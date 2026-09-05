@@ -99,6 +99,64 @@ Signing is a two-stage chain, and the internet-facing master never holds a
 key. It is gated by `ARCHCI_SIGN` (0 while there is no signer yet, 1 once the
 signer runs).
 
+```
+ WORKER (holds builder key)                         builder key = internal provenance
+ ─────────────────────────
+   git fetch <released commit>  from packaging/packages
+        │
+        ▼
+   makechrootpkg  (clean btrfs chroot)  ──►  foo-1.2-1.pkg.tar.zst
+        │
+        ▼
+   gpg --detach-sign  -u builder     ──►  foo-1.2-1.pkg.tar.zst.buildsig
+        │
+        ▼
+   rsync pkg + .buildsig  ──►  master:incoming/<job>/      (ssh key, rrsync-jailed)
+   ssh master report success
+        │
+════════╪═══════════════════════ VPC (ssh) ═══════════════════════════════════
+        ▼
+ MASTER (holds NO key)
+ ────────────────────
+   pool into repo/<repo>/os/<arch>/ :  foo-1.2-1.pkg.tar.zst + .buildsig
+   write built record ; touch index.needed
+        │
+        │   (packages sit here unsigned, NOT yet in the database)
+        │
+════════╪═══════════════════════ VPC (ssh) ═══════════════════════════════════
+        ▼
+ SIGNER (holds release key + trusted builder keyring)     release key = client-facing
+ ──────────────────────────────────────────────────
+   ssh master "unsigned"      ──►  list of pkgs with no .sig
+   rsync pull  pkg + .buildsig
+        │
+        ▼
+   gpg --verify  .buildsig  against trusted builder keyring
+        │
+        ├─ unknown / invalid / missing  ──►  REJECT (logged, never released)
+        │
+        ▼ valid
+   gpg --detach-sign  -u release   (passphrase via gpg-agent, 1× unlock)
+        │                          ──►  foo-1.2-1.pkg.tar.zst.sig
+        ▼
+   rsync push  .sig  ──►  master ;   ssh master "reindex"
+        │
+════════╪═══════════════════════ VPC (ssh) ═══════════════════════════════════
+        ▼
+ MASTER
+ ──────
+   archci-index:  repo-add  ONLY packages that now have a .sig  ──►  <repo>.db
+   archci-publish:  rclone  packages + .sig + db  ──►  Cloudflare R2
+                    (.buildsig is excluded, stays internal)
+        │
+════════╪══════════════════════════════════════════════════════════════════════
+        ▼
+ CLIENT
+ ──────
+   pacman  verifies  foo….pkg.tar.zst.sig  against the ONE release key
+           in its keyring  (SigLevel = Required).  Builder key never needed.
+```
+
 - **Builder signature (internal).** Each worker has its own OpenPGP key,
   generated locally by `install.sh worker`. Right after a build the worker
   signs every package into `<pkg>.buildsig`. This proves which builder made
