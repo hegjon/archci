@@ -112,7 +112,7 @@ cmd_heartbeat() {
 # a release signature (see README "Signing"). Each package keeps its builder
 # signature (.buildsig) alongside for the signer to verify.
 ingest() {
-	local id=$1 inc=$2 p n=0
+	local id=$1 inc=$2 p
 	shopt -s nullglob
 	local pkgs=("$inc"/*.pkg.tar.zst)
 	shopt -u nullglob
@@ -134,13 +134,12 @@ ingest() {
 			mv "$p" "$dir/$base" || exit 1
 			# builder signature travels with the package; the signer verifies it
 			[[ -f $p.buildsig ]] && mv "$p.buildsig" "$dir/$base.buildsig"
-			(( ++n ))
 		done
 	) || return 1
 	mkdir -p "$ARCHCI_HOME/built/$job_repo-$job_arch"
 	printf '%s %s\n' "$job_version" "$job_commit" >"$ARCHCI_HOME/built/$job_repo-$job_arch/$job_pkgbase"
 	touch "$ARCHCI_HOME/index.needed"
-	archci_log "$id: pooled $n package(s) for [$job_repo]"
+	archci_log "$id: pooled ${#pkgs[@]} package(s) for [$job_repo]"
 }
 
 cmd_report() {
