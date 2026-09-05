@@ -24,7 +24,10 @@ done
 id -u "$ARCHCI_BUILD_USER" >/dev/null 2>&1 || archci_die "build user $ARCHCI_BUILD_USER does not exist"
 
 # devtools' own helpers: lock, lock_close, is_subvolume, subvolume_delete_recursive, ...
-# (common.sh turns nounset off; the rest of this script does not rely on it.)
+# Its common.sh is not nounset-clean (it reads DEVTOOLS_COLOR unguarded), so
+# drop -u before sourcing; the rest of this script does not rely on it.
+export DEVTOOLS_COLOR=never
+set +u
 source /usr/share/devtools/lib/common.sh
 source /usr/share/devtools/lib/archroot.sh
 

@@ -2,7 +2,7 @@
 #   systemctl start archci-build@core-linux-7.2.3.arch1-2-a1
 # %i names the job directory ${ARCHCI_WORKER_HOME}/jobs/%i/ holding "job" and "out/".
 [Unit]
-Description=archci build %I
+Description=archci build %i
 
 [Service]
 Type=oneshot
