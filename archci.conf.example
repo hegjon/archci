@@ -40,6 +40,11 @@ ARCHCI_BUILD_USER=archci
 # Build timeout is TimeoutStartSec in archci-build@.service (systemctl edit archci-build@.service).
 # devtools chroot location; put it on btrfs to get snapshot-based clean chroots.
 ARCHCI_CHROOTS=/var/lib/archbuild
+# Extra args passed to makepkg (after --). Default skips upstream source PGP
+# checks: this is a rebuild farm and there is no central keyring for them; the
+# source is still pinned by sha256sums and the packaging-repo commit. Empty to
+# enforce signatures (seed the build user's keyring first).
+ARCHCI_MAKEPKG_ARGS=--skippgpcheck
 ARCHCI_CHROOT_UPDATE_MINUTES=60
 ARCHCI_IDLE_SLEEP=60
 ARCHCI_HEARTBEAT_SECONDS=300

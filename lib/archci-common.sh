@@ -43,6 +43,7 @@ archci_load_conf
 : "${ARCHCI_WORKER_HOME:=/var/lib/archci-worker}"
 : "${ARCHCI_BUILD_USER:=archci}"
 : "${ARCHCI_CHROOTS:=/var/lib/archbuild}"
+: "${ARCHCI_MAKEPKG_ARGS:=--skippgpcheck}"
 : "${ARCHCI_CHROOT_UPDATE_MINUTES:=60}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=300}"

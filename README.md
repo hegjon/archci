@@ -269,6 +269,11 @@ without network or root.
 - Packages are built independently against the official mirrors. If the
   mirror the worker uses lags behind the state repo, a build that needs the
   newer dependency fails and is retried later.
+- Upstream source PGP signatures are not verified (`ARCHCI_MAKEPKG_ARGS`
+  defaults to `--skippgpcheck`): there is no central keyring of packagers'
+  upstream keys, so a rebuild farm cannot check them. The build is still
+  pinned to the packaging repo's exact commit and the PKGBUILD sha256sums.
+  Clear the setting and seed the build user's keyring to enforce them.
 - Nothing is signed unless `ARCHCI_GPGKEY` is set on the master (the key has
   to be usable by root without a passphrase prompt).
 - `repo-add -R` keeps only the current version of each package in `repo/`;

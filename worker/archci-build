@@ -101,8 +101,19 @@ export BUILDTOOL=archci BUILDTOOLVER=1
 
 say "Building %s %s in %s" "$job_pkgbase" "$job_version" "$copy"
 cd "$srcdir"
+mcp_args=(-c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
+# ARCHCI_MAKEPKG_ARGS is passed to makepkg after --. It defaults to
+# --skippgpcheck: this is a rebuild farm, so upstream source authenticity is
+# not re-verified here (there is no central bundle of packagers' upstream
+# keys). The source is still pinned by the PKGBUILD sha256sums and by the exact
+# git commit taken from the trusted packaging repo. Set it empty to require
+# signatures (then seed the build user's keyring yourself).
+if [[ -n $ARCHCI_MAKEPKG_ARGS ]]; then
+	read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
+	mcp_args+=(-- "${extra_makepkg_args[@]}")
+fi
 rc=0
-makechrootpkg -c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER" || rc=$?
+makechrootpkg "${mcp_args[@]}" || rc=$?
 (( rc == 0 )) || echo "==> makechrootpkg exited with $rc"
 
 shopt -s nullglob
