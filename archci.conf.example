@@ -37,9 +37,9 @@ ARCHCI_WORKER_KEY=/etc/archci/worker_key
 ARCHCI_WORKER_HOME=/var/lib/archci-worker
 # Unprivileged local user makepkg runs as inside the chroot.
 ARCHCI_BUILD_USER=archci
+# Build timeout is TimeoutStartSec in archci-build@.service (systemctl edit archci-build@.service).
 # devtools chroot location; put it on btrfs to get snapshot-based clean chroots.
 ARCHCI_CHROOTS=/var/lib/archbuild
-ARCHCI_BUILD_TIMEOUT=12h
 ARCHCI_CHROOT_UPDATE_MINUTES=60
 ARCHCI_IDLE_SLEEP=60
 ARCHCI_HEARTBEAT_SECONDS=300

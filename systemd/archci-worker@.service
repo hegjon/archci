@@ -8,10 +8,8 @@ StartLimitIntervalSec=0
 ExecStart=/usr/local/bin/archci-worker %i
 Restart=always
 RestartSec=30
-# makechrootpkg runs systemd-nspawn --keep-unit inside this unit.
-Delegate=yes
-# On stop, SIGTERM reaches the build and the worker loop together; the loop
-# then reports the job as abandoned so the master requeues it at once.
+# Builds run as archci-build@<name>.service. On stop the loop stops the running
+# build unit and reports the job as abandoned, so the master requeues it at once.
 TimeoutStopSec=120
 
 [Install]

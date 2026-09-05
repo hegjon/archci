@@ -1,0 +1,18 @@
+# One build per instance, started synchronously by archci-worker:
+#   systemctl start archci-build@core-linux-7.2.3.arch1-2-a1
+# %i names the job directory ${ARCHCI_WORKER_HOME}/jobs/%i/ holding "job" and "out/".
+[Unit]
+Description=archci build %I
+
+[Service]
+Type=oneshot
+Environment=ARCHCI_WORKER_HOME=/var/lib/archci-worker
+EnvironmentFile=-/etc/archci/archci.conf
+ExecStart=/usr/local/bin/archci-build ${ARCHCI_WORKER_HOME}/jobs/%i/job ${ARCHCI_WORKER_HOME}/jobs/%i/out
+# makechrootpkg runs systemd-nspawn --keep-unit inside this unit.
+Delegate=yes
+# Compiler output must not be dropped by journald's rate limit.
+LogRateLimitIntervalSec=0
+# Build timeout (a oneshot is "starting" until it exits; RuntimeMaxSec= would be ignored).
+# Change with: systemctl edit archci-build@.service
+TimeoutStartSec=12h

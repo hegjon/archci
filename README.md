@@ -48,12 +48,20 @@ stamps the worker name and attempt, and prints it. The worker then:
 
 1. fetches the packaging repo at exactly the released commit
    (`archci-build` maps pkgbase to the GitLab path the same way devtools does),
-2. builds with `makechrootpkg -c -l archci-N` in `/var/lib/archbuild/<profile>-<arch>`;
-   devtools creates the chroot as a btrfs subvolume and each build gets a fresh
-   snapshot of it, refreshed with `pacman -Syuu` at most once an hour,
-3. rsyncs packages, makepkg logs and `build.log` to `incoming/<jobid>/` on the
-   master (the ssh key is jailed to that directory by `rrsync`),
-4. reports `success` or `failure`.
+2. starts `archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service`, a
+   oneshot template unit, with a blocking `systemctl start`. The build has its
+   own unit, cgroup and journal, and the unit's `TimeoutStartSec` (12 h, change
+   with `systemctl edit archci-build@.service`) is the timeout,
+3. inside that unit, builds with `makechrootpkg -c -l archci-N` in
+   `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
+   btrfs subvolume and each build gets a fresh snapshot of it, refreshed with
+   `pacman -Syuu` at most once an hour,
+4. takes the build's journal as `build.log`, and rsyncs it with the packages
+   and makepkg logs to `incoming/<jobid>/` on the master (the ssh key is
+   jailed to that directory by `rrsync`),
+5. reports `success` or `failure`. The verdict comes from a `result` file
+   `archci-build` writes last, not from the unit's exit status, because
+   systemd counts SIGTERM (a timeout, a stop) as a clean exit.
 
 While building, a background loop sends a heartbeat every 5 minutes. A job
 without a heartbeat for 30 minutes is put back in `pending/` by the reaper, so
@@ -81,8 +89,8 @@ rebuild.
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
 master/   archci-scan, archci-job, archci-shell, archci-authorize, archci-publish, archci-status
 worker/   archci-worker, archci-build
-systemd/  scan, reaper and publish timers (master); archci-worker@.service (worker);
-          journal-remote drop-ins for the master
+systemd/  scan, reaper and publish timers (master); archci-worker@.service and
+          archci-build@.service (worker); journal-remote drop-ins for the master
 ```
 
 `install.sh` copies `lib/` plus the role's directory to `/usr/local/lib/archci`
@@ -177,7 +185,9 @@ address, then:
 ```
 systemctl start archci-worker@1        # one chroot copy per instance
 systemctl enable --now archci-worker@2 # more instances = parallel builds
-journalctl -u archci-worker@1 -f
+journalctl -u archci-worker@1 -f       # the loop: claims, results, uploads
+systemctl list-units 'archci-build@*'  # builds running right now
+journalctl -u 'archci-build@*' -f      # their output
 ```
 
 The host's `/etc/pacman.d/mirrorlist` is copied into the chroot, so give
@@ -201,10 +211,16 @@ the last lines of a worker that died are already on the master.
 
 ```
 journalctl -D /var/log/journal/remote -f                     all workers, live
-journalctl -D /var/log/journal/remote -u archci-worker@1     one unit, every worker
+journalctl -D /var/log/journal/remote -u 'archci-worker@*'   the worker loops only
+journalctl -D /var/log/journal/remote -u 'archci-build@*'    every build's output
+journalctl -D /var/log/journal/remote -u archci-build@core-linux-7.2.3.arch1-2-a1
 journalctl -D /var/log/journal/remote _HOSTNAME=build-a      one worker
 journalctl --merge -f                                        master and workers together
 ```
+
+Because full build output goes through journald and journal-upload, size the
+master's `journal-remote.conf` limits and the workers' `SystemMaxUse` for it;
+large builds such as browsers produce hundreds of megabytes of log.
 
 Keep port 19532 on the master reachable from the VPC only (Digital Ocean
 cloud firewall or the droplet's own firewall); there is no authentication on

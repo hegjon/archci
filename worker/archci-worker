@@ -3,6 +3,11 @@
 #
 # One process per chroot copy; run several via archci-worker@N.service. Needs
 # only an ssh key that the master has authorized with archci-authorize.
+#
+# Each build runs as archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service,
+# a oneshot template unit started with a blocking "systemctl start", so its
+# output is in the journal (journalctl -u 'archci-build@*'), it has its own
+# cgroup, and the unit's TimeoutStartSec is the timeout.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -17,15 +22,16 @@ ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
 	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
 master() { ssh "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }
 
-workdir=$ARCHCI_WORKER_HOME/jobs/$instance
-jobfile=$workdir/job
-outdir=$workdir/out
-mkdir -p "$workdir"
+jobsdir=$ARCHCI_WORKER_HOME/jobs
+claim=$jobsdir/claim-$instance.tmp
+mkdir -p "$jobsdir"
 
 job_id=
+unit=
 reported=1
 on_term() {
 	trap - TERM INT
+	[[ -n $unit ]] && systemctl stop "$unit.service" 2>/dev/null || true
 	if [[ -n $job_id && $reported == 0 ]]; then
 		archci_log "shutting down, handing $job_id back to the master"
 		master report "$job_id" abandoned || true
@@ -36,27 +42,32 @@ trap on_term TERM INT
 
 archci_log "worker $worker started, master $ARCHCI_MASTER"
 while true; do
-	if ! master claim "$worker" >"$jobfile.tmp"; then
+	if ! master claim "$worker" >"$claim"; then
 		archci_log "master unreachable, retrying in ${ARCHCI_IDLE_SLEEP}s"
-		rm -f "$jobfile.tmp"
+		rm -f "$claim"
 		sleep "$ARCHCI_IDLE_SLEEP"
 		continue
 	fi
-	if [[ ! -s $jobfile.tmp ]]; then
-		rm -f "$jobfile.tmp"
+	if [[ ! -s $claim ]]; then
+		rm -f "$claim"
 		sleep "$ARCHCI_IDLE_SLEEP"
 		continue
 	fi
-	mv "$jobfile.tmp" "$jobfile"
-	if ! archci_read_job "$jobfile"; then
+	if ! archci_read_job "$claim"; then
 		archci_log "master sent an unreadable job, ignoring"
+		rm -f "$claim"
 		sleep "$ARCHCI_IDLE_SLEEP"
 		continue
 	fi
 	reported=0
-	archci_log "building $job_id"
-	rm -rf "$outdir"
+	# Unit instance and job directory share a name made of safe unit-name characters.
+	name=$(printf '%s' "$job_repo-$job_pkgbase-$job_version-a$job_attempt" | tr -c 'A-Za-z0-9:_.-' '_')
+	jobdir=$jobsdir/$name
+	outdir=$jobdir/out
+	rm -rf "$jobdir"
 	mkdir -p "$outdir"
+	mv "$claim" "$jobdir/job"
+	archci_log "building $job_id as archci-build@$name"
 
 	# Keep the master's stale-job reaper away while the build runs.
 	(
@@ -67,14 +78,19 @@ while true; do
 	) &
 	heartbeat=$!
 
-	status=failure
-	start=$SECONDS
-	if "$ARCHCI_WORKER_DIR/archci-build" "$jobfile" "$outdir" "$instance" >"$outdir/build.log" 2>&1; then
-		status=success
-	fi
+	unit=archci-build@$name
+	start=$(date +%s)
+	systemctl reset-failed "$unit.service" 2>/dev/null || true
+	systemctl start "$unit.service" || true   # blocks until the oneshot has finished
 	kill "$heartbeat" 2>/dev/null || true
 	wait "$heartbeat" 2>/dev/null || true
-	archci_log "$job_id: $status after $(( (SECONDS - start) / 60 )) min"
+	# The journal is the build log; keep a copy with the packages for the master.
+	journalctl -u "$unit" --since="@$start" -o cat --no-pager >"$outdir/build.log" 2>/dev/null || true
+	systemctl reset-failed "$unit.service" 2>/dev/null || true
+	status=failure
+	[[ -f $outdir/result && $(<"$outdir/result") == success ]] && status=success
+	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min (journalctl -u $unit)"
+	unit=
 
 	for try in 1 2 3; do
 		rsync -a --timeout=300 -e "ssh ${ssh_opts[*]}" "$outdir/" "$ARCHCI_MASTER:$job_id/" && break
@@ -86,6 +102,6 @@ while true; do
 	else
 		archci_log "could not report $job_id; the master will requeue it"
 	fi
-	rm -rf "$outdir" "$jobfile"
+	rm -rf "$jobdir"
 	job_id=
 done

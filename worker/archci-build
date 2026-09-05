@@ -1,14 +1,22 @@
 #!/bin/bash
-# archci-build JOBFILE OUTDIR [INSTANCE] -- build one job in a clean devtools chroot.
+# archci-build JOBFILE OUTDIR [COPY] -- build one job in a clean devtools chroot.
 #
-# Runs as root on a worker. Packages and makepkg logs end up in OUTDIR. Can be
-# run by hand to reproduce a build:  archci-build /path/to/job /tmp/out manual
+# Runs as root on a worker, normally inside archci-build@<name>.service started
+# by archci-worker, so each build has its own unit, cgroup, journal and
+# TimeoutStartSec. Packages and makepkg logs end up in OUTDIR, together with a
+# "result" file saying success or failure; the worker trusts that file, not the
+# unit's exit status, because systemd counts SIGTERM (a timeout, a stop) as a
+# clean exit. COPY is the chroot copy to use; it defaults to archci-<N> for the
+# worker instance N found in the job file's worker= line.
+# To reproduce a build by hand:  archci-build /path/to/job /tmp/out manual
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-jobfile=${1:-} outdir=${2:-} instance=${3:-manual}
-[[ -f $jobfile && -n $outdir ]] || archci_die "usage: archci-build JOBFILE OUTDIR [INSTANCE]"
+jobfile=${1:-} outdir=${2:-}
+[[ -f $jobfile && -n $outdir ]] || archci_die "usage: archci-build JOBFILE OUTDIR [COPY]"
 archci_read_job "$jobfile" || archci_die "$jobfile is not a valid job file"
+instance=${3:-${job_worker##*-}}
+instance=${instance:-manual}
 (( EUID == 0 )) || archci_die "must run as root (makechrootpkg needs it)"
 for tool in mkarchroot makechrootpkg arch-nspawn; do
 	command -v "$tool" >/dev/null || archci_die "devtools is not installed"
@@ -91,16 +99,8 @@ export BUILDTOOL=archci BUILDTOOLVER=1
 say "Building %s %s in %s" "$job_pkgbase" "$job_version" "$copy"
 cd "$srcdir"
 rc=0
-timeout --kill-after=60 "$ARCHCI_BUILD_TIMEOUT" \
-	makechrootpkg -c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER" || rc=$?
-if (( rc == 124 )); then
-	echo "==> build timed out after $ARCHCI_BUILD_TIMEOUT"
-	# timeout only signals makechrootpkg; make sure the container is gone too.
-	pkill -TERM -f "^systemd-nspawn .* -D $chroot/$copy " && sleep 10 || true
-	pkill -KILL -f "^systemd-nspawn .* -D $chroot/$copy " || true
-elif (( rc != 0 )); then
-	echo "==> makechrootpkg exited with $rc"
-fi
+makechrootpkg -c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER" || rc=$?
+(( rc == 0 )) || echo "==> makechrootpkg exited with $rc"
 
 shopt -s nullglob
 pkgs=("$outdir"/*.pkg.tar.zst)
@@ -108,6 +108,7 @@ if (( rc == 0 && ${#pkgs[@]} == 0 )); then
 	echo "==> build reported success but produced no packages"
 	rc=1
 fi
+if (( rc == 0 )); then echo success; else echo failure; fi >"$outdir/result"
 echo "==> archci-build finished with $rc at $(archci_now): ${pkgs[*]##*/}"
 rm -rf "$srcdir"
 exit "$rc"

@@ -84,7 +84,7 @@ else
 	fi
 	chmod 600 /etc/archci/worker_key
 	echo "==> worker: systemd unit"
-	install -m 644 systemd/archci-worker@.service "$unitdir/"
+	install -m 644 systemd/archci-worker@.service systemd/archci-build@.service "$unitdir/"
 	echo "==> worker: stream the journal to the master (systemd-journal-upload)"
 	source lib/archci-common.sh
 	install -d -m 755 /etc/systemd/journal-upload.conf.d
