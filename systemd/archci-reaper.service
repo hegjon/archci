@@ -1,5 +1,6 @@
 [Unit]
 Description=archci: requeue stale jobs and due retries
+RequiresMountsFor=/var/lib/archci
 
 [Service]
 Type=oneshot
