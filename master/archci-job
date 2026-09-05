@@ -13,7 +13,7 @@
 # Jobs are files; moving them between queue/{pending,running,done,failed} is
 # the whole state machine. Everything that touches the queue takes queue.lock.
 set -euo pipefail
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/archci-common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 lock_queue() {
 	exec 9>"$ARCHCI_HOME/lock/queue.lock"

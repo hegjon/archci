@@ -2,7 +2,13 @@
 # archci-common.sh -- shared helpers, sourced by every archci bash script.
 
 ARCHCI_CONF=${ARCHCI_CONF:-/etc/archci/archci.conf}
-ARCHCI_LIBDIR=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+# Layout, identical in the source tree and under /usr/local/lib/archci:
+#   lib/     this file and archci.rb, shared
+#   master/  scan, queue (archci-job), ssh shell, publish, status
+#   worker/  archci-worker loop and archci-build
+ARCHCI_ROOT=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
+ARCHCI_MASTER_DIR=$ARCHCI_ROOT/master
+ARCHCI_WORKER_DIR=$ARCHCI_ROOT/worker
 
 # Load KEY=value lines from the config file. Values already present in the
 # environment win, so tests and one-off runs can override the file.

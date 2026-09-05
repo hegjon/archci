@@ -21,13 +21,13 @@ mksubvol() {
 	fi
 }
 
-echo "==> installing scripts to $libdir"
-install -d -m 755 "$libdir" /etc/archci
-install -m 644 bin/archci-common.sh bin/archci.rb "$libdir/"
-for f in bin/*; do
-	[[ $f == *.sh || $f == *.rb ]] && continue
-	install -m 755 "$f" "$libdir/"
-	ln -sf "$libdir/${f##*/}" "$bindir/${f##*/}"
+# Same layout as the source tree: lib/ is shared, master/ or worker/ per role.
+echo "==> installing lib/ and $role/ to $libdir"
+install -d -m 755 "$libdir/lib" "$libdir/$role" /etc/archci
+install -m 644 lib/* "$libdir/lib/"
+for f in "$role"/*; do
+	install -m 755 "$f" "$libdir/$role/"
+	ln -sf "$libdir/$role/${f##*/}" "$bindir/${f##*/}"
 done
 if [[ ! -e /etc/archci/archci.conf ]]; then
 	install -m 644 archci.conf.example /etc/archci/archci.conf

@@ -4,7 +4,7 @@
 # Runs as root on a worker. Packages and makepkg logs end up in OUTDIR. Can be
 # run by hand to reproduce a build:  archci-build /path/to/job /tmp/out manual
 set -euo pipefail
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/archci-common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 jobfile=${1:-} outdir=${2:-} instance=${3:-manual}
 [[ -f $jobfile && -n $outdir ]] || archci_die "usage: archci-build JOBFILE OUTDIR [INSTANCE]"

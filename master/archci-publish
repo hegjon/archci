@@ -4,7 +4,7 @@
 # Runs as root on the master so the rclone credentials can stay in /etc/archci
 # and btrfs snapshots of repo/ can be created and pruned.
 set -euo pipefail
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/archci-common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 force=0
 [[ ${1:-} == --force ]] && force=1
@@ -43,7 +43,7 @@ archci_log "publishing to $ARCHCI_RCLONE_REMOTE"
 "${rclone[@]}" copy --exclude '*.db*' --exclude '*.files*' "$repo" "$ARCHCI_RCLONE_REMOTE"
 "${rclone[@]}" sync --exclude '/logs/**' --exclude '/status.json' "$repo" "$ARCHCI_RCLONE_REMOTE"
 
-"$ARCHCI_LIBDIR/archci-status" --json >"$ARCHCI_HOME/status.json.tmp"
+"$ARCHCI_MASTER_DIR/archci-status" --json >"$ARCHCI_HOME/status.json.tmp"
 mv "$ARCHCI_HOME/status.json.tmp" "$ARCHCI_HOME/status.json"
 "${rclone[@]}" copyto "$ARCHCI_HOME/status.json" "$ARCHCI_RCLONE_REMOTE/status.json"
 [[ -d $ARCHCI_HOME/logs ]] && "${rclone[@]}" copy "$ARCHCI_HOME/logs" "$ARCHCI_RCLONE_REMOTE/logs"

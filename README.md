@@ -75,6 +75,18 @@ the chroot at our R2 repo instead by adding it to a copy of
 `/usr/share/devtools/pacman.conf.d/extra.conf` if you want a self-hosting
 rebuild.
 
+## Source layout
+
+```
+lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
+master/   archci-scan, archci-job, archci-shell, archci-authorize, archci-publish, archci-status
+worker/   archci-worker, archci-build
+systemd/  scan, reaper and publish timers (master); archci-worker@.service (worker)
+```
+
+`install.sh` copies `lib/` plus the role's directory to `/usr/local/lib/archci`
+with the same layout and symlinks the role's scripts into `/usr/local/bin`.
+
 ## Layout on the master (`/var/lib/archci`)
 
 ```
@@ -118,7 +130,7 @@ template does this).
 ./install.sh master
 ```
 
-This installs the scripts to `/usr/local/lib/archci` (symlinked into
+This installs `lib/` and `master/` to `/usr/local/lib/archci` (symlinked into
 `/usr/local/bin`), creates the `archci` user and directories (as btrfs
 subvolumes when the filesystem allows), and enables the scan, reaper and
 publish timers. Then:
@@ -139,7 +151,7 @@ publish timers. Then:
    `ARCHCI_REPOS`, optionally `ARCHCI_GPGKEY`.
 
 3. Authorize worker keys: `archci-authorize worker_key.pub`. This appends
-   `command="/usr/local/lib/archci/archci-shell",restrict <key>` to the archci
+   `command="/usr/local/lib/archci/master/archci-shell",restrict <key>` to the archci
    user's `authorized_keys`, so a worker key can do nothing but the protocol.
 
 Clients then use:

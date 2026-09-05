@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 # archci-status [--json] -- what the master is doing right now.
-require_relative 'archci'
+require_relative '../lib/archci'
 
 cfg = Archci.config
 home = Archci.home

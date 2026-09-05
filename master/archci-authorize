@@ -1,7 +1,7 @@
 #!/bin/bash
 # archci-authorize PUBKEY-FILE|"ssh-ed25519 AAAA..." -- let a worker key talk to this master.
 set -euo pipefail
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/archci-common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 key=${1:-}
 [[ -n $key ]] || archci_die "usage: archci-authorize PUBKEY-FILE | 'ssh-ed25519 AAAA... comment'"
@@ -14,7 +14,7 @@ touch "$akf"
 if grep -qF "${BASH_REMATCH[0]}" "$akf"; then
 	archci_log "key already authorized"
 else
-	printf 'command="%s",restrict %s\n' "$ARCHCI_LIBDIR/archci-shell" "$key" >>"$akf"
+	printf 'command="%s",restrict %s\n' "$ARCHCI_MASTER_DIR/archci-shell" "$key" >>"$akf"
 	archci_log "authorized: ${key##* }"
 fi
 chown archci:archci "$akf"

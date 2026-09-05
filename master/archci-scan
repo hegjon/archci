@@ -7,7 +7,7 @@
 # The state repo has one file per package in <repo>-<arch>/<pkgbase>:
 #   "<pkgbase> <version> <tag> <commit>"
 # Our record of success is built/<repo>-<arch>/<pkgbase>: "<version> <commit>".
-require_relative 'archci'
+require_relative '../lib/archci'
 
 cfg = Archci.config
 home = Archci.home

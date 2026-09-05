@@ -4,7 +4,7 @@
 # One process per chroot copy; run several via archci-worker@N.service. Needs
 # only an ssh key that the master has authorized with archci-authorize.
 set -euo pipefail
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/archci-common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 instance=${1:-1}
 [[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
@@ -69,7 +69,7 @@ while true; do
 
 	status=failure
 	start=$SECONDS
-	if "$ARCHCI_LIBDIR/archci-build" "$jobfile" "$outdir" "$instance" >"$outdir/build.log" 2>&1; then
+	if "$ARCHCI_WORKER_DIR/archci-build" "$jobfile" "$outdir" "$instance" >"$outdir/build.log" 2>&1; then
 		status=success
 	fi
 	kill "$heartbeat" 2>/dev/null || true

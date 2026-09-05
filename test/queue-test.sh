@@ -8,9 +8,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export ARCHCI_CONF=/dev/null ARCHCI_HOME=$tmp/home ARCHCI_REPOS="core extra" ARCHCI_ARCH=x86_64
 export ARCHCI_MAX_ATTEMPTS=2 ARCHCI_STALE_MINUTES=0 ARCHCI_RETRY_MINUTES=0 JOURNAL_STREAM=1
-job=$here/../bin/archci-job
-scan=$here/../bin/archci-scan
-status=$here/../bin/archci-status
+job=$here/../master/archci-job
+scan=$here/../master/archci-scan
+status=$here/../master/archci-status
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # mkpkg DIR NAME VERSION -- smallest thing repo-add accepts as a package
 mkpkg() {
@@ -111,7 +111,7 @@ shift
 SSH_ORIGINAL_COMMAND="$*" exec "$ARCHCI_SHELL"
 SH
 chmod +x "$tmp/fakessh"
-export ARCHCI_SHELL=$here/../bin/archci-shell
+export ARCHCI_SHELL=$here/../master/archci-shell
 id=$(sed -n 's/^id=//p' < <("$tmp/fakessh" master claim worker-5))
 [[ -n $id ]] || fail "claim through archci-shell"
 mkdir -p "$tmp/out"; echo hi >"$tmp/out/build.log"; mkpkg "$tmp/out" acl 1:2.3.2-1
