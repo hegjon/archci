@@ -90,7 +90,7 @@ elif [[ $role == worker ]]; then
 	source lib/archci-common.sh
 	if [[ ! -d $ARCHCI_BUILDER_GNUPGHOME ]]; then
 		install -d -m 700 "$ARCHCI_BUILDER_GNUPGHOME"
-		gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --quick-generate-key \
+		gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --pinentry-mode loopback --passphrase "" --quick-generate-key \
 			"archci builder ${HOSTNAME%%.*} <archci-builder@${HOSTNAME%%.*}>" ed25519 sign never
 	fi
 	gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --armor \
