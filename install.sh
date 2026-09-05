@@ -88,8 +88,8 @@ elif [[ $role == worker ]]; then
 	chmod 600 /etc/archci/worker_key
 	echo "==> worker: builder signing key"
 	source lib/archci-common.sh
-	if [[ ! -d $ARCHCI_BUILDER_GNUPGHOME ]]; then
-		install -d -m 700 "$ARCHCI_BUILDER_GNUPGHOME"
+	install -d -m 700 "$ARCHCI_BUILDER_GNUPGHOME"
+	if ! gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --list-secret-keys "archci-builder@${HOSTNAME%%.*}" >/dev/null 2>&1; then
 		gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --pinentry-mode loopback --passphrase "" --quick-generate-key \
 			"archci builder ${HOSTNAME%%.*} <archci-builder@${HOSTNAME%%.*}>" ed25519 sign never
 	fi
