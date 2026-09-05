@@ -1,0 +1,43 @@
+# /etc/archci/archci.conf -- shared by master and workers. Plain KEY=value,
+# read by bash (sourced) and by the ruby scripts. Keep comments on their own line.
+
+## Common ---------------------------------------------------------------------
+# Master state: queue, built records, repo, logs (should be a btrfs subvolume).
+ARCHCI_HOME=/var/lib/archci
+ARCHCI_ARCH=x86_64
+# packaging/state directories to track, as "<repo>" (arch appended automatically).
+ARCHCI_REPOS="core extra"
+ARCHCI_STATE_URL=https://gitlab.archlinux.org/archlinux/packaging/state.git
+ARCHCI_PKGBUILD_URL=https://gitlab.archlinux.org/archlinux/packaging/packages
+
+## Master ---------------------------------------------------------------------
+# How many times a job may be built before it is parked in queue/failed for good.
+ARCHCI_MAX_ATTEMPTS=3
+# A running job without a worker heartbeat for this long goes back to pending.
+ARCHCI_STALE_MINUTES=30
+# A failed job with attempts left is retried after this long.
+ARCHCI_RETRY_MINUTES=180
+# Finished job records are pruned from queue/done after this many days.
+ARCHCI_DONE_KEEP_DAYS=30
+# rclone remote and bucket for Cloudflare R2, e.g. "r2:archci". Empty = do not publish.
+ARCHCI_RCLONE_REMOTE=""
+ARCHCI_RCLONE_CONFIG=/etc/archci/rclone.conf
+# Optional GPG key id used to sign packages and databases (key must be in root's keyring).
+ARCHCI_GPGKEY=""
+# Keep this many read-only btrfs snapshots of repo/ before each publish. 0 disables.
+ARCHCI_SNAPSHOTS=5
+
+## Worker ---------------------------------------------------------------------
+# ssh destination of the master. The master droplet is named "master"; workers resolve
+# it via /etc/hosts (cloud-init writes it) or DO private DNS.
+ARCHCI_MASTER="archci@master"
+ARCHCI_WORKER_KEY=/etc/archci/worker_key
+ARCHCI_WORKER_HOME=/var/lib/archci-worker
+# Unprivileged local user makepkg runs as inside the chroot.
+ARCHCI_BUILD_USER=archci
+# devtools chroot location; put it on btrfs to get snapshot-based clean chroots.
+ARCHCI_CHROOTS=/var/lib/archbuild
+ARCHCI_BUILD_TIMEOUT=12h
+ARCHCI_CHROOT_UPDATE_MINUTES=60
+ARCHCI_IDLE_SLEEP=60
+ARCHCI_HEARTBEAT_SECONDS=300

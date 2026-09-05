@@ -1,0 +1,8 @@
+[Unit]
+Description=archci: publish repo and logs to Cloudflare R2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/archci-publish

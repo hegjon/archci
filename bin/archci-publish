@@ -1,0 +1,50 @@
+#!/bin/bash
+# archci-publish [--force] -- push repo/, logs/ and status.json to Cloudflare R2.
+#
+# Runs as root on the master so the rclone credentials can stay in /etc/archci
+# and btrfs snapshots of repo/ can be created and pruned.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/archci-common.sh"
+
+force=0
+[[ ${1:-} == --force ]] && force=1
+flag=$ARCHCI_HOME/publish.needed
+if [[ -z $ARCHCI_RCLONE_REMOTE ]]; then
+	archci_log "ARCHCI_RCLONE_REMOTE is empty, not publishing"
+	exit 0
+fi
+(( force )) || [[ -e $flag ]] || exit 0
+exec 9>"$ARCHCI_HOME/lock/publish.lock"
+flock 9
+rm -f "$flag"
+
+repo=$ARCHCI_HOME/repo
+export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
+rclone=(rclone --copy-links --transfers 8 --checkers 16 --fast-list --stats-one-line --stats 0)
+
+snapshot_repo() {
+	(( ARCHCI_SNAPSHOTS > 0 )) || return 0
+	[[ $(stat -f -c %T "$repo") == btrfs && $(stat -c %i "$repo") == 256 ]] || {
+		archci_log "repo/ is not a btrfs subvolume, skipping snapshot"
+		return 0
+	}
+	local dir=$ARCHCI_HOME/snapshots old
+	mkdir -p "$dir"
+	btrfs subvolume snapshot -r "$repo" "$dir/repo-$(date -u +%Y%m%dT%H%M%SZ)" >/dev/null
+	while read -r old; do
+		btrfs subvolume delete "$old" >/dev/null
+	done < <(ls -1d "$dir"/repo-* | sort | head -n -"$ARCHCI_SNAPSHOTS")
+}
+snapshot_repo
+
+archci_log "publishing to $ARCHCI_RCLONE_REMOTE"
+# Packages first, so a client never downloads a database that lists a file
+# which is not there yet; then the databases and removal of superseded files.
+"${rclone[@]}" copy --exclude '*.db*' --exclude '*.files*' "$repo" "$ARCHCI_RCLONE_REMOTE"
+"${rclone[@]}" sync --exclude '/logs/**' --exclude '/status.json' "$repo" "$ARCHCI_RCLONE_REMOTE"
+
+"$ARCHCI_LIBDIR/archci-status" --json >"$ARCHCI_HOME/status.json.tmp"
+mv "$ARCHCI_HOME/status.json.tmp" "$ARCHCI_HOME/status.json"
+"${rclone[@]}" copyto "$ARCHCI_HOME/status.json" "$ARCHCI_RCLONE_REMOTE/status.json"
+[[ -d $ARCHCI_HOME/logs ]] && "${rclone[@]}" copy "$ARCHCI_HOME/logs" "$ARCHCI_RCLONE_REMOTE/logs"
+archci_log "published"

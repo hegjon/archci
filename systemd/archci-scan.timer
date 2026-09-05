@@ -1,0 +1,10 @@
+[Unit]
+Description=archci: scan packaging state every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target

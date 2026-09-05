@@ -1,0 +1,7 @@
+[Unit]
+Description=archci: requeue stale jobs and due retries
+
+[Service]
+Type=oneshot
+User=archci
+ExecStart=/usr/local/bin/archci-job reap

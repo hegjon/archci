@@ -1,0 +1,80 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# archci-status [--json] -- what the master is doing right now.
+require_relative 'archci'
+
+cfg = Archci.config
+home = Archci.home
+arch = cfg['ARCHCI_ARCH']
+now = Time.now
+
+counts = Archci::QUEUES.to_h { |q| [q, Dir.glob(File.join(Archci.queue(q), '*.job')).size] }
+built = cfg['ARCHCI_REPOS'].split.to_h do |repo|
+  [repo, Dir.glob(File.join(home, 'built', "#{repo}-#{arch}", '*')).size]
+end
+tracked = cfg['ARCHCI_REPOS'].split.to_h do |repo|
+  [repo, Dir.glob(File.join(home, 'state', "#{repo}-#{arch}", '*')).size]
+end
+
+running = Archci.jobs('running').map do |j|
+  { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'],
+    'worker' => j['worker'], 'attempt' => j['attempt'], 'claimed' => j['claimed'],
+    'heartbeat_age_min' => ((now - j['mtime']) / 60).round }
+end
+failed = Archci.jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
+  { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'],
+    'worker' => j['worker'], 'attempt' => j['attempt'], 'final' => j['final'] == '1',
+    'finished' => j['finished'],
+    'log' => "logs/#{j['repo']}/#{j['pkgbase']}/#{j['version']}/attempt-#{j['attempt']}.log" }
+end
+recent = Archci.jobs('done').sort_by { |j| -j['mtime'].to_i }.first(50).map do |j|
+  { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'],
+    'worker' => j['worker'], 'finished' => j['finished'] }
+end
+workers = (running + recent).filter_map { |j| j['worker'] }.tally
+
+report = {
+  'generated' => now.utc.iso8601,
+  'arch' => arch,
+  'queue' => counts,
+  'tracked' => tracked,
+  'built' => built,
+  'workers' => workers,
+  'running' => running,
+  'failed' => failed,
+  'recent' => recent
+}
+
+if ARGV.include?('--json')
+  puts JSON.pretty_generate(report)
+  exit
+end
+
+puts "archci master status  (#{report['generated']})"
+puts
+puts format('  queue: %s', counts.map { |q, n| "#{q}=#{n}" }.join('  '))
+puts format('  built: %s', built.map { |r, n| "#{r} #{n}/#{tracked[r]}" }.join('  '))
+puts
+unless running.empty?
+  puts '  running:'
+  running.each do |j|
+    puts format('    %-40s %-20s attempt %d  heartbeat %dm ago', "#{j['repo']}/#{j['pkgbase']} #{j['version']}",
+                j['worker'], j['attempt'], j['heartbeat_age_min'])
+  end
+  puts
+end
+unless failed.empty?
+  puts "  failed (#{failed.size}, newest first):"
+  failed.first(20).each do |j|
+    puts format('    %-40s %-20s attempt %d%s', "#{j['repo']}/#{j['pkgbase']} #{j['version']}",
+                j['worker'], j['attempt'], j['final'] ? '  GAVE UP' : '')
+  end
+  puts
+end
+unless recent.empty?
+  puts '  recently built:'
+  recent.first(10).each do |j|
+    puts format('    %-40s %-20s %s', "#{j['repo']}/#{j['pkgbase']} #{j['version']}", j['worker'], j['finished'])
+  end
+end

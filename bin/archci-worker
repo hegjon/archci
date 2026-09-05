@@ -1,0 +1,91 @@
+#!/bin/bash
+# archci-worker [INSTANCE] -- pull jobs from the master, build them, upload results.
+#
+# One process per chroot copy; run several via archci-worker@N.service. Needs
+# only an ssh key that the master has authorized with archci-authorize.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/archci-common.sh"
+
+instance=${1:-1}
+[[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
+[[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY (run install.sh worker)"
+worker="$(hostname -s)-$instance"
+archci_valid_worker "$worker" || archci_die "hostname makes an invalid worker id: $worker"
+
+ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
+	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
+	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
+master() { ssh "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }
+
+workdir=$ARCHCI_WORKER_HOME/jobs/$instance
+jobfile=$workdir/job
+outdir=$workdir/out
+mkdir -p "$workdir"
+
+job_id=
+reported=1
+on_term() {
+	trap - TERM INT
+	if [[ -n $job_id && $reported == 0 ]]; then
+		archci_log "shutting down, handing $job_id back to the master"
+		master report "$job_id" abandoned || true
+	fi
+	exit 143
+}
+trap on_term TERM INT
+
+archci_log "worker $worker started, master $ARCHCI_MASTER"
+while true; do
+	if ! master claim "$worker" >"$jobfile.tmp"; then
+		archci_log "master unreachable, retrying in ${ARCHCI_IDLE_SLEEP}s"
+		rm -f "$jobfile.tmp"
+		sleep "$ARCHCI_IDLE_SLEEP"
+		continue
+	fi
+	if [[ ! -s $jobfile.tmp ]]; then
+		rm -f "$jobfile.tmp"
+		sleep "$ARCHCI_IDLE_SLEEP"
+		continue
+	fi
+	mv "$jobfile.tmp" "$jobfile"
+	if ! archci_read_job "$jobfile"; then
+		archci_log "master sent an unreadable job, ignoring"
+		sleep "$ARCHCI_IDLE_SLEEP"
+		continue
+	fi
+	reported=0
+	archci_log "building $job_id"
+	rm -rf "$outdir"
+	mkdir -p "$outdir"
+
+	# Keep the master's stale-job reaper away while the build runs.
+	(
+		trap - TERM INT
+		while sleep "$ARCHCI_HEARTBEAT_SECONDS"; do
+			master heartbeat "$job_id" || archci_log "heartbeat for $job_id failed"
+		done
+	) &
+	heartbeat=$!
+
+	status=failure
+	start=$SECONDS
+	if "$ARCHCI_LIBDIR/archci-build" "$jobfile" "$outdir" "$instance" >"$outdir/build.log" 2>&1; then
+		status=success
+	fi
+	kill "$heartbeat" 2>/dev/null || true
+	wait "$heartbeat" 2>/dev/null || true
+	archci_log "$job_id: $status after $(( (SECONDS - start) / 60 )) min"
+
+	for try in 1 2 3; do
+		rsync -a --timeout=300 -e "ssh ${ssh_opts[*]}" "$outdir/" "$ARCHCI_MASTER:$job_id/" && break
+		archci_log "upload of $job_id failed (try $try)"
+		sleep 30
+	done
+	if master report "$job_id" "$status"; then
+		reported=1
+	else
+		archci_log "could not report $job_id; the master will requeue it"
+	fi
+	rm -rf "$outdir" "$jobfile"
+	job_id=
+done

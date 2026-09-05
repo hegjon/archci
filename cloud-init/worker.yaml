@@ -1,0 +1,35 @@
+#cloud-config
+# Digital Ocean user-data for a build worker. Assumes an Arch Linux image with
+# cloud-init (e.g. the official Arch cloud image uploaded as a custom image).
+# Fill in the git url, the master's private IP in /etc/hosts and the shared worker key,
+# then create droplets with:  doctl compute droplet create ... --user-data-file worker.yaml
+# Workers are interchangeable: destroy one and its job is requeued by the master.
+package_update: true
+packages: [git, devtools, rsync, openssh, btrfs-progs]
+
+write_files:
+  - path: /etc/archci/archci.conf
+    permissions: '0644'
+    content: |
+      ARCHCI_MASTER="archci@master"
+      ARCHCI_REPOS="core extra"
+  - path: /etc/archci/worker_key
+    permissions: '0600'
+    content: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      ...paste the worker key authorized on the master with archci-authorize...
+      -----END OPENSSH PRIVATE KEY-----
+  - path: /etc/hosts
+    append: true
+    content: |
+      10.0.0.2 master
+  - path: /etc/pacman.d/mirrorlist
+    permissions: '0644'
+    content: |
+      Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+
+runcmd:
+  - git clone https://example.invalid/archci.git /opt/archci
+  - /opt/archci/install.sh worker
+  # one worker per ~4 GB RAM and 2 vCPU is a reasonable start
+  - systemctl enable --now archci-worker@1

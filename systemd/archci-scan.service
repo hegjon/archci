@@ -1,0 +1,9 @@
+[Unit]
+Description=archci: scan Arch packaging state and enqueue builds
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=archci
+ExecStart=/usr/local/bin/archci-scan
