@@ -5,8 +5,9 @@
 # by archci-worker, so each build has its own unit, cgroup, journal and
 # TimeoutStartSec. Packages and makepkg logs end up in OUTDIR, together with a
 # "result" file saying success or failure; the worker trusts that file, not the
-# unit's exit status, because systemd counts SIGTERM (a timeout, a stop) as a
-# clean exit. COPY is the chroot copy to use; it defaults to archci-<N> for the
+# unit's exit status, because a build killed by SIGTERM (e.g. an external stop)
+# is counted a clean exit by systemd. (A TimeoutStartSec timeout, by contrast,
+# already fails the unit.) COPY is the chroot copy to use; it defaults to archci-<N> for the
 # worker instance N found in the job file's worker= line.
 # To reproduce a build by hand:  archci-build /path/to/job /tmp/out manual
 set -euo pipefail

@@ -66,8 +66,10 @@ stamped with the worker name and attempt, and is printed. The worker then:
    their builder signatures and makepkg logs to `incoming/<jobid>/` on the
    master (the ssh key is jailed to that directory by `rrsync`),
 6. reports `success` or `failure`. The verdict comes from a `result` file
-   `archci-build` writes last, not from the unit's exit status, because
-   systemd counts SIGTERM (a timeout, a stop) as a clean exit.
+   `archci-build` writes last, not from the unit's exit status, because systemd
+   counts a build killed by SIGTERM (an external stop) as a clean exit. A
+   `TimeoutStartSec` timeout does fail the unit, but the result file also covers
+   the stop/kill case, so the worker relies on it uniformly.
 
 While building, a background loop sends a heartbeat every 5 minutes. A job
 without a heartbeat for 30 minutes is put back in `pending/` by the reaper, so
