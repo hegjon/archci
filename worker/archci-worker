@@ -14,7 +14,7 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 instance=${1:-1}
 [[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
 [[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY (run install.sh worker)"
-worker="$(hostname -s)-$instance"
+worker="${HOSTNAME%%.*}-$instance"
 archci_valid_worker "$worker" || archci_die "hostname makes an invalid worker id: $worker"
 
 ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30

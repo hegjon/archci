@@ -80,7 +80,7 @@ else
 	install -d -o archci -m 755 /var/lib/archci-worker/srcdest
 	mksubvol /var/lib/archbuild
 	if [[ ! -f /etc/archci/worker_key ]]; then
-		ssh-keygen -q -t ed25519 -N '' -C "archci-worker@$(hostname -s)" -f /etc/archci/worker_key
+		ssh-keygen -q -t ed25519 -N '' -C "archci-worker@${HOSTNAME%%.*}" -f /etc/archci/worker_key
 	fi
 	chmod 600 /etc/archci/worker_key
 	echo "==> worker: systemd unit"

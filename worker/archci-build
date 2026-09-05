@@ -41,7 +41,7 @@ base_packages=(base-devel)
 copy=archci-$instance
 srcdir=$ARCHCI_WORKER_HOME/build/$instance/$job_pkgbase
 
-echo "==> archci-build $job_id on $(hostname) at $(archci_now)"
+echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
 echo "    repo=$job_repo profile=$profile chroot=$chroot copy=$copy commit=$job_commit"
 
 # --- clean chroot: create once, refresh periodically, recreate on devtools bumps
