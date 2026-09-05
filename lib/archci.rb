@@ -68,7 +68,7 @@ module Archci
   # Packages whose released commit is not the one we last built, in claim
   # order: updates of packages we already publish first, then the backlog.
   # Nothing is stored; this is computed from state/, built/ and the queue on
-  # every call (about 13,000 small files for core+extra, well under a second).
+  # every call (about 8,200 small files for core+extra, well under a second).
   #   limit: stop as soon as this many candidates are known
   def self.outstanding(limit: nil)
     cfg = config

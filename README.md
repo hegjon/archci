@@ -41,7 +41,7 @@ walks the state files and compares each with `built/<repo>-<arch>/<pkgbase>`
 (`version commit` of the last successful build), skipping packages that are
 running, queued, waiting for a retry or given up on. Updates to packages
 already in our repo come first, then the never-built rest, alphabetically.
-That walk is about 13,000 small files for core plus extra and takes well
+That walk is about 8,200 small files for core plus extra and takes well
 under a second, once per claim.
 
 **Workers.** `archci-worker@N` runs `ssh master claim <host>-N`. The master's
@@ -228,9 +228,17 @@ Because full build output goes through journald and journal-upload, size the
 master's `journal-remote.conf` limits and the workers' `SystemMaxUse` for it;
 large builds such as browsers produce hundreds of megabytes of log.
 
-Keep port 19532 on the master reachable from the VPC only (Digital Ocean
-cloud firewall or the droplet's own firewall); there is no authentication on
-the plain-HTTP listener.
+There is no authentication on the plain-HTTP listener, so bind it to the
+master's VPC address only, with a drop-in for the socket:
+
+```
+# /etc/systemd/system/systemd-journal-remote.socket.d/vpc.conf
+[Socket]
+ListenStream=
+ListenStream=<private ip>:19532
+```
+
+and keep port 19532 closed in the Digital Ocean cloud firewall.
 
 ## Operating it
 
@@ -256,7 +264,7 @@ without network or root.
 ## Notes and limits
 
 - Nothing is queued up front: with an empty `built/`, every package in
-  `ARCHCI_REPOS` (about 13,000 for core+extra) is outstanding and gets built
+  `ARCHCI_REPOS` (about 8,200 for core+extra) is outstanding and gets built
   in repo order, then name order, as workers ask for work.
 - Packages are built independently against the official mirrors. If the
   mirror the worker uses lags behind the state repo, a build that needs the
