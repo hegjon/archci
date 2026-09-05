@@ -49,8 +49,12 @@ if [[ $role == master ]]; then
 	chown archci:archci /var/lib/archci/repo /var/lib/archci/incoming
 	echo "==> master: systemd timers"
 	install -m 644 systemd/archci-scan.* systemd/archci-reaper.* systemd/archci-publish.* "$unitdir/"
+	echo "==> master: receive worker journals (systemd-journal-remote on port 19532)"
+	install -D -m 644 systemd/systemd-journal-remote.service.d/archci.conf "$unitdir/systemd-journal-remote.service.d/archci.conf"
+	install -D -m 644 systemd/journal-remote.conf /etc/systemd/journal-remote.conf.d/archci.conf
 	systemctl daemon-reload
 	systemctl enable --now archci-scan.timer archci-reaper.timer archci-publish.timer
+	systemctl enable --now systemd-journal-remote.socket
 	cat <<-MSG
 
 	Master installed. Next:
@@ -64,6 +68,8 @@ if [[ $role == master ]]; then
 	     and set ARCHCI_RCLONE_REMOTE="r2:<bucket>" in /etc/archci/archci.conf.
 	  2. Authorize each worker key:  archci-authorize /path/to/worker_key.pub
 	  3. Watch:  archci-status,  journalctl -t archci-job -f,  journalctl -u archci-scan
+	     Worker journals:  journalctl -D /var/log/journal/remote -f
+	  4. Keep port 19532 (worker journal upload) reachable from the VPC only.
 	MSG
 else
 	echo "==> worker: packages"
@@ -79,13 +85,19 @@ else
 	chmod 600 /etc/archci/worker_key
 	echo "==> worker: systemd unit"
 	install -m 644 systemd/archci-worker@.service "$unitdir/"
+	echo "==> worker: stream the journal to the master (systemd-journal-upload)"
+	source lib/archci-common.sh
+	install -d -m 755 /etc/systemd/journal-upload.conf.d
+	printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/etc/systemd/journal-upload.conf.d/archci.conf
 	systemctl daemon-reload
 	systemctl enable archci-worker@1.service
+	systemctl enable --now systemd-journal-upload.service
 	cat <<-MSG
 
 	Worker installed. Next:
 	  1. Make sure "master" resolves to the master's private address (/etc/hosts),
-	     or change ARCHCI_MASTER in /etc/archci/archci.conf.
+	     or change ARCHCI_MASTER and ARCHCI_JOURNAL_URL in /etc/archci/archci.conf
+	     and rerun this script.
 	  2. Authorize this key on the master (archci-authorize):
 	       $(cat /etc/archci/worker_key.pub)
 	  3. systemctl start archci-worker@1   (add @2, @3 ... for parallel builds)

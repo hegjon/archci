@@ -31,6 +31,8 @@ ARCHCI_SNAPSHOTS=5
 # ssh destination of the master. The master droplet is named "master"; workers resolve
 # it via /etc/hosts (cloud-init writes it) or DO private DNS.
 ARCHCI_MASTER="archci@master"
+# Where systemd-journal-upload streams this worker's journal (journal-remote on the master).
+ARCHCI_JOURNAL_URL=http://master:19532
 ARCHCI_WORKER_KEY=/etc/archci/worker_key
 ARCHCI_WORKER_HOME=/var/lib/archci-worker
 # Unprivileged local user makepkg runs as inside the chroot.

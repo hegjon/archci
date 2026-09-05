@@ -81,7 +81,8 @@ rebuild.
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
 master/   archci-scan, archci-job, archci-shell, archci-authorize, archci-publish, archci-status
 worker/   archci-worker, archci-build
-systemd/  scan, reaper and publish timers (master); archci-worker@.service (worker)
+systemd/  scan, reaper and publish timers (master); archci-worker@.service (worker);
+          journal-remote drop-ins for the master
 ```
 
 `install.sh` copies `lib/` plus the role's directory to `/usr/local/lib/archci`
@@ -187,6 +188,27 @@ of this on first boot, so workers are created and destroyed with
 `doctl compute droplet create/delete`. The same worker key can be shared by
 all droplets; workers are identified by hostname, which on DO is the droplet
 name. The master may run `archci-worker@1` too if `master` resolves to itself.
+
+## Monitoring workers from the master
+
+Workers stream their journal to the master with `systemd-journal-upload`
+(configured by `install.sh worker` from `ARCHCI_JOURNAL_URL`, default
+`http://master:19532`). The master receives it with `systemd-journal-remote`
+over plain HTTP on the VPC and keeps one file per worker under
+`/var/log/journal/remote/`, capped by `journal-remote.conf` (2 GB, 200 files).
+Same direction as the job protocol: workers only need the master's name, and
+the last lines of a worker that died are already on the master.
+
+```
+journalctl -D /var/log/journal/remote -f                     all workers, live
+journalctl -D /var/log/journal/remote -u archci-worker@1     one unit, every worker
+journalctl -D /var/log/journal/remote _HOSTNAME=build-a      one worker
+journalctl --merge -f                                        master and workers together
+```
+
+Keep port 19532 on the master reachable from the VPC only (Digital Ocean
+cloud firewall or the droplet's own firewall); there is no authentication on
+the plain-HTTP listener.
 
 ## Operating it
 

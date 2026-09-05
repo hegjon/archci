@@ -38,6 +38,7 @@ archci_load_conf
 : "${ARCHCI_GPGKEY:=}"
 : "${ARCHCI_SNAPSHOTS:=5}"
 : "${ARCHCI_MASTER:=archci@master}"
+: "${ARCHCI_JOURNAL_URL:=http://${ARCHCI_MASTER#*@}:19532}"
 : "${ARCHCI_WORKER_KEY:=/etc/archci/worker_key}"
 : "${ARCHCI_WORKER_HOME:=/var/lib/archci-worker}"
 : "${ARCHCI_BUILD_USER:=archci}"
