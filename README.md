@@ -11,25 +11,36 @@ systemd timers and journald. There is no daemon: the queue is a directory of
 files, and moving a file between `pending/`, `running/`, `done/` and `failed/`
 is the whole state machine.
 
-```
- gitlab.archlinux.org                         Cloudflare R2
-   packaging/state ──git pull──┐        ┌── staging/ ──┐   release/ (clients)
-   packaging/packages/*        │        │ unsigned pkgs│      ▲ signed pkgs + db
-        │                      ▼        ▼ + .buildsig   │      │
-        │              ┌──────────── master ───────────┴──┐   │
-        │              │ archci-scan  (timer)  state → queue│   │
-        │              │ archci-job   (ssh)    claim/report │   │
-        │              │ archci-job reap(timer) stale/retry │   │
-        │              │ archci-stage (timer)  pool → staging   │
-        │              └───────▲───────────────────────────────┘
-        │        ssh "claim"/"report", rsync (rrsync-jailed)
-        │                      │              ┌──── signer ─────┴──────┐
-        ▼              ┌───────┴─ worker ──┐  │ archci-sign (timer):   │
-   git fetch <commit>  │ archci-worker@N   │  │  staging → verify      │
-                       │ archci-build      │  │  buildsig → release-   │
-                       │ makechrootpkg     │  │  sign → repo-add →     │
-                       │ + builder-sign    │  │  release/  (release key)│
-                       └───────────────────┘  └────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph GL["gitlab.archlinux.org"]
+    ST["packaging/state"]
+    PK["packaging/packages"]
+  end
+  subgraph MASTER["master (holds no key)"]
+    SCAN["archci-scan: state to queue"]
+    JOB["archci-job: claim / report (ssh)"]
+    REAP["archci-job reap: stale / retry"]
+    STAGE["archci-stage: pool to staging"]
+  end
+  subgraph WORKER["worker x N"]
+    WL["archci-worker@N"]
+    BUILD["archci-build: makechrootpkg + builder-sign"]
+  end
+  subgraph SIGNER["signer (holds release key)"]
+    SIGN["archci-sign: verify buildsig, release-sign, repo-add"]
+  end
+  subgraph R2["Cloudflare R2"]
+    STG[("staging/ : unsigned pkgs + .buildsig")]
+    REL[("release/ : signed pkgs + db")]
+  end
+  ST -->|git pull| SCAN
+  WL -->|ssh claim / report| JOB
+  WL --> BUILD
+  PK -->|git fetch commit| BUILD
+  BUILD -->|rsync pkg + .buildsig| JOB
+  JOB --> STAGE --> STG --> SIGN --> REL
+  REL -->|"pacman, SigLevel=Required"| CLIENTS["clients"]
 ```
 
 ## How it works
@@ -103,42 +114,18 @@ Signing is a two-stage chain, the internet-facing master never holds a key, and
 R2 is the hand-off between master and signer. The signer needs no access to the
 master at all; it talks only to R2.
 
-```
- WORKER (holds builder key)                         builder key = internal provenance
- ─────────────────────────
-   git fetch <released commit>  →  makechrootpkg (clean btrfs chroot)
-        │                                       ──►  foo-1.2-1.pkg.tar.zst
-   gpg --detach-sign -u builder                 ──►  foo-1.2-1.pkg.tar.zst.buildsig
-        │
-   rsync pkg + .buildsig  ──►  master:incoming/<job>/   (ssh key, rrsync-jailed)
-        │
-════════╪═══════════════════════ VPC (ssh) ═══════════════════════════════════
-        ▼
- MASTER (holds NO key)
- ────────────────────
-   pool  →  archci-stage:  rclone move  pkg + .buildsig  ──►  R2 staging/
-        │
-════════╪══════════════════════ Cloudflare R2 ════════════════════════════════
-        ▼
- SIGNER (holds release key + trusted builder keyring)     release key = client-facing
- ──────────────────────────────────────────────────
-   rclone pull  staging/pkg + .buildsig
-        │
-   gpg --verify  .buildsig  against trusted builder keyring
-        ├─ unknown / invalid / missing  ──►  REJECT (logged, deleted from staging)
-        ▼ valid
-   gpg --detach-sign -u release   (passphrase via gpg-agent, 1× unlock)
-        │                          ──►  foo-1.2-1.pkg.tar.zst.sig
-        ▼
-   rclone push  pkg + .sig  ──►  R2 release/ ;  repo-add  ──►  release/<repo>.db
-   rclone delete  staging/pkg + .buildsig        (.buildsig never leaves staging)
-        │
-════════╪══════════════════════ Cloudflare R2 ════════════════════════════════
-        ▼
- CLIENT
- ──────
-   pacman  fetches from R2 release/ and verifies foo….pkg.tar.zst.sig
-           against the ONE release key in its keyring  (SigLevel = Required).
+```mermaid
+flowchart TD
+  A["worker: makechrootpkg produces pkg"] --> B["gpg detach-sign -u builder to pkg.buildsig<br/>builder key = internal provenance"]
+  B -->|"rsync (rrsync-jailed)"| C["master: pool pkg + .buildsig<br/>(holds no key)"]
+  C -->|"archci-stage: rclone move"| D[("R2 staging/")]
+  D --> E["signer: rclone pull pkg + .buildsig"]
+  E --> F{"verify .buildsig against<br/>trusted builder keyring"}
+  F -->|"unknown / invalid / missing"| X["REJECT<br/>delete from staging"]
+  F -->|valid| G["gpg detach-sign -u release to pkg.sig<br/>release key = client-facing"]
+  G --> H["rclone push pkg + .sig to release/<br/>repo-add to db, delete from staging"]
+  H --> I[("R2 release/")]
+  I -->|"pacman, SigLevel=Required,<br/>one release key in keyring"| J["client verifies pkg.sig"]
 ```
 
 - **Builder signature (internal).** Each worker has its own OpenPGP key,
