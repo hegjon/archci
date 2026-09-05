@@ -1,9 +1,0 @@
-[Unit]
-Description=archci: publish every 5 minutes when something changed
-
-[Timer]
-OnBootSec=3min
-OnUnitActiveSec=5min
-
-[Install]
-WantedBy=timers.target

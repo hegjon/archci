@@ -13,7 +13,6 @@ write_files:
     content: |
       ARCHCI_MASTER="archci@master"
       ARCHCI_REPOS="core extra"
-      ARCHCI_SIGN=1
   - path: /etc/archci/worker_key
     permissions: '0600'
     content: |

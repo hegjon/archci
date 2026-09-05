@@ -48,12 +48,12 @@ if [[ $role == master ]]; then
 	mksubvol /var/lib/archci/incoming
 	chown archci:archci /var/lib/archci/repo /var/lib/archci/incoming
 	echo "==> master: systemd timers"
-	install -m 644 systemd/archci-scan.* systemd/archci-reaper.* systemd/archci-index.* systemd/archci-publish.* "$unitdir/"
+	install -m 644 systemd/archci-scan.* systemd/archci-reaper.* systemd/archci-stage.* "$unitdir/"
 	echo "==> master: receive worker journals (systemd-journal-remote on port 19532)"
 	install -D -m 644 systemd/systemd-journal-remote.service.d/archci.conf "$unitdir/systemd-journal-remote.service.d/archci.conf"
 	install -D -m 644 systemd/journal-remote.conf /etc/systemd/journal-remote.conf.d/archci.conf
 	systemctl daemon-reload
-	systemctl enable --now archci-scan.timer archci-reaper.timer archci-index.timer archci-publish.timer
+	systemctl enable --now archci-scan.timer archci-reaper.timer archci-stage.timer
 	systemctl enable --now systemd-journal-remote.socket
 	cat <<-MSG
 
@@ -65,12 +65,13 @@ if [[ $role == master ]]; then
 	       access_key_id = ...
 	       secret_access_key = ...
 	       endpoint = https://<account-id>.r2.cloudflarestorage.com
-	     and set ARCHCI_RCLONE_REMOTE="r2:<bucket>" in /etc/archci/archci.conf.
-	  2. Authorize each worker SSH key:  archci-authorize /path/to/worker_key.pub
-	     Authorize the signer SSH key:   archci-authorize --signer /path/to/signer_key.pub
-	  3. The master holds NO signing key. Once the signer runs, set ARCHCI_SIGN=1
-	     in /etc/archci/archci.conf so only signed packages enter the databases.
-	  4. Watch:  archci-status,  journalctl -t archci-job -f,  journalctl -u archci-scan
+	     and set ARCHCI_R2_STAGING="r2:<bucket>/staging" in /etc/archci/archci.conf.
+	     Ideally use a token that can only write the staging prefix.
+	  2. The master holds NO signing key and builds no database. It moves built
+	     packages to STAGING; the signer verifies, signs and publishes them.
+	  3. Authorize each worker SSH key:  archci-authorize /path/to/worker_key.pub
+	     (The signer needs no SSH access to the master; it uses R2.)
+	  4. Watch:  archci-status,  journalctl -u archci-stage,  journalctl -t archci-job -f
 	     Worker journals:  journalctl -D /var/log/journal/remote -f
 	  5. Keep ports 19532 (journal upload) and 22 reachable from the VPC only.
 	MSG
@@ -120,40 +121,36 @@ elif [[ $role == worker ]]; then
 	MSG
 elif [[ $role == signer ]]; then
 	echo "==> signer: packages"
-	pacman -S --needed --noconfirm git rsync openssh gnupg
+	pacman -S --needed --noconfirm git rclone gnupg
 	source lib/archci-common.sh
 	echo "==> signer: user, directories and keyrings"
 	getent passwd archci >/dev/null || useradd --system --home-dir "$ARCHCI_SIGNER_HOME" --shell /usr/bin/nologin archci
-	install -d -m 755 "$ARCHCI_SIGNER_HOME" "$ARCHCI_SIGNER_HOME/work"
+	install -d -m 755 "$ARCHCI_SIGNER_HOME" "$ARCHCI_SIGNER_HOME/work" "$ARCHCI_SIGNER_HOME/repo"
 	install -d -m 700 "$ARCHCI_RELEASE_GNUPGHOME" "$ARCHCI_BUILDER_KEYRING"
 	# Cache the release passphrase for a day so the timer can sign after one unlock.
 	if [[ ! -f $ARCHCI_RELEASE_GNUPGHOME/gpg-agent.conf ]]; then
 		printf 'default-cache-ttl 86400\nmax-cache-ttl 86400\nallow-loopback-pinentry\n' \
 			>"$ARCHCI_RELEASE_GNUPGHOME/gpg-agent.conf"
 	fi
-	if [[ ! -f $ARCHCI_SIGNER_KEY ]]; then
-		ssh-keygen -q -t ed25519 -N '' -C "archci-signer@${HOSTNAME%%.*}" -f "$ARCHCI_SIGNER_KEY"
-	fi
-	chmod 600 "$ARCHCI_SIGNER_KEY"
 	echo "==> signer: systemd timer"
 	install -m 644 systemd/archci-sign.service systemd/archci-sign.timer "$unitdir/"
 	systemctl daemon-reload
 	systemctl enable archci-sign.timer
 	cat <<-MSG
 
-	Signer installed. Next:
-	  1. Make sure "master" (or ARCHCI_SIGNER_MASTER) resolves to the master's
-	     VPC address in /etc/hosts.
+	Signer installed. It talks only to R2, never to the master. Next:
+	  1. Put the R2 credentials in /etc/archci/rclone.conf (chmod 600) and set,
+	     in /etc/archci/archci.conf:
+	       ARCHCI_R2_STAGING="r2:<bucket>/staging"   (read; the master writes it)
+	       ARCHCI_R2_RELEASE="r2:<bucket>"           (write; clients read it)
+	     Ideally a token that can read staging and write the release prefix.
 	  2. Create the passphrase-protected release key once:
 	       gpg --homedir $ARCHCI_RELEASE_GNUPGHOME --full-generate-key
 	     Match ARCHCI_RELEASE_KEY (default archci-release). Export the PUBLIC key:
 	       gpg --homedir $ARCHCI_RELEASE_GNUPGHOME --armor --export archci-release >/etc/archci/release.pub
 	     Clients:  pacman-key --add release.pub && pacman-key --lsign-key <fingerprint>
-	  3. Authorize this signer's SSH key on the master:
-	       $(cat "$ARCHCI_SIGNER_KEY.pub")
-	     On the master:  archci-authorize --signer /path/to/signer_key.pub
-	  4. Trust each worker's builder key:  archci-authorize-builder builder_key.pub
-	  5. Unlock the release key and start signing:
+	  3. Trust each worker's builder key:  archci-authorize-builder builder_key.pub
+	  4. Unlock the release key and start signing:
 	       archci-sign --unlock
 	       systemctl start archci-sign.timer
 	     journalctl -u archci-sign -f

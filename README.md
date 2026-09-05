@@ -12,24 +12,24 @@ files, and moving a file between `pending/`, `running/`, `done/` and `failed/`
 is the whole state machine.
 
 ```
- gitlab.archlinux.org                       Cloudflare R2
-   packaging/state ──git pull──┐              ▲ rclone (packages first, then dbs, logs, status.json)
-   packaging/packages/*        │              │
-        │                      ▼              │
-        │              ┌───────────────── master ────────────────┐
-        │              │ archci-scan   (timer)  state → queue    │
-        │              │ archci-job    (ssh)    claim/heartbeat/ │
-        │              │                        report → pool     │
-        │              │ archci-job reap (timer) stale/retry     │
-        │              │ archci-publish (timer) repo/ → R2       │
-        │              └───────▲──────────────────────▲──────────┘
-        │        ssh "claim" / "report"       rsync (rrsync-jailed)
-        │                      │                      │
-        ▼              ┌───────┴────── worker ────────┴──────────┐
-   git fetch <commit>  │ archci-worker@N  loop: claim → build → │
-                       │ archci-build     mkarchroot/makechrootpkg│
-                       │                  (btrfs snapshot per job)│
-                       └──────────────────────────────────────────┘
+ gitlab.archlinux.org                         Cloudflare R2
+   packaging/state ──git pull──┐        ┌── staging/ ──┐   release/ (clients)
+   packaging/packages/*        │        │ unsigned pkgs│      ▲ signed pkgs + db
+        │                      ▼        ▼ + .buildsig   │      │
+        │              ┌──────────── master ───────────┴──┐   │
+        │              │ archci-scan  (timer)  state → queue│   │
+        │              │ archci-job   (ssh)    claim/report │   │
+        │              │ archci-job reap(timer) stale/retry │   │
+        │              │ archci-stage (timer)  pool → staging   │
+        │              └───────▲───────────────────────────────┘
+        │        ssh "claim"/"report", rsync (rrsync-jailed)
+        │                      │              ┌──── signer ─────┴──────┐
+        ▼              ┌───────┴─ worker ──┐  │ archci-sign (timer):   │
+   git fetch <commit>  │ archci-worker@N   │  │  staging → verify      │
+                       │ archci-build      │  │  buildsig → release-   │
+                       │ makechrootpkg     │  │  sign → repo-add →     │
+                       │ + builder-sign    │  │  release/  (release key)│
+                       └───────────────────┘  └────────────────────────┘
 ```
 
 ## How it works
@@ -74,18 +74,20 @@ without a heartbeat for 30 minutes is put back in `pending/` by the reaper, so
 a worker can be destroyed at any time. On `systemctl stop` the worker reports
 `abandoned`, which requeues without counting an attempt.
 
-**Master.** The master holds no signing key. On `report success` the packages
-and their builder signatures are pooled into `repo/<repo>/os/<arch>/` (debug
-packages go to `<repo>-debug`) and the built record is written. `archci-index`
-then builds the pacman databases with `repo-add -R`, but with `ARCHCI_SIGN=1`
-it adds only packages that already carry a release signature, so the database
-never lists a package a client could not verify. Failures keep their log under
-`logs/<repo>/<pkgbase>/<version>/attempt-N.log` and are retried after 3 hours,
-up to 3 attempts. A newer upstream release drops any pending or failed job for
-the older commit; the new commit is simply outstanding again. `archci-publish`
-(root, every 5 min, only when something changed) optionally snapshots `repo/`,
-uploads packages before databases so clients never see a dangling db entry,
-excludes the internal `.buildsig` files, then ships logs and `status.json`.
+**Master.** The master holds no signing key and builds no database. On `report
+success` the packages and their builder signatures are pooled into
+`repo/<repo>/os/<arch>/` (debug packages go to `<repo>-debug`) and the built
+record is written. `archci-stage` (a timer) then `rclone move`s the pool to the
+R2 staging area, so the master keeps only packages not yet staged. Failures
+keep their log under `logs/<repo>/<pkgbase>/<version>/attempt-N.log` and are
+retried after 3 hours, up to 3 attempts. A newer upstream release drops any
+pending or failed job for the older commit; the new commit is simply
+outstanding again.
+
+**Signer.** Everything from staging on is the signer's job; see Signing below.
+It verifies each package's builder signature, adds the client-facing release
+signature, runs `repo-add`, publishes packages + `.sig` + database to the R2
+release area that clients use, and deletes the package from staging.
 
 Builds use dependencies from the official Arch mirrors, not from our own
 output, so packages can be built in any order and workers stay simple. Point
@@ -95,66 +97,46 @@ rebuild.
 
 ## Signing
 
-Signing is a two-stage chain, and the internet-facing master never holds a
-key. It is gated by `ARCHCI_SIGN` (0 while there is no signer yet, 1 once the
-signer runs).
+Signing is a two-stage chain, the internet-facing master never holds a key, and
+R2 is the hand-off between master and signer. The signer needs no access to the
+master at all; it talks only to R2.
 
 ```
  WORKER (holds builder key)                         builder key = internal provenance
  ─────────────────────────
-   git fetch <released commit>  from packaging/packages
+   git fetch <released commit>  →  makechrootpkg (clean btrfs chroot)
+        │                                       ──►  foo-1.2-1.pkg.tar.zst
+   gpg --detach-sign -u builder                 ──►  foo-1.2-1.pkg.tar.zst.buildsig
         │
-        ▼
-   makechrootpkg  (clean btrfs chroot)  ──►  foo-1.2-1.pkg.tar.zst
-        │
-        ▼
-   gpg --detach-sign  -u builder     ──►  foo-1.2-1.pkg.tar.zst.buildsig
-        │
-        ▼
-   rsync pkg + .buildsig  ──►  master:incoming/<job>/      (ssh key, rrsync-jailed)
-   ssh master report success
+   rsync pkg + .buildsig  ──►  master:incoming/<job>/   (ssh key, rrsync-jailed)
         │
 ════════╪═══════════════════════ VPC (ssh) ═══════════════════════════════════
         ▼
  MASTER (holds NO key)
  ────────────────────
-   pool into repo/<repo>/os/<arch>/ :  foo-1.2-1.pkg.tar.zst + .buildsig
-   write built record ; touch index.needed
+   pool  →  archci-stage:  rclone move  pkg + .buildsig  ──►  R2 staging/
         │
-        │   (packages sit here unsigned, NOT yet in the database)
-        │
-════════╪═══════════════════════ VPC (ssh) ═══════════════════════════════════
+════════╪══════════════════════ Cloudflare R2 ════════════════════════════════
         ▼
  SIGNER (holds release key + trusted builder keyring)     release key = client-facing
  ──────────────────────────────────────────────────
-   ssh master "unsigned"      ──►  list of pkgs with no .sig
-   rsync pull  pkg + .buildsig
+   rclone pull  staging/pkg + .buildsig
         │
-        ▼
    gpg --verify  .buildsig  against trusted builder keyring
-        │
-        ├─ unknown / invalid / missing  ──►  REJECT (logged, never released)
-        │
+        ├─ unknown / invalid / missing  ──►  REJECT (logged, deleted from staging)
         ▼ valid
-   gpg --detach-sign  -u release   (passphrase via gpg-agent, 1× unlock)
+   gpg --detach-sign -u release   (passphrase via gpg-agent, 1× unlock)
         │                          ──►  foo-1.2-1.pkg.tar.zst.sig
         ▼
-   rsync push  .sig  ──►  master ;   ssh master "reindex"
+   rclone push  pkg + .sig  ──►  R2 release/ ;  repo-add  ──►  release/<repo>.db
+   rclone delete  staging/pkg + .buildsig        (.buildsig never leaves staging)
         │
-════════╪═══════════════════════ VPC (ssh) ═══════════════════════════════════
-        ▼
- MASTER
- ──────
-   archci-index:  repo-add  ONLY packages that now have a .sig  ──►  <repo>.db
-   archci-publish:  rclone  packages + .sig + db  ──►  Cloudflare R2
-                    (.buildsig is excluded, stays internal)
-        │
-════════╪══════════════════════════════════════════════════════════════════════
+════════╪══════════════════════ Cloudflare R2 ════════════════════════════════
         ▼
  CLIENT
  ──────
-   pacman  verifies  foo….pkg.tar.zst.sig  against the ONE release key
-           in its keyring  (SigLevel = Required).  Builder key never needed.
+   pacman  fetches from R2 release/ and verifies foo….pkg.tar.zst.sig
+           against the ONE release key in its keyring  (SigLevel = Required).
 ```
 
 - **Builder signature (internal).** Each worker has its own OpenPGP key,
@@ -162,26 +144,32 @@ signer runs).
   signs every package into `<pkg>.buildsig`. This proves which builder made
   the package and that its bytes were not altered afterwards. It is never
   shown to clients and is excluded from what is published.
-- **Release signature (client-facing).** The `signer` role runs on a
-  dedicated droplet on the same VPC and holds the passphrase-protected release
-  key. `archci-sign` (a timer) asks the master for packages that have no
-  release signature, fetches each with its builder signature, verifies the
-  builder signature against a keyring of authorized builder keys, then makes
-  the detached release `<pkg>.sig` with the release key and pushes only that
-  back. A package whose builder signature is missing, invalid, or from an
-  unknown key is rejected and never released.
+- **Release signature (client-facing).** The `signer` role runs on its own
+  droplet and holds the passphrase-protected release key. `archci-sign` (a
+  timer) lists the R2 staging area, pulls each package with its builder
+  signature, verifies the builder signature against a keyring of authorized
+  builder keys, makes the detached release `<pkg>.sig`, runs `repo-add`, and
+  publishes packages + `.sig` + database to the R2 release area, then deletes
+  the package from staging. A package whose builder signature is missing,
+  invalid, or from an unknown key is rejected and never released.
 
 The two signatures live in separate files on purpose. pacman verifies the
 client-facing `<pkg>.sig` against the one release key in its keyring; the
-builder signatures stay internal, so clients never need per-worker keys. The
-release private key never leaves the signer: it is generated there with a
-passphrase and unlocked once per session into `gpg-agent` (`archci-sign
---unlock`), so the signing timer runs unattended for the agent's cache
-lifetime without the key ever touching the master. The database itself is left
-unsigned (pacman's default `DatabaseOptional`); package authenticity is fully
-covered by the release signatures. A compromise of the master therefore cannot
-get a malicious package released: it cannot forge a builder signature, and the
-signer refuses anything that fails that check.
+builder signatures stay in staging and never reach the release area, so clients
+never need per-worker keys. The release private key never leaves the signer: it
+is generated there with a passphrase and unlocked once per session into
+`gpg-agent` (`archci-sign --unlock`), so the signing timer runs unattended for
+the agent's cache lifetime. The database is left unsigned (pacman's default
+`DatabaseOptional`); package authenticity is fully covered by the release
+signatures. A compromise of the master cannot get a malicious package released:
+it holds no key, cannot forge a builder signature, and the signer refuses
+anything that fails that check.
+
+Because the hand-off is R2, the signer needs no access to the master, and the
+release area is written only by the key holder. It also means neither host must
+store the whole repository: R2 does. Use scoped R2 tokens so the master can
+only write `staging/` and the signer can read `staging/` and write the release
+prefix, and do not serve `staging/` publicly.
 
 Trust bootstrap: export the release public key on the signer and give it to
 clients (`pacman-key --add release.pub && pacman-key --lsign-key <fpr>`), and
@@ -194,11 +182,12 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 
 ```
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
-master/   archci-scan, archci-next, archci-job, archci-index, archci-shell, archci-authorize, archci-publish, archci-status
+master/   archci-scan, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
 worker/   archci-worker, archci-build
 signer/   archci-sign, archci-authorize-builder
-systemd/  scan, reaper and publish timers (master); archci-worker@.service and
-          archci-build@.service (worker); journal-remote drop-ins for the master
+systemd/  scan, reaper and stage timers (master); archci-worker@.service and
+          archci-build@.service (worker); archci-sign timer (signer);
+          journal-remote drop-ins for the master
 ```
 
 `install.sh` copies `lib/` plus the role's directory to `/usr/local/lib/archci`
@@ -211,11 +200,12 @@ state/                      clone of packaging/state
 queue/{pending,running,done,failed}/<jobid>.job
 built/<repo>-<arch>/<pkgbase>     "version commit" of the last good build
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
-repo/<repo>/os/<arch>/      the pacman repo that gets published (btrfs subvolume)
+repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume)
 logs/<repo>/<pkgbase>/<version>/attempt-N.log
-snapshots/repo-<timestamp>  read-only snapshots taken before each publish
-status.json                 what archci-status --json printed last
 ```
+
+The released repository lives on R2, not on the master. The signer keeps only
+the databases locally, in `/var/lib/archci-signer/repo/`.
 
 A job file:
 
@@ -249,11 +239,11 @@ template does this).
 
 This installs `lib/` and `master/` to `/usr/local/lib/archci` (symlinked into
 `/usr/local/bin`), creates the `archci` user and directories (as btrfs
-subvolumes when the filesystem allows), and enables the scan, reaper and
-publish timers. Then:
+subvolumes when the filesystem allows), and enables the scan, reaper and stage
+timers. Then:
 
-1. Create an R2 bucket with a public custom domain and an API token, and write
-   `/etc/archci/rclone.conf` (mode 600):
+1. Create an R2 bucket and an API token that may write the `staging/` prefix,
+   and write `/etc/archci/rclone.conf` (mode 600):
 
    ```
    [r2]
@@ -264,18 +254,20 @@ publish timers. Then:
    endpoint = https://<account-id>.r2.cloudflarestorage.com
    ```
 
-2. Edit `/etc/archci/archci.conf`: `ARCHCI_RCLONE_REMOTE="r2:<bucket>"`,
-   `ARCHCI_REPOS`. Leave `ARCHCI_SIGN=0` until the signer droplet exists.
+2. Edit `/etc/archci/archci.conf`: `ARCHCI_R2_STAGING="r2:<bucket>/staging"`
+   and `ARCHCI_REPOS`. The master needs no release credentials; the signer
+   publishes the release area.
 
 3. Authorize worker keys: `archci-authorize worker_key.pub`. This appends
    `command="/usr/local/lib/archci/master/archci-shell",restrict <key>` to the archci
    user's `authorized_keys`, so a worker key can do nothing but the protocol.
+   The signer needs no key on the master.
 
-Clients then use:
+Clients read the release area (see Signer):
 
 ```
 [core]
-Server = https://<r2 domain>/$repo/os/$arch
+Server = https://<r2 release domain>/$repo/os/$arch
 ```
 
 ### Worker
@@ -309,26 +301,25 @@ name. The master may run `archci-worker@1` too if `master` resolves to itself.
 
 ### Signer
 
-On a dedicated droplet on the same VPC:
+On a dedicated droplet (it needs only R2 access, not the VPC):
 
 ```
 ./install.sh signer
 ```
 
-This installs `gnupg`, creates the release and builder keyrings under
-`/etc/archci`, sets a one-day `gpg-agent` cache, and generates the signer's
-ssh key. Then, following the printed steps: create the passphrase-protected
-release key, authorize the signer's ssh key on the master with
-`archci-authorize --signer`, register each worker's builder key with
-`archci-authorize-builder`, export the release public key for clients, and:
+This installs `rclone` and `gnupg`, and creates the release and builder
+keyrings under `/etc/archci` with a one-day `gpg-agent` cache. Then, following
+the printed steps: write `/etc/archci/rclone.conf` and set
+`ARCHCI_R2_STAGING` (read) and `ARCHCI_R2_RELEASE` (write) in
+`/etc/archci/archci.conf`, create the passphrase-protected release key,
+register each worker's builder key with `archci-authorize-builder`, export the
+release public key for clients, and:
 
 ```
 archci-sign --unlock              # enter the passphrase once per session
 systemctl start archci-sign.timer # sign new packages every 2 minutes
 journalctl -u archci-sign -f
 ```
-
-Finally set `ARCHCI_SIGN=1` on the master so only signed packages are indexed.
 
 ## Monitoring workers from the master
 
@@ -369,21 +360,20 @@ and keep port 19532 closed in the Digital Ocean cloud firewall.
 
 ```
 archci-status                       queue counts, running builds, recent failures
-archci-status --json                same as published to R2 as status.json
+archci-status --json                queue/outstanding as JSON
 archci-next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
-journalctl -u archci-index          database builds
-journalctl -u archci-publish        uploads
+journalctl -u archci-stage          staging to R2
 archci-job enqueue extra firefox    build the current release now (priority 0)
 archci-job retry <jobid>            reset attempts of a failed job and requeue
 archci-job requeue <jobid>          put a running/failed job back, keep attempts
-archci-index --force                rebuild databases now
-archci-publish --force              push even if nothing changed
+archci-stage --force                move pooled packages to R2 staging now
 archci-build job.file /tmp/out      reproduce a build by hand on a worker (root)
 
 # on the signer
 archci-sign --unlock                cache the release passphrase for the session
+archci-sign                         sign and publish staged packages now
 journalctl -u archci-sign -f        release-signing activity
 archci-authorize-builder key.pub    trust a worker's builder key
 ```
@@ -411,7 +401,11 @@ without network or root.
   whose builder signature the signer rejects is not re-attempted automatically,
   since that indicates a misconfigured or untrusted worker; investigate the
   signer log.
-- `repo-add -R` keeps only the current version of each package in `repo/`;
-  older versions live on in the btrfs snapshots until pruned.
+- The signer's `repo-add -R` keeps only the current version of each package in
+  the release database, and `archci-sign` then deletes the superseded package
+  files from the R2 release area.
+- Unsigned packages transit the R2 `staging/` prefix. Keep it private (never
+  served publicly) and use scoped R2 tokens: the master writes only `staging/`,
+  the signer reads `staging/` and writes the release prefix.
 - Worker ssh keys are shared secrets; rotate by running `archci-authorize` with
   a new key and deleting the old line from `~archci/.ssh/authorized_keys`.

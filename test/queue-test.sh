@@ -48,30 +48,21 @@ grep -q '^attempt=1$' <<<"$out" || fail "attempt should be 1"
 "$job" heartbeat "$id"
 ! "$job" heartbeat "9-1-core,nope,1-1" 2>/dev/null || fail "heartbeat of unknown job must fail"
 
-echo "--- report success pools packages (no db yet); index builds the db"
-index=$here/../master/archci-index
+echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
 echo "log" >"$inc/build.log"
 mkpkg "$inc" acl 1:2.3.2-1
 mkpkg "$inc" acl-debug 1:2.3.2-1
-: >"$inc/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig"   # carried through as provenance
+: >"$inc/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig"   # carried through to the signer
 "$job" report "$id" success
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 [[ $(<"$ARCHCI_HOME/built/core-x86_64/acl") == "1:2.3.2-1 1111111111111111111111111111111111111111" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/core/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 [[ -f $ARCHCI_HOME/repo/core/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"
-[[ ! -e $ARCHCI_HOME/repo/core/os/x86_64/core.db.tar.gz ]] || fail "db must not exist before indexing"
-[[ -e $ARCHCI_HOME/index.needed ]] || fail "index flag missing"
+[[ -e $ARCHCI_HOME/stage.needed ]] || fail "stage flag missing"
 [[ -f $ARCHCI_HOME/logs/core/acl/1:2.3.2-1/attempt-1.log ]] || fail "log not archived"
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next") == "5 core linux "* ]] || fail "built package must not be outstanding"
-# ARCHCI_SIGN=0 in this test, so index adds the pooled packages straight away.
-"$index"
-[[ -f $ARCHCI_HOME/repo/core/os/x86_64/core.db.tar.gz ]] || fail "no core db after index"
-[[ -f $ARCHCI_HOME/repo/core-debug/os/x86_64/core-debug.db.tar.gz ]] || fail "no debug db after index"
-bsdtar -xOf "$ARCHCI_HOME/repo/core/os/x86_64/core.db.tar.gz" '*/desc' | grep -qxF 'acl-1:2.3.2-1-x86_64.pkg.tar.zst' || fail "acl not in db"
-[[ -e $ARCHCI_HOME/publish.needed ]] || fail "publish flag missing after index"
-rm -f "$ARCHCI_HOME/index.needed"; "$index"; [[ ! -e $ARCHCI_HOME/index.needed ]] || true  # idempotent, no-op
 
 echo "--- report failure, retry, give up"
 id=$(sed -n 's/^id=//p' < <("$job" claim worker-2))
@@ -136,25 +127,12 @@ rsync -a -e "$tmp/fakessh" "$tmp/out/" "master:$id/" || fail "rsync via rrsync"
 "$tmp/fakessh" master report "$id" success
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "report through shell"
 
-echo "--- signer ssh role: list unsigned, reindex, rsync repo, refuse job protocol"
-cat >"$tmp/signerssh" <<'SH'
-#!/bin/bash
-shift
-SSH_ORIGINAL_COMMAND="$*" exec "$ARCHCI_SHELL" signer
-SH
-chmod +x "$tmp/signerssh"
-"$tmp/signerssh" master unsigned | grep -q 'core/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst' || fail "signer unsigned list"
-rm -f "$ARCHCI_HOME/index.needed"; "$tmp/signerssh" master reindex
-[[ -e $ARCHCI_HOME/index.needed ]] || fail "signer reindex must set the flag"
-rsync -a -e "$tmp/signerssh" "master:core/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst" "$tmp/pulled.pkg" || fail "signer must rsync the repo"
-! "$tmp/signerssh" master claim x 2>/dev/null || fail "signer must not run the job protocol"
-
 echo "--- signing gate: two-stage builder + release signatures (real gpg)"
 gpgb=$tmp/gpg-builder gpgk=$tmp/gpg-keyring gpgr=$tmp/gpg-release gpgx=$tmp/gpg-attacker relpub=$tmp/gpg-relpub
 for h in "$gpgb" "$gpgk" "$gpgr" "$gpgx" "$relpub"; do mkdir -p "$h"; chmod 700 "$h"; done
-gpg --homedir "$gpgb" --batch --quick-generate-key 'archci-builder <b@t>' ed25519 sign never 2>/dev/null
-gpg --homedir "$gpgr" --batch --passphrase '' --quick-generate-key 'archci-release <r@t>' ed25519 sign never 2>/dev/null
-gpg --homedir "$gpgx" --batch --quick-generate-key 'evil <e@t>' ed25519 sign never 2>/dev/null
+gpg --homedir "$gpgb" --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'archci-builder <b@t>' ed25519 sign never 2>/dev/null
+gpg --homedir "$gpgr" --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'archci-release <r@t>' ed25519 sign never 2>/dev/null
+gpg --homedir "$gpgx" --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'evil <e@t>' ed25519 sign never 2>/dev/null
 gpg --homedir "$gpgb" --armor --export b@t | gpg --homedir "$gpgk" --batch --import 2>/dev/null   # trust only the real builder
 mkpkg "$tmp" gate 1-1; pk=$tmp/gate-1-1-x86_64.pkg.tar.zst
 gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$pk.buildsig" "$pk"
@@ -167,16 +145,59 @@ gpg --homedir "$relpub" --batch --verify "$pk.sig" "$pk" 2>/dev/null || fail "re
 printf tamper >>"$pk"
 ! gpg --homedir "$relpub" --batch --verify "$pk.sig" "$pk" 2>/dev/null || fail "tampered package must fail release verification"
 
-echo "--- ARCHCI_SIGN=1: index adds only signed packages"
-sh=$tmp/signtest; mkdir -p "$sh"/repo/core/os/x86_64 "$sh"/lock
-mkpkg "$sh/repo/core/os/x86_64" onlybuilt 1-1
-mkpkg "$sh/repo/core/os/x86_64" signed 1-1
-: >"$sh/repo/core/os/x86_64/signed-1-1-x86_64.pkg.tar.zst.sig"
-ARCHCI_SIGN=1 ARCHCI_HOME=$sh "$index" --force
-gdb=$sh/repo/core/os/x86_64/core.db.tar.gz
-[[ -f $gdb ]] || fail "sign-gate: db not built"
-bsdtar -xOf "$gdb" '*/desc' | grep -qxF 'signed-1-1-x86_64.pkg.tar.zst' || fail "signed package must be indexed"
-if bsdtar -xOf "$gdb" '*/desc' | grep -qxF 'onlybuilt-1-1-x86_64.pkg.tar.zst'; then fail "unsigned package must NOT be indexed"; fi
+echo "--- R2 transport: master stages, signer verifies+signs+publishes (fake rclone)"
+# A faithful stand-in for rclone: every remote is a local path.
+cat >"$tmp/rclone" <<'SH'
+#!/bin/bash
+sub=""; pos=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --transfers|--checkers|--config|--stats|--timeout|--contimeout) shift 2;;
+    -R|--*) shift;;
+    *) [[ -z $sub ]] && sub=$1 || pos+=("$1"); shift;;
+  esac
+done
+case $sub in
+  lsf) [[ -d ${pos[0]} ]] && (cd "${pos[0]}" && find . -type f -printf '%P\n');;
+  copyto) [[ -f ${pos[0]} ]] || exit 1; mkdir -p "$(dirname "${pos[1]}")"; cp "${pos[0]}" "${pos[1]}";;
+  deletefile) rm -f "${pos[0]}";;
+  move) if [[ -d ${pos[0]} ]]; then (cd "${pos[0]}" && find . -type f -printf '%P\n') | while IFS= read -r f; do
+          mkdir -p "$(dirname "${pos[1]}/$f")"; mv "${pos[0]}/$f" "${pos[1]}/$f"; done; fi;;
+esac
+exit 0
+SH
+chmod +x "$tmp/rclone"; export PATH="$tmp:$PATH"
+
+R2=$tmp/r2; staging=$R2/staging release=$R2/release
+export ARCHCI_R2_STAGING=$staging ARCHCI_R2_RELEASE=$release ARCHCI_RCLONE_CONFIG=/dev/null
+# reuse the trusted builder keyring ($gpgk) and release key ($gpgr) from above
+export ARCHCI_RELEASE_GNUPGHOME=$gpgr ARCHCI_RELEASE_KEY=archci-release
+export ARCHCI_BUILDER_KEYRING=$gpgk ARCHCI_SIGNER_HOME=$tmp/signer
+mkdir -p "$ARCHCI_SIGNER_HOME"
+
+# a good package (built + builder-signed by the trusted key) lands in the master pool
+mkpkg "$ARCHCI_HOME/repo/core/os/x86_64" hello 1-1
+hp=$ARCHCI_HOME/repo/core/os/x86_64/hello-1-1-x86_64.pkg.tar.zst
+gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$hp.buildsig" "$hp"
+# an untrusted package (signed by the attacker key) also lands in the pool
+mkpkg "$ARCHCI_HOME/repo/core/os/x86_64" evil 1-1
+ep=$ARCHCI_HOME/repo/core/os/x86_64/evil-1-1-x86_64.pkg.tar.zst
+gpg --homedir "$gpgx" --batch --detach-sign -u evil -o "$ep.buildsig" "$ep"
+
+"$here/../master/archci-stage" --force
+[[ ! -e $hp && ! -e $ep ]] || fail "stage must move packages out of the pool"
+[[ -f $staging/core/os/x86_64/hello-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not staged"
+
+"$here/../signer/archci-sign"
+# the trusted package is released and signed; the attacker package is rejected
+rel=$release/core/os/x86_64
+[[ -f $rel/hello-1-1-x86_64.pkg.tar.zst && -f $rel/hello-1-1-x86_64.pkg.tar.zst.sig ]] || fail "trusted package not released+signed"
+[[ ! -e $release/core/os/x86_64/evil-1-1-x86_64.pkg.tar.zst ]] || fail "attacker package must not be released"
+[[ -f $rel/core.db.tar.gz && -f $rel/core.db ]] || fail "release database (both names) missing"
+bsdtar -xOf "$rel/core.db.tar.gz" '*/desc' | grep -qxF 'hello-1-1-x86_64.pkg.tar.zst' || fail "hello not in release db"
+gpg --homedir "$relpub" --batch --verify "$rel/hello-1-1-x86_64.pkg.tar.zst.sig" "$rel/hello-1-1-x86_64.pkg.tar.zst" 2>/dev/null || fail "released signature must verify for clients"
+# staging is drained (both the released and the rejected package removed)
+[[ -z $(find "$staging" -name '*.pkg.tar.zst' 2>/dev/null) ]] || fail "staging must be drained"
 
 echo "--- status"
 "$status" | head -5

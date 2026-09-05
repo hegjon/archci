@@ -1,5 +1,5 @@
 [Unit]
-Description=archci: index new packages every 2 minutes
+Description=archci: stage packages every 2 minutes
 
 [Timer]
 OnBootSec=3min

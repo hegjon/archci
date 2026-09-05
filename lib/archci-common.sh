@@ -33,27 +33,25 @@ archci_load_conf
 : "${ARCHCI_STALE_MINUTES:=30}"
 : "${ARCHCI_RETRY_MINUTES:=180}"
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
-: "${ARCHCI_RCLONE_REMOTE:=}"
+# R2 (or any rclone remote). Master writes unsigned packages to STAGING; the
+# signer reads STAGING, signs, and writes the released repo to RELEASE. Both
+# empty = the R2 hand-off is idle. See README "Signing".
+: "${ARCHCI_R2_STAGING:=}"
+: "${ARCHCI_R2_RELEASE:=}"
 : "${ARCHCI_RCLONE_CONFIG:=/etc/archci/rclone.conf}"
 # --- signing (see README "Signing") -------------------------------------------
 # Master holds NO key. Workers sign each package with a builder key (internal
-# provenance); the signer droplet verifies that and adds the client-facing
-# release signature. ARCHCI_SIGN gates the whole thing: 0 = index/serve
-# packages unsigned (fine while there is no signer yet), 1 = only signed
-# packages enter the database.
-: "${ARCHCI_SIGN:=0}"
+# provenance); the signer droplet verifies that, adds the client-facing release
+# signature, builds the database, and publishes the released repo.
 # Worker: gpg home holding the builder secret key, and its key id/uid.
 : "${ARCHCI_BUILDER_GNUPGHOME:=/etc/archci/builder-gnupg}"
 : "${ARCHCI_BUILDER_KEY:=archci-builder}"
-# Signer: ssh destination of the master, gpg home with the release SECRET key
-# (passphrase-protected, unlocked through gpg-agent) plus the authorized
-# builder PUBLIC keys, and the release key id/uid.
-: "${ARCHCI_SIGNER_MASTER:=${ARCHCI_MASTER:-archci@master}}"
+# Signer: gpg home with the release SECRET key (passphrase-protected, unlocked
+# through gpg-agent) plus the authorized builder PUBLIC keys, and the key id.
 : "${ARCHCI_RELEASE_GNUPGHOME:=/etc/archci/release-gnupg}"
 : "${ARCHCI_RELEASE_KEY:=archci-release}"
 : "${ARCHCI_BUILDER_KEYRING:=/etc/archci/builder-keyring}"
 : "${ARCHCI_SIGNER_HOME:=/var/lib/archci-signer}"
-: "${ARCHCI_SIGNER_KEY:=/etc/archci/signer_key}"
 : "${ARCHCI_SNAPSHOTS:=5}"
 : "${ARCHCI_MASTER:=archci@master}"
 : "${ARCHCI_JOURNAL_URL:=http://${ARCHCI_MASTER#*@}:19532}"

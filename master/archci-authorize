@@ -1,12 +1,10 @@
 #!/bin/bash
-# archci-authorize [--signer] PUBKEY -- let a worker (or the signer) key talk to this master.
+# archci-authorize PUBKEY -- let a worker key talk to this master.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-role=worker
-if [[ ${1:-} == --signer ]]; then role=signer; shift; fi
 key=${1:-}
-[[ -n $key ]] || archci_die "usage: archci-authorize [--signer] PUBKEY-FILE | 'ssh-ed25519 AAAA... comment'"
+[[ -n $key ]] || archci_die "usage: archci-authorize PUBKEY-FILE | 'ssh-ed25519 AAAA... comment'"
 [[ -f $key ]] && key=$(<"$key")
 [[ $key =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9-]+@openssh.com)\ [A-Za-z0-9+/=]+ ]] || archci_die "that does not look like a public key"
 
@@ -16,9 +14,7 @@ touch "$akf"
 if grep -qF "${BASH_REMATCH[0]}" "$akf"; then
 	archci_log "key already authorized"
 else
-	cmd=$ARCHCI_MASTER_DIR/archci-shell
-	[[ $role == signer ]] && cmd="$cmd signer"
-	printf 'command="%s",restrict %s\n' "$cmd" "$key" >>"$akf"
+	printf 'command="%s",restrict %s\n' "$ARCHCI_MASTER_DIR/archci-shell" "$key" >>"$akf"
 	archci_log "authorized: ${key##* }"
 fi
 chown archci:archci "$akf"

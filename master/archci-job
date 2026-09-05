@@ -108,9 +108,10 @@ cmd_heartbeat() {
 }
 
 # Pool built packages and record what was built. The master holds no key and
-# does not build the database here; archci-index does that once packages carry
-# a release signature (see README "Signing"). Each package keeps its builder
-# signature (.buildsig) alongside for the signer to verify.
+# does not build the database; the signer does, from released (signed)
+# packages (see README "Signing"). Each package keeps its builder signature
+# (.buildsig) alongside for the signer to verify, then archci-stage moves both
+# to the R2 staging area.
 ingest() {
 	local id=$1 inc=$2 p
 	shopt -s nullglob
@@ -133,12 +134,12 @@ ingest() {
 			mkdir -p "$dir"
 			mv "$p" "$dir/$base" || exit 1
 			# builder signature travels with the package; the signer verifies it
-			[[ -f $p.buildsig ]] && mv "$p.buildsig" "$dir/$base.buildsig"
+			if [[ -f $p.buildsig ]]; then mv "$p.buildsig" "$dir/$base.buildsig"; fi
 		done
 	) || return 1
 	mkdir -p "$ARCHCI_HOME/built/$job_repo-$job_arch"
 	printf '%s %s\n' "$job_version" "$job_commit" >"$ARCHCI_HOME/built/$job_repo-$job_arch/$job_pkgbase"
-	touch "$ARCHCI_HOME/index.needed"
+	touch "$ARCHCI_HOME/stage.needed"
 	archci_log "$id: pooled ${#pkgs[@]} package(s) for [$job_repo]"
 }
 

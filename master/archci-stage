@@ -1,0 +1,30 @@
+#!/bin/bash
+# archci-stage -- push pooled (unsigned) packages to the R2 staging area.
+# Runs as the archci user on a timer. The master holds no key and builds no
+# database; it just moves each package and its builder signature to STAGING,
+# where the signer picks it up (see README "Signing"). rclone move copies then
+# removes the local file, so the master keeps only packages not yet staged.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+
+flag=$ARCHCI_HOME/stage.needed
+[[ ${1:-} == --force ]] || [[ -e $flag ]] || exit 0
+if [[ -z $ARCHCI_R2_STAGING ]]; then
+	archci_log "ARCHCI_R2_STAGING is empty, not staging"
+	exit 0
+fi
+command -v rclone >/dev/null || archci_die "rclone is not installed"
+
+exec 9>"$ARCHCI_HOME/lock/repo.lock"
+flock 9
+rm -f "$flag"
+
+export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
+pool=$ARCHCI_HOME/repo
+[[ -d $pool ]] || exit 0
+# Move packages and their builder signatures; nothing else lives in the pool.
+before=$(find "$pool" -name '*.pkg.tar.zst' | wc -l)
+rclone move "$pool" "$ARCHCI_R2_STAGING" --transfers 8 --checkers 16 --no-traverse
+find "$pool" -type d -empty -delete 2>/dev/null || true
+(( before )) && archci_log "staged $before package(s) to $ARCHCI_R2_STAGING"
+exit 0

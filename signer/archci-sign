@@ -1,94 +1,107 @@
 #!/bin/bash
-# archci-sign [--unlock|--once] -- add the client-facing release signature to
-# packages the master has pooled. Runs on the signer droplet (root) on a timer.
+# archci-sign [--unlock] -- release-sign packages the master staged to R2.
 #
-# For each package the master reports as unsigned it fetches the package and its
-# builder signature, verifies the builder signature against the authorized
-# builder keyring, then makes a detached release signature with the release key
-# and pushes only that <pkg>.sig back to the master. The release private key
-# (passphrase-protected) never leaves this host; the master stays keyless.
+# Runs on the signer droplet (root) on a timer. It talks only to R2, never to
+# the master. For every package in the STAGING area it: pulls the package and
+# its builder signature, verifies the builder signature against the authorized
+# builder keyring, makes the client-facing release signature with the release
+# key, adds the package to the release database (repo-add), publishes package +
+# .sig + database to the RELEASE area, and deletes the package from STAGING.
+# The release private key (passphrase-protected) never leaves this host.
 #
-#   --unlock   prime gpg-agent with the release passphrase (pinentry once), then exit
-#   --once     run even if another archci-sign holds the lock is NOT implied; just a no-op flag for clarity
+#   --unlock   prime gpg-agent with the release passphrase (once per session)
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-export GNUPGHOME=$ARCHCI_RELEASE_GNUPGHOME
-release_sign() {  # release_sign FILE -> writes FILE.sig
-	gpg --homedir "$ARCHCI_RELEASE_GNUPGHOME" --batch --yes --pinentry-mode loopback \
-		--detach-sign -u "$ARCHCI_RELEASE_KEY" -o "$1.sig" "$1" 2>/dev/null
-}
+release_sign() { gpg --homedir "$ARCHCI_RELEASE_GNUPGHOME" --batch --yes --pinentry-mode loopback \
+	--detach-sign -u "$ARCHCI_RELEASE_KEY" -o "$1.sig" "$1" 2>/dev/null; }
 
 if [[ ${1:-} == --unlock ]]; then
-	# Sign a throwaway file so the passphrase lands in gpg-agent's cache (raise
-	# default-cache-ttl in the homedir's agent conf). Normally pinentry prompts
-	# once; set ARCHCI_RELEASE_PASSPHRASE to unlock without a prompt (for
-	# automation/testing -- keep it out of the persistent environment).
 	tmp=$(mktemp); : >"$tmp"
 	unlock=(gpg --homedir "$ARCHCI_RELEASE_GNUPGHOME" --detach-sign -u "$ARCHCI_RELEASE_KEY" -o /dev/null)
-	if [[ -n ${ARCHCI_RELEASE_PASSPHRASE:-} ]]; then
-		unlock=("${unlock[@]}" --pinentry-mode loopback --passphrase "$ARCHCI_RELEASE_PASSPHRASE")
-	fi
-	if "${unlock[@]}" "$tmp"; then
-		archci_log "release key unlocked; gpg-agent will cache it"
-	else
-		rm -f "$tmp"; archci_die "could not unlock the release key"
-	fi
+	[[ -n ${ARCHCI_RELEASE_PASSPHRASE:-} ]] && unlock=("${unlock[@]}" --pinentry-mode loopback --passphrase "$ARCHCI_RELEASE_PASSPHRASE")
+	if "${unlock[@]}" "$tmp"; then archci_log "release key unlocked; gpg-agent will cache it"
+	else rm -f "$tmp"; archci_die "could not unlock the release key"; fi
 	rm -f "$tmp"; exit 0
 fi
 
-[[ -r $ARCHCI_SIGNER_KEY ]] || archci_die "no ssh key at $ARCHCI_SIGNER_KEY (run install.sh signer, authorize it on the master with: archci-authorize --signer)"
+[[ -n $ARCHCI_R2_STAGING && -n $ARCHCI_R2_RELEASE ]] || archci_die "set ARCHCI_R2_STAGING and ARCHCI_R2_RELEASE"
+command -v rclone >/dev/null || archci_die "rclone is not installed"
 [[ -d $ARCHCI_RELEASE_GNUPGHOME ]] || archci_die "no release keyring at $ARCHCI_RELEASE_GNUPGHOME"
-[[ -d $ARCHCI_BUILDER_KEYRING ]] || archci_die "no builder keyring at $ARCHCI_BUILDER_KEYRING (authorize builder keys with archci-authorize-builder)"
+[[ -d $ARCHCI_BUILDER_KEYRING ]] || archci_die "no builder keyring at $ARCHCI_BUILDER_KEYRING (archci-authorize-builder)"
 
 exec 9>"$ARCHCI_SIGNER_HOME/sign.lock"
 flock -n 9 || { archci_log "another archci-sign is running"; exit 0; }
 
-ssh_opts=(-i "$ARCHCI_SIGNER_KEY" -o BatchMode=yes -o ConnectTimeout=30
-	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
-master() { ssh "${ssh_opts[@]}" "$ARCHCI_SIGNER_MASTER" "$@"; }
-
+export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
 work=$ARCHCI_SIGNER_HOME/work
-mkdir -p "$work"
+localrepo=$ARCHCI_SIGNER_HOME/repo         # persistent home of the release databases
+rm -rf "$work"; mkdir -p "$work" "$localrepo"
 
-mapfile -t unsigned < <(master unsigned || true)
-if (( ${#unsigned[@]} == 0 )); then
-	exit 0
-fi
-archci_log "release-signing ${#unsigned[@]} package(s)"
+mapfile -t rels < <(rclone lsf -R --files-only "$ARCHCI_R2_STAGING" 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
+(( ${#rels[@]} )) || exit 0
+archci_log "staging holds ${#rels[@]} package(s) to sign"
 
+declare -A touched=()
 signed=0 rejected=0
-for rel in "${unsigned[@]}"; do
-	# rel is a path relative to the master's repo/, e.g. core/os/x86_64/acl-...pkg.tar.zst
-	[[ $rel == *..* || $rel == /* ]] && { archci_log "skipping suspicious path: $rel"; continue; }
-	dst=$work/$rel
-	mkdir -p "$(dirname "$dst")"
-	# Fetch the package and its builder signature (rrsync jails this to repo/).
-	if ! rsync -a --timeout=120 -e "ssh ${ssh_opts[*]}" \
-			"$ARCHCI_SIGNER_MASTER:$rel" "$ARCHCI_SIGNER_MASTER:$rel.buildsig" "$(dirname "$dst")/" 2>/dev/null; then
-		archci_log "could not fetch $rel (or it has no builder signature), skipping"
-		continue
-	fi
-	# Verify the builder signature: the key must be an authorized builder.
-	if ! gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --verify "$dst.buildsig" "$dst" 2>/dev/null; then
-		archci_log "REJECT $rel: builder signature missing, invalid, or from an unknown key"
-		rm -f "$dst" "$dst.buildsig"
+for rel in "${rels[@]}"; do
+	[[ $rel == *..* || $rel == /* ]] && { archci_log "skip suspicious path: $rel"; continue; }
+	reldir=${rel%/*}; db=${rel%%/*}
+	mkdir -p "$work/$reldir" "$localrepo/$reldir"
+	if ! rclone copyto "$ARCHCI_R2_STAGING/$rel" "$work/$rel" 2>/dev/null \
+	   || ! rclone copyto "$ARCHCI_R2_STAGING/$rel.buildsig" "$work/$rel.buildsig" 2>/dev/null; then
+		archci_log "REJECT $rel: could not fetch package or builder signature"
+		rclone deletefile "$ARCHCI_R2_STAGING/$rel" 2>/dev/null || true
+		rclone deletefile "$ARCHCI_R2_STAGING/$rel.buildsig" 2>/dev/null || true
 		(( ++rejected )); continue
 	fi
-	# Make the release signature and push it back.
-	if ! release_sign "$dst"; then
+	if ! gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --verify "$work/$rel.buildsig" "$work/$rel" 2>/dev/null; then
+		archci_log "REJECT $rel: builder signature invalid or from an unknown key"
+		rclone deletefile "$ARCHCI_R2_STAGING/$rel" 2>/dev/null || true
+		rclone deletefile "$ARCHCI_R2_STAGING/$rel.buildsig" 2>/dev/null || true
+		rm -f "$work/$rel" "$work/$rel.buildsig"; (( ++rejected )); continue
+	fi
+	if ! release_sign "$work/$rel"; then
 		archci_log "release key is locked; run 'archci-sign --unlock' on the signer"
-		rm -f "$dst" "$dst.buildsig"
 		break
 	fi
-	if rsync -a --timeout=120 -e "ssh ${ssh_opts[*]}" "$dst.sig" "$ARCHCI_SIGNER_MASTER:$rel.sig"; then
-		(( ++signed ))
-	else
-		archci_log "could not upload signature for $rel"
+	# publish package + signature to the release area
+	rclone copyto "$work/$rel" "$ARCHCI_R2_RELEASE/$rel"
+	rclone copyto "$work/$rel.sig" "$ARCHCI_R2_RELEASE/$rel.sig"
+	# add to the release database (seed the local db from release on a fresh signer)
+	if [[ ! -f $localrepo/$reldir/$db.db.tar.gz ]]; then
+		rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.db.tar.gz" "$localrepo/$reldir/$db.db.tar.gz" 2>/dev/null || true
+		rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.files.tar.gz" "$localrepo/$reldir/$db.files.tar.gz" 2>/dev/null || true
 	fi
-	rm -f "$dst" "$dst.buildsig" "$dst.sig"
+	cp "$work/$rel" "$localrepo/$rel"
+	repo-add -R -q "$localrepo/$reldir/$db.db.tar.gz" "$localrepo/$rel" >/dev/null
+	rm -f "$localrepo/$rel"                       # keep only the database locally
+	touched[$reldir]=$db
+	rclone deletefile "$ARCHCI_R2_STAGING/$rel" 2>/dev/null || true
+	rclone deletefile "$ARCHCI_R2_STAGING/$rel.buildsig" 2>/dev/null || true
+	rm -f "$work/$rel" "$work/$rel.buildsig" "$work/$rel.sig"
+	(( ++signed ))
+done
+
+# publish the updated databases (as <db>.db.tar.gz and the <db>.db clients fetch)
+for reldir in "${!touched[@]}"; do
+	db=${touched[$reldir]}
+	for pair in "db.tar.gz:db" "files.tar.gz:files"; do
+		src=$localrepo/$reldir/$db.${pair%%:*}
+		[[ -f $src ]] || continue
+		rclone copyto "$src" "$ARCHCI_R2_RELEASE/$reldir/$db.${pair%%:*}"
+		rclone copyto "$src" "$ARCHCI_R2_RELEASE/$reldir/$db.${pair##*:}"
+	done
+	# prune release packages no longer in the database (superseded versions)
+	mapfile -t indb < <(bsdtar -xOf "$localrepo/$reldir/$db.db.tar.gz" '*/desc' 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
+	while IFS= read -r f; do
+		[[ $f == *.pkg.tar.zst ]] || continue
+		printf '%s\n' "${indb[@]}" | grep -qxF "$f" && continue
+		archci_log "pruning superseded $reldir/$f from release"
+		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f" 2>/dev/null || true
+		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f.sig" 2>/dev/null || true
+	done < <(rclone lsf --files-only "$ARCHCI_R2_RELEASE/$reldir" 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
 done
 
 archci_log "signed $signed, rejected $rejected"
-(( signed )) && master reindex || true
 exit 0

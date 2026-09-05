@@ -1,9 +1,10 @@
 [Unit]
-Description=archci: publish repo and logs to Cloudflare R2
+Description=archci: push pooled packages to the R2 staging area
 After=network-online.target
 Wants=network-online.target
 RequiresMountsFor=/var/lib/archci
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/archci-publish
+User=archci
+ExecStart=/usr/local/bin/archci-stage
