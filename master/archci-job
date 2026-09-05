@@ -1,7 +1,9 @@
 #!/bin/bash
 # archci-job -- master-side queue operations (runs as the archci user).
 #
-#   claim WORKER              hand the first pending job to WORKER and print it
+#   claim WORKER              hand the next job to WORKER and print it: the first
+#                             pending file, else the next outstanding package
+#                             (archci-next), chosen just in time
 #   heartbeat ID              mark a running job as still alive
 #   report ID STATUS          finish a job: success | failure | abandoned
 #                             (results are expected in incoming/ID/)
@@ -11,7 +13,8 @@
 #   reap                      requeue stale running jobs and due retries, prune done/
 #
 # Jobs are files; moving them between queue/{pending,running,done,failed} is
-# the whole state machine. Everything that touches the queue takes queue.lock.
+# the whole state machine. The backlog is never stored: pending/ only holds
+# manual enqueues and retries. Everything that touches the queue takes queue.lock.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -45,6 +48,26 @@ requeue_file() {  # requeue_file FILE  (lock held)
 	rm -rf "${ARCHCI_HOME:?}/incoming/${name%.job}"
 }
 
+# write_job DEST PRIO REPO PKGBASE VERSION TAG COMMIT -> prints the file name
+write_job() {
+	local dest=$1 prio=$2 repo=$3 pkgbase=$4 version=$5 tag=$6 commit=$7 id
+	id="$prio-$(date +%s)-$repo,$pkgbase,$version"
+	archci_valid_id "$id" || archci_die "cannot form a valid job id for $repo/$pkgbase $version"
+	cat >"$dest/$id.job.tmp" <<-JOB
+		id=$id
+		repo=$repo
+		arch=$ARCHCI_ARCH
+		pkgbase=$pkgbase
+		version=$version
+		tag=$tag
+		commit=$commit
+		attempt=0
+		created=$(archci_now)
+	JOB
+	mv "$dest/$id.job.tmp" "$dest/$id.job"
+	printf '%s\n' "$id.job"
+}
+
 find_job() {  # find_job ID DIR... -> path
 	local id=$1 d
 	shift
@@ -60,7 +83,13 @@ cmd_claim() {
 	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
 	lock_queue
 	name=$(cd "$Q_PENDING" && LC_ALL=C ls -1 2>/dev/null | grep '\.job$' | sort | head -n1 || true)
-	[[ -n $name ]] || exit 0
+	if [[ -z $name ]]; then
+		# Nothing queued by hand or for retry: pick the next outstanding package now.
+		local prio repo pkgbase version tag commit
+		read -r prio repo pkgbase version tag commit < <("$ARCHCI_MASTER_DIR/archci-next") || true
+		[[ -n ${commit:-} ]] || exit 0
+		name=$(write_job "$Q_PENDING" "$prio" "$repo" "$pkgbase" "$version" "$tag" "$commit")
+	fi
 	mv "$Q_PENDING/$name" "$Q_RUNNING/$name"
 	archci_read_job "$Q_RUNNING/$name" || archci_die "corrupt job file $name"
 	rewrite_job "$Q_RUNNING/$name" "$Q_RUNNING/$name" \
@@ -180,34 +209,21 @@ cmd_retry() {
 }
 
 cmd_enqueue() {
-	local repo=$1 pkgbase=$2 prio=${3:-0} statefile name version tag commit id old
+	local repo=$1 pkgbase=$2 prio=${3:-0} statefile name version tag commit old
 	statefile=$ARCHCI_HOME/state/$repo-$ARCHCI_ARCH/$pkgbase
 	[[ -f $statefile ]] || archci_die "no state entry $repo-$ARCHCI_ARCH/$pkgbase (run archci-scan first?)"
 	read -r name version tag commit <"$statefile"
 	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected state line in $statefile"
-	id="$prio-$(date +%s)-$repo,$pkgbase,$version"
-	archci_valid_id "$id" || archci_die "cannot form a valid job id for $repo/$pkgbase $version"
 	lock_queue
 	for old in "$Q_PENDING"/*-"$repo,$pkgbase,"*.job; do
 		[[ -e $old ]] && rm -f "$old"
 	done
-	cat >"$Q_PENDING/$id.job.tmp" <<-JOB
-		id=$id
-		repo=$repo
-		arch=$ARCHCI_ARCH
-		pkgbase=$pkgbase
-		version=$version
-		tag=$tag
-		commit=$commit
-		attempt=0
-		created=$(archci_now)
-	JOB
-	mv "$Q_PENDING/$id.job.tmp" "$Q_PENDING/$id.job"
-	archci_log "enqueued $id"
+	name=$(write_job "$Q_PENDING" "$prio" "$repo" "$pkgbase" "$version" "$tag" "$commit")
+	archci_log "enqueued ${name%.job}"
 }
 
 cmd_reap() {
-	local now file age n=0
+	local now file age commit n=0
 	now=$(date +%s)
 	lock_queue
 	shopt -s nullglob
@@ -218,6 +234,16 @@ cmd_reap() {
 		archci_log "$job_id: no heartbeat from $job_worker for $((age / 60)) min, requeueing"
 		requeue_file "$file"
 		(( ++n ))
+	done
+	# A newer release supersedes queued and failed jobs; claim picks the new commit up.
+	for file in "$Q_PENDING"/*.job "$Q_FAILED"/*.job; do
+		archci_read_job "$file" || continue
+		[[ -f $ARCHCI_HOME/state/$job_repo-$job_arch/$job_pkgbase ]] || continue
+		read -r _ _ _ commit <"$ARCHCI_HOME/state/$job_repo-$job_arch/$job_pkgbase"
+		if [[ -n $commit && $commit != "$job_commit" ]]; then
+			archci_log "$job_id: superseded by commit ${commit:0:12}, dropping"
+			rm -f "$file"
+		fi
 	done
 	for file in "$Q_FAILED"/*.job; do
 		archci_read_job "$file" || continue

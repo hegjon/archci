@@ -1,17 +1,16 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# archci-scan -- sync archlinux/packaging/state and enqueue a build job for
-# every pkgbase whose released commit is not the one we last built.
+# archci-scan -- sync archlinux/packaging/state and report what is outstanding.
 #
 # The state repo has one file per package in <repo>-<arch>/<pkgbase>:
 #   "<pkgbase> <version> <tag> <commit>"
-# Our record of success is built/<repo>-<arch>/<pkgbase>: "<version> <commit>".
+# Nothing is queued here: archci-job claim asks archci-next for the next
+# package just in time, comparing state/ with built/<repo>-<arch>/<pkgbase>.
 require_relative '../lib/archci'
 
 cfg = Archci.config
 home = Archci.home
-arch = cfg['ARCHCI_ARCH']
 state = File.join(home, 'state')
 
 File.open(File.join(home, 'lock', 'scan.lock'), File::RDWR | File::CREAT) do |lock|
@@ -26,68 +25,8 @@ File.open(File.join(home, 'lock', 'scan.lock'), File::RDWR | File::CREAT) do |lo
     ok = system('git', 'clone', '-q', '--depth=1', cfg['ARCHCI_STATE_URL'], state)
   end
   abort 'archci-scan: could not sync the state repo' unless ok
-
-  # Everything queued, running or parked as failed, keyed by repo/pkgbase.
-  queued = Hash.new { |h, k| h[k] = [] }
-  %w[pending running failed].each do |q|
-    Archci.jobs(q).each { |j| queued[[j['repo'], j['pkgbase']]] << j.merge('queue' => q) }
-  end
-
-  now = Time.now.to_i
-  enqueued = 0
-  skipped_running = 0
-  seen = 0
-
-  cfg['ARCHCI_REPOS'].split.each do |repo|
-    dir = File.join(state, "#{repo}-#{arch}")
-    unless File.directory?(dir)
-      Archci.log "no such state directory #{repo}-#{arch}, check ARCHCI_REPOS"
-      next
-    end
-
-    Dir.children(dir).sort.each do |name|
-      pkgbase, version, tag, commit = File.read(File.join(dir, name)).split
-      next unless pkgbase && version && tag && commit && pkgbase == name
-
-      seen += 1
-      built_file = File.join(home, 'built', "#{repo}-#{arch}", pkgbase)
-      built = File.exist?(built_file) ? File.read(built_file).strip : nil
-      next if built == "#{version} #{commit}"
-
-      existing = queued[[repo, pkgbase]]
-      # Already queued for this exact commit (or failed for good at it): nothing to do.
-      next if existing.any? { |j| j['commit'] == commit }
-      # Let a running build finish; the next scan sees the newer commit anyway.
-      if existing.any? { |j| j['queue'] == 'running' }
-        skipped_running += 1
-        next
-      end
-      # Superseded pending/failed jobs for an older commit are dropped.
-      existing.each do |j|
-        File.delete(j['path'])
-        Archci.log "dropped #{j['id']} (#{j['queue']}), superseded by #{version}"
-      rescue Errno::ENOENT
-        nil
-      end
-
-      # Updates to something we already publish come before the backlog.
-      prio = built ? 1 : 5
-      id = "#{prio}-#{now}-#{repo},#{pkgbase},#{version}"
-      Archci.write_atomic(File.join(Archci.queue('pending'), "#{id}.job"), <<~JOB)
-        id=#{id}
-        repo=#{repo}
-        arch=#{arch}
-        pkgbase=#{pkgbase}
-        version=#{version}
-        tag=#{tag}
-        commit=#{commit}
-        attempt=0
-        created=#{Time.now.utc.iso8601}
-      JOB
-      enqueued += 1
-    end
-  end
-
-  Archci.log "scanned #{seen} packages, enqueued #{enqueued}, #{skipped_running} running" \
-             " (pending now #{Dir.glob(File.join(Archci.queue('pending'), '*.job')).size})"
 end
+
+outstanding = Archci.outstanding
+updates = outstanding.count { |e| e['prio'] == 1 }
+Archci.log "state synced: #{updates} update(s) and #{outstanding.size - updates} unbuilt package(s) outstanding"

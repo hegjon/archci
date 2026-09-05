@@ -17,6 +17,9 @@ tracked = cfg['ARCHCI_REPOS'].split.to_h do |repo|
   [repo, Dir.glob(File.join(home, 'state', "#{repo}-#{arch}", '*')).size]
 end
 
+outstanding = Archci.outstanding
+updates = outstanding.count { |e| e['prio'] == 1 }
+
 running = Archci.jobs('running').map do |j|
   { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'],
     'worker' => j['worker'], 'attempt' => j['attempt'], 'claimed' => j['claimed'],
@@ -38,6 +41,7 @@ report = {
   'generated' => now.utc.iso8601,
   'arch' => arch,
   'queue' => counts,
+  'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
   'tracked' => tracked,
   'built' => built,
   'workers' => workers,
@@ -54,6 +58,7 @@ end
 puts "archci master status  (#{report['generated']})"
 puts
 puts format('  queue: %s', counts.map { |q, n| "#{q}=#{n}" }.join('  '))
+puts format('  outstanding: %d update(s), %d unbuilt', updates, outstanding.size - updates)
 puts format('  built: %s', built.map { |r, n| "#{r} #{n}/#{tracked[r]}" }.join('  '))
 puts
 unless running.empty?

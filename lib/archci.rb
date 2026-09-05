@@ -65,6 +65,46 @@ module Archci
     Dir.glob(File.join(queue(queue_name), '*.job')).sort.filter_map { |p| read_job(p) }
   end
 
+  # Packages whose released commit is not the one we last built, in claim
+  # order: updates of packages we already publish first, then the backlog.
+  # Nothing is stored; this is computed from state/, built/ and the queue on
+  # every call (about 13,000 small files for core+extra, well under a second).
+  #   limit: stop as soon as this many candidates are known
+  def self.outstanding(limit: nil)
+    cfg = config
+    arch = cfg['ARCHCI_ARCH']
+    state = File.join(home, 'state')
+    running = jobs('running').to_h { |j| [[j['repo'], j['pkgbase']], true] }
+    queued = Hash.new { |h, k| h[k] = [] } # pending or failed, by commit
+    %w[pending failed].each do |q|
+      jobs(q).each { |j| queued[[j['repo'], j['pkgbase']]] << j['commit'] }
+    end
+
+    updates = []
+    backlog = []
+    cfg['ARCHCI_REPOS'].split.each do |repo|
+      dir = File.join(state, "#{repo}-#{arch}")
+      next unless File.directory?(dir)
+
+      Dir.children(dir).sort.each do |name|
+        pkgbase, version, tag, commit = File.read(File.join(dir, name)).split
+        next unless pkgbase == name && version && tag && commit
+
+        built_file = File.join(home, 'built', "#{repo}-#{arch}", pkgbase)
+        built = File.exist?(built_file) ? File.read(built_file).strip : nil
+        next if built == "#{version} #{commit}"
+        next if running[[repo, pkgbase]]            # one build per package at a time
+        next if queued[[repo, pkgbase]].include?(commit) # queued, in retry backoff, or given up
+
+        entry = { 'repo' => repo, 'pkgbase' => pkgbase, 'version' => version, 'tag' => tag,
+                  'commit' => commit, 'prio' => built ? 1 : 5 }
+        (built ? updates : backlog) << entry
+        return updates if limit && updates.size >= limit
+      end
+    end
+    limit ? (updates + backlog).first(limit) : updates + backlog
+  end
+
   def self.log(msg)
     warn "#{File.basename($PROGRAM_NAME)}: #{msg}"
     return if ENV['JOURNAL_STREAM']

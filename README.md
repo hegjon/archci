@@ -34,17 +34,21 @@ is the whole state machine.
 
 ## How it works
 
-**Scanning.** `archci-scan` (ruby, every 10 min) pulls the state repo. Each file
-`<repo>-<arch>/<pkgbase>` there holds `pkgbase version tag commit`. It compares
-that with `built/<repo>-<arch>/<pkgbase>` (`version commit` of the last
-successful build) and writes a job file into `queue/pending/` for every
-difference. Updates to packages already in our repo get priority 1, the
-never-built backlog priority 5, manual enqueues 0. A newer release replaces a
-pending or failed job for the same package; a running one is left alone.
+**Scanning.** `archci-scan` (ruby, every 10 min) only pulls the state repo.
+Each file `<repo>-<arch>/<pkgbase>` there holds `pkgbase version tag commit`.
+The backlog is never written down: when a worker asks for work, `archci-next`
+walks the state files and compares each with `built/<repo>-<arch>/<pkgbase>`
+(`version commit` of the last successful build), skipping packages that are
+running, queued, waiting for a retry or given up on. Updates to packages
+already in our repo come first, then the never-built rest, alphabetically.
+That walk is about 13,000 small files for core plus extra and takes well
+under a second, once per claim.
 
 **Workers.** `archci-worker@N` runs `ssh master claim <host>-N`. The master's
-forced command (`archci-shell`) moves the first pending job to `running/`,
-stamps the worker name and attempt, and prints it. The worker then:
+forced command (`archci-shell`) takes the first file in `queue/pending/`
+(manual enqueues and retries), or else asks `archci-next` for the next
+outstanding package and writes a job for it. The job goes to `running/`
+stamped with the worker name and attempt, and is printed. The worker then:
 
 1. fetches the packaging repo at exactly the released commit
    (`archci-build` maps pkgbase to the GitLab path the same way devtools does),
@@ -72,7 +76,9 @@ a worker can be destroyed at any time. On `systemctl stop` the worker reports
 `repo/<repo>/os/<arch>/`, added with `repo-add -R` (debug packages go to
 `<repo>-debug`), and the built record is written. Failures keep their log
 under `logs/<repo>/<pkgbase>/<version>/attempt-N.log` and are retried after
-3 hours, up to 3 attempts. `archci-publish` (root, every 5 min, only when
+3 hours, up to 3 attempts. A newer upstream release drops any pending or
+failed job for the older commit; the new commit is simply outstanding again.
+`archci-publish` (root, every 5 min, only when
 something changed) optionally snapshots `repo/`, then uploads packages before
 databases so clients never see a dangling db entry, then logs and
 `status.json`.
@@ -87,7 +93,7 @@ rebuild.
 
 ```
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
-master/   archci-scan, archci-job, archci-shell, archci-authorize, archci-publish, archci-status
+master/   archci-scan, archci-next, archci-job, archci-shell, archci-authorize, archci-publish, archci-status
 worker/   archci-worker, archci-build
 systemd/  scan, reaper and publish timers (master); archci-worker@.service and
           archci-build@.service (worker); journal-remote drop-ins for the master
@@ -231,6 +237,7 @@ the plain-HTTP listener.
 ```
 archci-status                       queue counts, running builds, recent failures
 archci-status --json                same as published to R2 as status.json
+archci-next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
 journalctl -u archci-publish        uploads
@@ -248,8 +255,9 @@ without network or root.
 
 ## Notes and limits
 
-- The first scan enqueues every package in `ARCHCI_REPOS` (about 13,000 for
-  core+extra). Order is priority, then enqueue time, then name.
+- Nothing is queued up front: with an empty `built/`, every package in
+  `ARCHCI_REPOS` (about 13,000 for core+extra) is outstanding and gets built
+  in repo order, then name order, as workers ask for work.
 - Packages are built independently against the official mirrors. If the
   mirror the worker uses lags behind the state repo, a build that needs the
   newer dependency fails and is retried later.

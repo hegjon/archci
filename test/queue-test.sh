@@ -1,7 +1,7 @@
 #!/bin/bash
 # Exercise the master queue on a throwaway ARCHCI_HOME without network or root:
-# scan (from a fake state repo) -> claim -> heartbeat -> report success/failure
-# -> reap. Fake packages are empty files; repo-add still builds a real db.
+# scan (from a fake state repo) -> just-in-time claim -> heartbeat -> report
+# success/failure -> reap. Fake packages are minimal but real enough for repo-add.
 set -euo pipefail
 here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 tmp=$(mktemp -d)
@@ -10,6 +10,7 @@ export ARCHCI_CONF=/dev/null ARCHCI_HOME=$tmp/home ARCHCI_REPOS="core extra" ARC
 export ARCHCI_MAX_ATTEMPTS=2 ARCHCI_STALE_MINUTES=0 ARCHCI_RETRY_MINUTES=0 JOURNAL_STREAM=1
 job=$here/../master/archci-job
 scan=$here/../master/archci-scan
+next=$here/../master/archci-next
 status=$here/../master/archci-status
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # mkpkg DIR NAME VERSION -- smallest thing repo-add accepts as a package
@@ -31,16 +32,17 @@ echo "acl 1:2.3.2-1 1-2.3.2-1 1111111111111111111111111111111111111111" >"$state
 git -C "$state" add -A && git -C "$state" -c user.name=t -c user.email=t@t commit -q -m init
 export ARCHCI_STATE_URL=file://$state
 
-echo "--- scan"
+echo "--- scan: syncs state only, stores no backlog"
 "$scan"
-(( $(ls "$ARCHCI_HOME/queue/pending" | wc -l) == 3 )) || fail "expected 3 pending jobs"
-"$scan"
-(( $(ls "$ARCHCI_HOME/queue/pending" | wc -l) == 3 )) || fail "second scan must not duplicate jobs"
+(( $(ls "$ARCHCI_HOME/queue/pending" | wc -l) == 0 )) || fail "scan must not create pending jobs"
+[[ $("$next") == "5 core acl 1:2.3.2-1 1-2.3.2-1 1111111111111111111111111111111111111111" ]] || fail "archci-next: $("$next")"
+"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding" unless j["outstanding"] == {"updates"=>0, "backlog"=>3}'
 
-echo "--- claim"
+echo "--- claim picks the next outstanding package just in time"
 out=$("$job" claim worker-1)
 id=$(sed -n 's/^id=//p' <<<"$out")
 [[ $id == 5-*-core,acl,1:2.3.2-1 ]] || fail "expected acl first (sorted), got $id"
+[[ $("$next") == "5 core linux "* ]] || fail "a running package must not be offered again"
 grep -q '^attempt=1$' <<<"$out" || fail "attempt should be 1"
 [[ -f $ARCHCI_HOME/queue/running/$id.job ]] || fail "job not in running/"
 "$job" heartbeat "$id"
@@ -60,6 +62,7 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 [[ -f $ARCHCI_HOME/logs/core/acl/1:2.3.2-1/attempt-1.log ]] || fail "log not archived"
 [[ -e $ARCHCI_HOME/publish.needed ]] || fail "publish flag missing"
 [[ ! -e $inc ]] || fail "incoming not cleaned"
+[[ $("$next") == "5 core linux "* ]] || fail "built package must not be outstanding"
 
 echo "--- report failure, retry, give up"
 id=$(sed -n 's/^id=//p' < <("$job" claim worker-2))
@@ -76,8 +79,7 @@ id2=$(sed -n 's/^id=//p' < <("$job" claim worker-2))
 grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final after max attempts"
 "$job" reap
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "final job must stay failed"
-"$scan"
-[[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "scan must not re-enqueue a final failure at the same commit"
+[[ $("$next") == "5 extra libsigc++ "* ]] || fail "a final failure at the same commit must be skipped"
 
 echo "--- success reported with empty upload counts as failure"
 id=$(sed -n 's/^id=//p' < <("$job" claim worker-3))
@@ -95,12 +97,15 @@ id=$(sed -n 's/^id=//p' < <("$job" claim worker-4))
 "$job" report "$id" abandoned
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "abandoned must not count an attempt"
 
-echo "--- new upstream version supersedes a pending job"
+echo "--- a new upstream version supersedes a pending job and a final failure"
 echo "libsigc++ 2.12.3-1 2.12.3-1 8888888888888888888888888888888888888888" >"$state/extra-x86_64/libsigc++"
+echo "linux 7.2.4.arch1-1 7.2.4.arch1-1 2222222222222222222222222222222222222222" >"$state/core-x86_64/linux"
 git -C "$state" -c user.name=t -c user.email=t@t commit -qam bump
 "$scan"
-ls "$ARCHCI_HOME/queue/pending" | grep -q 'libsigc++,2.12.3-1' || fail "new version not enqueued"
-ls "$ARCHCI_HOME/queue/pending" | grep -q 'libsigc++,2.12.2-1' && fail "old pending job not dropped"
+"$job" reap
+ls "$ARCHCI_HOME/queue/pending" | grep -q 'libsigc++,2.12.2-1' && fail "superseded pending job not dropped"
+(( $(ls "$ARCHCI_HOME/queue/failed" | wc -l) == 0 )) || fail "superseded final failure not dropped"
+[[ $("$next") == "5 core linux 7.2.4.arch1-1 "* ]] || fail "new linux release should be next: $("$next")"
 "$job" enqueue core acl 0
 ls "$ARCHCI_HOME/queue/pending" | grep -q '^0-.*core,acl' || fail "manual enqueue"
 
@@ -124,5 +129,5 @@ rsync -a -e "$tmp/fakessh" "$tmp/out/" "master:$id/" || fail "rsync via rrsync"
 
 echo "--- status"
 "$status" | head -5
-"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 1 && j["built"]["core"] == 1'
+"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 0 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["core"] == 1'
 echo "ALL OK"
