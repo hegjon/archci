@@ -20,13 +20,19 @@ release_sign() {  # release_sign FILE -> writes FILE.sig
 }
 
 if [[ ${1:-} == --unlock ]]; then
-	# Sign a throwaway file so pinentry prompts once; the passphrase is then
-	# cached in gpg-agent (raise default-cache-ttl in the homedir's agent conf).
+	# Sign a throwaway file so the passphrase lands in gpg-agent's cache (raise
+	# default-cache-ttl in the homedir's agent conf). Normally pinentry prompts
+	# once; set ARCHCI_RELEASE_PASSPHRASE to unlock without a prompt (for
+	# automation/testing -- keep it out of the persistent environment).
 	tmp=$(mktemp); : >"$tmp"
-	if gpg --homedir "$ARCHCI_RELEASE_GNUPGHOME" --detach-sign -u "$ARCHCI_RELEASE_KEY" -o /dev/null "$tmp"; then
+	unlock=(gpg --homedir "$ARCHCI_RELEASE_GNUPGHOME" --detach-sign -u "$ARCHCI_RELEASE_KEY" -o /dev/null)
+	if [[ -n ${ARCHCI_RELEASE_PASSPHRASE:-} ]]; then
+		unlock=("${unlock[@]}" --pinentry-mode loopback --passphrase "$ARCHCI_RELEASE_PASSPHRASE")
+	fi
+	if "${unlock[@]}" "$tmp"; then
 		archci_log "release key unlocked; gpg-agent will cache it"
 	else
-		archci_die "could not unlock the release key"
+		rm -f "$tmp"; archci_die "could not unlock the release key"
 	fi
 	rm -f "$tmp"; exit 0
 fi
