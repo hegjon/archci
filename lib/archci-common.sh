@@ -90,7 +90,7 @@ archci_valid_worker() { [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; }
 #                         job_tag job_commit job_attempt job_worker
 archci_read_job() {
 	local line
-	job_id= job_repo= job_arch= job_pkgbase= job_version= job_tag= job_commit= job_attempt=0 job_worker=
+	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_attempt=0 job_worker=''
 	while IFS= read -r line || [[ -n $line ]]; do
 		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|attempt|worker)=(.*)$ ]] || continue
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"

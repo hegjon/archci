@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2010,SC2012  # test assertions use ls on controlled temp fixtures
 # Exercise the master queue on a throwaway ARCHCI_HOME without network or root:
 # scan (from a fake state repo) -> just-in-time claim -> heartbeat -> report
 # success/failure -> reap. Fake packages are minimal but real enough for repo-add.

@@ -5,7 +5,7 @@
 # Run directly, or via test/run.sh.
 set -uo pipefail
 root=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
-cd "$root"
+cd "$root" || exit 1
 rc=0
 note() { printf '%s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; rc=1; }
@@ -29,8 +29,11 @@ for f in "${ruby_files[@]}"; do ruby -c "$f" >/dev/null || fail "ruby -c $f"; do
 
 if command -v shellcheck >/dev/null; then
 	note "== shellcheck (${#bash_files[@]} scripts) =="
-	# SC1091: don't follow sourced files. SC2317: unreachable (devtools helpers).
-	shellcheck -x -e SC1091 "${bash_files[@]}" || fail "shellcheck"
+	# Excluded, structural to this codebase (not defects):
+	#   SC1091 sourced files not followed; SC2154 vars set indirectly by
+	#   archci_read_job/config eval; SC2034 vars exported via "${!ARCHCI_@}";
+	#   SC2059 the say() printf-format helper; SC2029 ssh command expands client-side.
+	shellcheck -x -e SC1091 -e SC2154 -e SC2034 -e SC2059 -e SC2029 "${bash_files[@]}" || fail "shellcheck"
 else
 	note "== shellcheck: not installed, skipping (pacman -S shellcheck) =="
 fi

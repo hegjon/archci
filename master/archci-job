@@ -79,10 +79,13 @@ find_job() {  # find_job ID DIR... -> path
 
 # ---------------------------------------------------------------------------
 cmd_claim() {
-	local worker=$1 name
+	local worker=$1
 	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
 	lock_queue
-	name=$(cd "$Q_PENDING" && LC_ALL=C ls -1 2>/dev/null | grep '\.job$' | sort | head -n1 || true)
+	local name='' pend
+	local LC_ALL=C                       # deterministic, ASCII filename order
+	shopt -s nullglob; pend=("$Q_PENDING"/*.job); shopt -u nullglob
+	(( ${#pend[@]} )) && name=${pend[0]##*/}
 	if [[ -z $name ]]; then
 		# Nothing queued by hand or for retry: pick the next outstanding package now.
 		local prio repo pkgbase version tag commit
