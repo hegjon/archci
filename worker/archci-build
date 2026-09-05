@@ -122,6 +122,26 @@ if (( rc == 0 && ${#pkgs[@]} == 0 )); then
 	echo "==> build reported success but produced no packages"
 	rc=1
 fi
+
+# Builder signature: internal provenance the signer verifies before it adds the
+# client-facing release signature. Each package gets a detached <pkg>.buildsig.
+# Required when signing is on; done opportunistically if a builder key exists.
+if (( rc == 0 && ${#pkgs[@]} )); then
+	if [[ -d $ARCHCI_BUILDER_GNUPGHOME ]]; then
+		for pkg in "${pkgs[@]}"; do
+			if gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes \
+					--detach-sign -u "$ARCHCI_BUILDER_KEY" -o "$pkg.buildsig" "$pkg"; then
+				echo "==> builder-signed ${pkg##*/}"
+			else
+				echo "==> failed to builder-sign ${pkg##*/}"
+				rc=1; break
+			fi
+		done
+	elif (( ARCHCI_SIGN )); then
+		echo "==> ARCHCI_SIGN=1 but no builder key at $ARCHCI_BUILDER_GNUPGHOME"
+		rc=1
+	fi
+fi
 if (( rc == 0 )); then echo success; else echo failure; fi >"$outdir/result"
 echo "==> archci-build finished with $rc at $(archci_now): ${pkgs[*]##*/}"
 rm -rf "$srcdir"

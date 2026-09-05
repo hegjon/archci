@@ -14,7 +14,9 @@ touch "$akf"
 if grep -qF "${BASH_REMATCH[0]}" "$akf"; then
 	archci_log "key already authorized"
 else
-	printf 'command="%s",restrict %s\n' "$ARCHCI_MASTER_DIR/archci-shell" "$key" >>"$akf"
+	cmd=$ARCHCI_MASTER_DIR/archci-shell
+	[[ $role == signer ]] && cmd="$cmd signer"
+	printf 'command="%s",restrict %s\n' "$cmd" "$key" >>"$akf"
 	archci_log "authorized: ${key##* }"
 fi
 chown archci:archci "$akf"

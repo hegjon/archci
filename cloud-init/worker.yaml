@@ -13,12 +13,20 @@ write_files:
     content: |
       ARCHCI_MASTER="archci@master"
       ARCHCI_REPOS="core extra"
+      ARCHCI_SIGN=1
   - path: /etc/archci/worker_key
     permissions: '0600'
     content: |
       -----BEGIN OPENSSH PRIVATE KEY-----
       ...paste the worker key authorized on the master with archci-authorize...
       -----END OPENSSH PRIVATE KEY-----
+  - path: /etc/archci/builder-secret.asc
+    permissions: '0600'
+    content: |
+      -----BEGIN PGP PRIVATE KEY BLOCK-----
+      ...one shared builder key for the fleet; its public half is trusted once
+      on the signer with archci-authorize-builder...
+      -----END PGP PRIVATE KEY BLOCK-----
   - path: /etc/hosts
     append: true
     content: |
@@ -31,5 +39,10 @@ write_files:
 runcmd:
   - git clone https://example.invalid/archci.git /opt/archci
   - /opt/archci/install.sh worker
+  # replace the builder key install.sh generated with the shared fleet key,
+  # so every ephemeral worker signs with one key the signer already trusts
+  - rm -rf /etc/archci/builder-gnupg
+  - install -d -m 700 /etc/archci/builder-gnupg
+  - gpg --homedir /etc/archci/builder-gnupg --batch --import /etc/archci/builder-secret.asc
   # one worker per ~4 GB RAM and 2 vCPU is a reasonable start
   - systemctl enable --now archci-worker@1

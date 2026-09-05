@@ -40,8 +40,8 @@ snapshot_repo
 archci_log "publishing to $ARCHCI_RCLONE_REMOTE"
 # Packages first, so a client never downloads a database that lists a file
 # which is not there yet; then the databases and removal of superseded files.
-"${rclone[@]}" copy --exclude '*.db*' --exclude '*.files*' "$repo" "$ARCHCI_RCLONE_REMOTE"
-"${rclone[@]}" sync --exclude '/logs/**' --exclude '/status.json' "$repo" "$ARCHCI_RCLONE_REMOTE"
+"${rclone[@]}" copy --exclude '*.buildsig' --exclude '*.db*' --exclude '*.files*' "$repo" "$ARCHCI_RCLONE_REMOTE"
+"${rclone[@]}" sync --exclude '*.buildsig' --exclude '/logs/**' --exclude '/status.json' "$repo" "$ARCHCI_RCLONE_REMOTE"
 
 "$ARCHCI_MASTER_DIR/archci-status" --json >"$ARCHCI_HOME/status.json.tmp"
 mv "$ARCHCI_HOME/status.json.tmp" "$ARCHCI_HOME/status.json"

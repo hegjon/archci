@@ -22,10 +22,24 @@ ARCHCI_DONE_KEEP_DAYS=30
 # rclone remote and bucket for Cloudflare R2, e.g. "r2:archci". Empty = do not publish.
 ARCHCI_RCLONE_REMOTE=""
 ARCHCI_RCLONE_CONFIG=/etc/archci/rclone.conf
-# Optional GPG key id used to sign packages and databases (key must be in root's keyring).
-ARCHCI_GPGKEY=""
 # Keep this many read-only btrfs snapshots of repo/ before each publish. 0 disables.
 ARCHCI_SNAPSHOTS=5
+
+## Signing (see README "Signing") --------------------------------------------
+# 0 = index/serve packages unsigned (use until the signer droplet exists).
+# 1 = only packages carrying a release signature enter the databases.
+ARCHCI_SIGN=0
+# Worker: gpg home with the builder secret key, and the key uid.
+ARCHCI_BUILDER_GNUPGHOME=/etc/archci/builder-gnupg
+ARCHCI_BUILDER_KEY=archci-builder
+# Signer: ssh dest of the master (defaults to ARCHCI_MASTER), the release
+# secret key's gpg home and uid, and the keyring of trusted builder pubkeys.
+ARCHCI_SIGNER_MASTER=archci@master
+ARCHCI_RELEASE_GNUPGHOME=/etc/archci/release-gnupg
+ARCHCI_RELEASE_KEY=archci-release
+ARCHCI_BUILDER_KEYRING=/etc/archci/builder-keyring
+ARCHCI_SIGNER_HOME=/var/lib/archci-signer
+ARCHCI_SIGNER_KEY=/etc/archci/signer_key
 
 ## Worker ---------------------------------------------------------------------
 # ssh destination of the master. The master droplet is named "master"; workers resolve

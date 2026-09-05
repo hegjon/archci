@@ -1,0 +1,8 @@
+[Unit]
+Description=archci: build pacman databases from signed packages
+RequiresMountsFor=/var/lib/archci
+
+[Service]
+Type=oneshot
+User=archci
+ExecStart=/usr/local/bin/archci-index

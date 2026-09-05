@@ -1,0 +1,15 @@
+#!/bin/bash
+# archci-authorize-builder PUBKEY-FILE -- trust a worker's builder key on the signer.
+#
+# Import a builder public key (ASCII-armored, from a worker's
+# /etc/archci/builder-gnupg) into the signer's builder keyring, so archci-sign
+# will accept packages that key signed. Run once per worker key.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+
+pub=${1:-}
+[[ -n $pub && -f $pub ]] || archci_die "usage: archci-authorize-builder PUBKEY-FILE"
+install -d -m 700 "$ARCHCI_BUILDER_KEYRING"
+gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --import "$pub" || archci_die "import failed"
+archci_log "imported builder key(s) from $pub"
+gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --list-keys --with-colons | awk -F: '/^uid/{print "  trusted builder: "$10}'

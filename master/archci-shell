@@ -1,20 +1,38 @@
 #!/bin/bash
-# archci-shell -- forced command for worker ssh keys on the master.
+# archci-shell [ROLE] -- forced command for keys the master authorizes.
 #
-# authorized_keys:  command="/usr/local/lib/archci/master/archci-shell",restrict ssh-ed25519 AAAA... worker
+# authorized_keys lines (written by archci-authorize):
+#   command="/usr/local/lib/archci/master/archci-shell",restrict        ...  # a worker
+#   command="/usr/local/lib/archci/master/archci-shell signer",restrict ...  # the signer
 #
-# Workers can only claim/heartbeat/report jobs and rsync into incoming/.
+# A worker may only run the job protocol and rsync into incoming/. The signer
+# may list unsigned packages, rsync the repo (to fetch packages and push back
+# .sig files), and ask for a reindex. Neither can run anything else.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
+role=${1:-worker}
 read -ra argv <<<"${SSH_ORIGINAL_COMMAND:-}"
-case ${argv[0]:-} in
-	claim|heartbeat|report)
-		exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
-	rsync)
-		# rrsync (from the rsync package) confines the transfer to this directory.
-		exec rrsync -wo -no-del "$ARCHCI_HOME/incoming" ;;
-	*)
-		archci_log "refused: ${SSH_ORIGINAL_COMMAND:-<none>}"
-		exit 2 ;;
+refuse() { archci_log "refused ($role): ${SSH_ORIGINAL_COMMAND:-<none>}"; exit 2; }
+
+case $role in
+	worker)
+		case ${argv[0]:-} in
+			claim|heartbeat|report) exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
+			rsync) exec rrsync -wo -no-del "$ARCHCI_HOME/incoming" ;;
+			*) refuse ;;
+		esac ;;
+	signer)
+		case ${argv[0]:-} in
+			# packages in the pool that have no release signature yet, one path per line
+			unsigned)
+				cd "$ARCHCI_HOME/repo" 2>/dev/null || exit 0
+				find . -name '*.pkg.tar.zst' -print | while IFS= read -r f; do
+					[[ -f $f.sig ]] || printf '%s\n' "${f#./}"
+				done ;;
+			reindex) touch "$ARCHCI_HOME/index.needed" ;;
+			rsync) exec rrsync "$ARCHCI_HOME/repo" ;;
+			*) refuse ;;
+		esac ;;
+	*) refuse ;;
 esac

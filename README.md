@@ -19,7 +19,7 @@ is the whole state machine.
         │              ┌───────────────── master ────────────────┐
         │              │ archci-scan   (timer)  state → queue    │
         │              │ archci-job    (ssh)    claim/heartbeat/ │
-        │              │                        report → repo-add│
+        │              │                        report → pool     │
         │              │ archci-job reap (timer) stale/retry     │
         │              │ archci-publish (timer) repo/ → R2       │
         │              └───────▲──────────────────────▲──────────┘
@@ -60,10 +60,12 @@ stamped with the worker name and attempt, and is printed. The worker then:
    `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
    btrfs subvolume and each build gets a fresh snapshot of it, refreshed with
    `pacman -Syuu` at most once an hour,
-4. takes the build's journal as `build.log`, and rsyncs it with the packages
-   and makepkg logs to `incoming/<jobid>/` on the master (the ssh key is
-   jailed to that directory by `rrsync`),
-5. reports `success` or `failure`. The verdict comes from a `result` file
+4. signs each package with the worker's own builder key (`<pkg>.buildsig`,
+   internal provenance, see Signing below),
+5. takes the build's journal as `build.log`, and rsyncs it with the packages,
+   their builder signatures and makepkg logs to `incoming/<jobid>/` on the
+   master (the ssh key is jailed to that directory by `rrsync`),
+6. reports `success` or `failure`. The verdict comes from a `result` file
    `archci-build` writes last, not from the unit's exit status, because
    systemd counts SIGTERM (a timeout, a stop) as a clean exit.
 
@@ -72,16 +74,18 @@ without a heartbeat for 30 minutes is put back in `pending/` by the reaper, so
 a worker can be destroyed at any time. On `systemctl stop` the worker reports
 `abandoned`, which requeues without counting an attempt.
 
-**Master.** On `report success` the packages are moved into
-`repo/<repo>/os/<arch>/`, added with `repo-add -R` (debug packages go to
-`<repo>-debug`), and the built record is written. Failures keep their log
-under `logs/<repo>/<pkgbase>/<version>/attempt-N.log` and are retried after
-3 hours, up to 3 attempts. A newer upstream release drops any pending or
-failed job for the older commit; the new commit is simply outstanding again.
-`archci-publish` (root, every 5 min, only when
-something changed) optionally snapshots `repo/`, then uploads packages before
-databases so clients never see a dangling db entry, then logs and
-`status.json`.
+**Master.** The master holds no signing key. On `report success` the packages
+and their builder signatures are pooled into `repo/<repo>/os/<arch>/` (debug
+packages go to `<repo>-debug`) and the built record is written. `archci-index`
+then builds the pacman databases with `repo-add -R`, but with `ARCHCI_SIGN=1`
+it adds only packages that already carry a release signature, so the database
+never lists a package a client could not verify. Failures keep their log under
+`logs/<repo>/<pkgbase>/<version>/attempt-N.log` and are retried after 3 hours,
+up to 3 attempts. A newer upstream release drops any pending or failed job for
+the older commit; the new commit is simply outstanding again. `archci-publish`
+(root, every 5 min, only when something changed) optionally snapshots `repo/`,
+uploads packages before databases so clients never see a dangling db entry,
+excludes the internal `.buildsig` files, then ships logs and `status.json`.
 
 Builds use dependencies from the official Arch mirrors, not from our own
 output, so packages can be built in any order and workers stay simple. Point
@@ -89,12 +93,52 @@ the chroot at our R2 repo instead by adding it to a copy of
 `/usr/share/devtools/pacman.conf.d/extra.conf` if you want a self-hosting
 rebuild.
 
+## Signing
+
+Signing is a two-stage chain, and the internet-facing master never holds a
+key. It is gated by `ARCHCI_SIGN` (0 while there is no signer yet, 1 once the
+signer runs).
+
+- **Builder signature (internal).** Each worker has its own OpenPGP key,
+  generated locally by `install.sh worker`. Right after a build the worker
+  signs every package into `<pkg>.buildsig`. This proves which builder made
+  the package and that its bytes were not altered afterwards. It is never
+  shown to clients and is excluded from what is published.
+- **Release signature (client-facing).** The `signer` role runs on a
+  dedicated droplet on the same VPC and holds the passphrase-protected release
+  key. `archci-sign` (a timer) asks the master for packages that have no
+  release signature, fetches each with its builder signature, verifies the
+  builder signature against a keyring of authorized builder keys, then makes
+  the detached release `<pkg>.sig` with the release key and pushes only that
+  back. A package whose builder signature is missing, invalid, or from an
+  unknown key is rejected and never released.
+
+The two signatures live in separate files on purpose. pacman verifies the
+client-facing `<pkg>.sig` against the one release key in its keyring; the
+builder signatures stay internal, so clients never need per-worker keys. The
+release private key never leaves the signer: it is generated there with a
+passphrase and unlocked once per session into `gpg-agent` (`archci-sign
+--unlock`), so the signing timer runs unattended for the agent's cache
+lifetime without the key ever touching the master. The database itself is left
+unsigned (pacman's default `DatabaseOptional`); package authenticity is fully
+covered by the release signatures. A compromise of the master therefore cannot
+get a malicious package released: it cannot forge a builder signature, and the
+signer refuses anything that fails that check.
+
+Trust bootstrap: export the release public key on the signer and give it to
+clients (`pacman-key --add release.pub && pacman-key --lsign-key <fpr>`), and
+register each worker's builder public key on the signer once with
+`archci-authorize-builder`. Ephemeral fleets can instead share one builder key
+baked into the worker image (see `cloud-init/worker.yaml`), registered once.
+
+
 ## Source layout
 
 ```
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
-master/   archci-scan, archci-next, archci-job, archci-shell, archci-authorize, archci-publish, archci-status
+master/   archci-scan, archci-next, archci-job, archci-index, archci-shell, archci-authorize, archci-publish, archci-status
 worker/   archci-worker, archci-build
+signer/   archci-sign, archci-authorize-builder
 systemd/  scan, reaper and publish timers (master); archci-worker@.service and
           archci-build@.service (worker); journal-remote drop-ins for the master
 ```
@@ -163,7 +207,7 @@ publish timers. Then:
    ```
 
 2. Edit `/etc/archci/archci.conf`: `ARCHCI_RCLONE_REMOTE="r2:<bucket>"`,
-   `ARCHCI_REPOS`, optionally `ARCHCI_GPGKEY`.
+   `ARCHCI_REPOS`. Leave `ARCHCI_SIGN=0` until the signer droplet exists.
 
 3. Authorize worker keys: `archci-authorize worker_key.pub`. This appends
    `command="/usr/local/lib/archci/master/archci-shell",restrict <key>` to the archci
@@ -204,6 +248,29 @@ of this on first boot, so workers are created and destroyed with
 `doctl compute droplet create/delete`. The same worker key can be shared by
 all droplets; workers are identified by hostname, which on DO is the droplet
 name. The master may run `archci-worker@1` too if `master` resolves to itself.
+
+### Signer
+
+On a dedicated droplet on the same VPC:
+
+```
+./install.sh signer
+```
+
+This installs `gnupg`, creates the release and builder keyrings under
+`/etc/archci`, sets a one-day `gpg-agent` cache, and generates the signer's
+ssh key. Then, following the printed steps: create the passphrase-protected
+release key, authorize the signer's ssh key on the master with
+`archci-authorize --signer`, register each worker's builder key with
+`archci-authorize-builder`, export the release public key for clients, and:
+
+```
+archci-sign --unlock              # enter the passphrase once per session
+systemctl start archci-sign.timer # sign new packages every 2 minutes
+journalctl -u archci-sign -f
+```
+
+Finally set `ARCHCI_SIGN=1` on the master so only signed packages are indexed.
 
 ## Monitoring workers from the master
 
@@ -248,12 +315,19 @@ archci-status --json                same as published to R2 as status.json
 archci-next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
+journalctl -u archci-index          database builds
 journalctl -u archci-publish        uploads
 archci-job enqueue extra firefox    build the current release now (priority 0)
 archci-job retry <jobid>            reset attempts of a failed job and requeue
 archci-job requeue <jobid>          put a running/failed job back, keep attempts
+archci-index --force                rebuild databases now
 archci-publish --force              push even if nothing changed
 archci-build job.file /tmp/out      reproduce a build by hand on a worker (root)
+
+# on the signer
+archci-sign --unlock                cache the release passphrase for the session
+journalctl -u archci-sign -f        release-signing activity
+archci-authorize-builder key.pub    trust a worker's builder key
 ```
 
 All knobs are in `archci.conf.example`. Environment variables override the
@@ -274,8 +348,11 @@ without network or root.
   upstream keys, so a rebuild farm cannot check them. The build is still
   pinned to the packaging repo's exact commit and the PKGBUILD sha256sums.
   Clear the setting and seed the build user's keyring to enforce them.
-- Nothing is signed unless `ARCHCI_GPGKEY` is set on the master (the key has
-  to be usable by root without a passphrase prompt).
+- Packages are signed by the `signer` role, never on the master; the database
+  is left unsigned (`DatabaseOptional`). See Signing above. A built package
+  whose builder signature the signer rejects is not re-attempted automatically,
+  since that indicates a misconfigured or untrusted worker; investigate the
+  signer log.
 - `repo-add -R` keeps only the current version of each package in `repo/`;
   older versions live on in the btrfs snapshots until pruned.
 - Worker ssh keys are shared secrets; rotate by running `archci-authorize` with

@@ -107,48 +107,40 @@ cmd_heartbeat() {
 	touch "$Q_RUNNING/$id.job"
 }
 
-# Move built packages into the local pacman repo and record what was built.
+# Pool built packages and record what was built. The master holds no key and
+# does not build the database here; archci-index does that once packages carry
+# a release signature (see README "Signing"). Each package keeps its builder
+# signature (.buildsig) alongside for the signer to verify.
 ingest() {
-	local id=$1 inc=$2 p main=() debug=()
-	local repodir=$ARCHCI_HOME/repo/$job_repo/os/$job_arch
-	local debugdir=$ARCHCI_HOME/repo/$job_repo-debug/os/$job_arch
+	local id=$1 inc=$2 p n=0
 	shopt -s nullglob
-	for p in "$inc"/*.pkg.tar.zst; do
-		if [[ ${p##*/} == *-debug-"$job_version"-*.pkg.tar.zst ]]; then debug+=("$p"); else main+=("$p"); fi
-	done
+	local pkgs=("$inc"/*.pkg.tar.zst)
 	shopt -u nullglob
-	if (( ${#main[@]} == 0 )); then
+	if (( ${#pkgs[@]} == 0 )); then
 		archci_log "$id: reported success but uploaded no packages"
 		return 1
 	fi
 	(
 		exec 8>"$ARCHCI_HOME/lock/repo.lock"
 		flock 8
-		add_to_repo "$repodir" "$job_repo" "${main[@]}" || exit 1
-		if (( ${#debug[@]} )); then
-			add_to_repo "$debugdir" "$job_repo-debug" "${debug[@]}" || exit 1
-		fi
+		for p in "${pkgs[@]}"; do
+			local base=${p##*/} dir
+			if [[ $base == *-debug-"$job_version"-*.pkg.tar.zst ]]; then
+				dir=$ARCHCI_HOME/repo/$job_repo-debug/os/$job_arch
+			else
+				dir=$ARCHCI_HOME/repo/$job_repo/os/$job_arch
+			fi
+			mkdir -p "$dir"
+			mv "$p" "$dir/$base" || exit 1
+			# builder signature travels with the package; the signer verifies it
+			[[ -f $p.buildsig ]] && mv "$p.buildsig" "$dir/$base.buildsig"
+			(( ++n ))
+		done
 	) || return 1
 	mkdir -p "$ARCHCI_HOME/built/$job_repo-$job_arch"
 	printf '%s %s\n' "$job_version" "$job_commit" >"$ARCHCI_HOME/built/$job_repo-$job_arch/$job_pkgbase"
-	touch "$ARCHCI_HOME/publish.needed"
-	archci_log "$id: added ${#main[@]} package(s) to [$job_repo]"
-}
-
-add_to_repo() {  # add_to_repo DIR DBNAME PKG...
-	local dir=$1 db=$2 p files=() sign=()
-	shift 2
-	mkdir -p "$dir"
-	[[ -n $ARCHCI_GPGKEY ]] && sign=(--sign --key "$ARCHCI_GPGKEY")
-	for p in "$@"; do
-		mv "$p" "$dir/" || return 1
-		if [[ -n $ARCHCI_GPGKEY ]]; then
-			gpg --batch --yes --detach-sign -u "$ARCHCI_GPGKEY" "$dir/${p##*/}" || return 1
-		fi
-		files+=("$dir/${p##*/}")
-	done
-	# -R removes the previous version's files, so repo/ only holds what the db lists.
-	repo-add -R -q "${sign[@]}" "$dir/$db.db.tar.gz" "${files[@]}"
+	touch "$ARCHCI_HOME/index.needed"
+	archci_log "$id: pooled $n package(s) for [$job_repo]"
 }
 
 cmd_report() {

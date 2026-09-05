@@ -1,0 +1,88 @@
+#!/bin/bash
+# archci-sign [--unlock|--once] -- add the client-facing release signature to
+# packages the master has pooled. Runs on the signer droplet (root) on a timer.
+#
+# For each package the master reports as unsigned it fetches the package and its
+# builder signature, verifies the builder signature against the authorized
+# builder keyring, then makes a detached release signature with the release key
+# and pushes only that <pkg>.sig back to the master. The release private key
+# (passphrase-protected) never leaves this host; the master stays keyless.
+#
+#   --unlock   prime gpg-agent with the release passphrase (pinentry once), then exit
+#   --once     run even if another archci-sign holds the lock is NOT implied; just a no-op flag for clarity
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+
+export GNUPGHOME=$ARCHCI_RELEASE_GNUPGHOME
+release_sign() {  # release_sign FILE -> writes FILE.sig
+	gpg --homedir "$ARCHCI_RELEASE_GNUPGHOME" --batch --yes --pinentry-mode loopback \
+		--detach-sign -u "$ARCHCI_RELEASE_KEY" -o "$1.sig" "$1" 2>/dev/null
+}
+
+if [[ ${1:-} == --unlock ]]; then
+	# Sign a throwaway file so pinentry prompts once; the passphrase is then
+	# cached in gpg-agent (raise default-cache-ttl in the homedir's agent conf).
+	tmp=$(mktemp); : >"$tmp"
+	if gpg --homedir "$ARCHCI_RELEASE_GNUPGHOME" --detach-sign -u "$ARCHCI_RELEASE_KEY" -o /dev/null "$tmp"; then
+		archci_log "release key unlocked; gpg-agent will cache it"
+	else
+		archci_die "could not unlock the release key"
+	fi
+	rm -f "$tmp"; exit 0
+fi
+
+[[ -r $ARCHCI_SIGNER_KEY ]] || archci_die "no ssh key at $ARCHCI_SIGNER_KEY (run install.sh signer, authorize it on the master with: archci-authorize --signer)"
+[[ -d $ARCHCI_RELEASE_GNUPGHOME ]] || archci_die "no release keyring at $ARCHCI_RELEASE_GNUPGHOME"
+[[ -d $ARCHCI_BUILDER_KEYRING ]] || archci_die "no builder keyring at $ARCHCI_BUILDER_KEYRING (authorize builder keys with archci-authorize-builder)"
+
+exec 9>"$ARCHCI_SIGNER_HOME/sign.lock"
+flock -n 9 || { archci_log "another archci-sign is running"; exit 0; }
+
+ssh_opts=(-i "$ARCHCI_SIGNER_KEY" -o BatchMode=yes -o ConnectTimeout=30
+	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
+master() { ssh "${ssh_opts[@]}" "$ARCHCI_SIGNER_MASTER" "$@"; }
+
+work=$ARCHCI_SIGNER_HOME/work
+mkdir -p "$work"
+
+mapfile -t unsigned < <(master unsigned || true)
+if (( ${#unsigned[@]} == 0 )); then
+	exit 0
+fi
+archci_log "release-signing ${#unsigned[@]} package(s)"
+
+signed=0 rejected=0
+for rel in "${unsigned[@]}"; do
+	# rel is a path relative to the master's repo/, e.g. core/os/x86_64/acl-...pkg.tar.zst
+	[[ $rel == *..* || $rel == /* ]] && { archci_log "skipping suspicious path: $rel"; continue; }
+	dst=$work/$rel
+	mkdir -p "$(dirname "$dst")"
+	# Fetch the package and its builder signature (rrsync jails this to repo/).
+	if ! rsync -a --timeout=120 -e "ssh ${ssh_opts[*]}" \
+			"$ARCHCI_SIGNER_MASTER:$rel" "$ARCHCI_SIGNER_MASTER:$rel.buildsig" "$(dirname "$dst")/" 2>/dev/null; then
+		archci_log "could not fetch $rel (or it has no builder signature), skipping"
+		continue
+	fi
+	# Verify the builder signature: the key must be an authorized builder.
+	if ! gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --verify "$dst.buildsig" "$dst" 2>/dev/null; then
+		archci_log "REJECT $rel: builder signature missing, invalid, or from an unknown key"
+		rm -f "$dst" "$dst.buildsig"
+		(( ++rejected )); continue
+	fi
+	# Make the release signature and push it back.
+	if ! release_sign "$dst"; then
+		archci_log "release key is locked; run 'archci-sign --unlock' on the signer"
+		rm -f "$dst" "$dst.buildsig"
+		break
+	fi
+	if rsync -a --timeout=120 -e "ssh ${ssh_opts[*]}" "$dst.sig" "$ARCHCI_SIGNER_MASTER:$rel.sig"; then
+		(( ++signed ))
+	else
+		archci_log "could not upload signature for $rel"
+	fi
+	rm -f "$dst" "$dst.buildsig" "$dst.sig"
+done
+
+archci_log "signed $signed, rejected $rejected"
+(( signed )) && master reindex || true
+exit 0

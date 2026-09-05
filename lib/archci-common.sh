@@ -35,7 +35,25 @@ archci_load_conf
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
 : "${ARCHCI_RCLONE_REMOTE:=}"
 : "${ARCHCI_RCLONE_CONFIG:=/etc/archci/rclone.conf}"
-: "${ARCHCI_GPGKEY:=}"
+# --- signing (see README "Signing") -------------------------------------------
+# Master holds NO key. Workers sign each package with a builder key (internal
+# provenance); the signer droplet verifies that and adds the client-facing
+# release signature. ARCHCI_SIGN gates the whole thing: 0 = index/serve
+# packages unsigned (fine while there is no signer yet), 1 = only signed
+# packages enter the database.
+: "${ARCHCI_SIGN:=0}"
+# Worker: gpg home holding the builder secret key, and its key id/uid.
+: "${ARCHCI_BUILDER_GNUPGHOME:=/etc/archci/builder-gnupg}"
+: "${ARCHCI_BUILDER_KEY:=archci-builder}"
+# Signer: ssh destination of the master, gpg home with the release SECRET key
+# (passphrase-protected, unlocked through gpg-agent) plus the authorized
+# builder PUBLIC keys, and the release key id/uid.
+: "${ARCHCI_SIGNER_MASTER:=${ARCHCI_MASTER:-archci@master}}"
+: "${ARCHCI_RELEASE_GNUPGHOME:=/etc/archci/release-gnupg}"
+: "${ARCHCI_RELEASE_KEY:=archci-release}"
+: "${ARCHCI_BUILDER_KEYRING:=/etc/archci/builder-keyring}"
+: "${ARCHCI_SIGNER_HOME:=/var/lib/archci-signer}"
+: "${ARCHCI_SIGNER_KEY:=/etc/archci/signer_key}"
 : "${ARCHCI_SNAPSHOTS:=5}"
 : "${ARCHCI_MASTER:=archci@master}"
 : "${ARCHCI_JOURNAL_URL:=http://${ARCHCI_MASTER#*@}:19532}"
