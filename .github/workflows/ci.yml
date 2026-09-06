@@ -11,7 +11,7 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm --needed git ruby rsync gnupg shellcheck
+        run: pacman -Syu --noconfirm --needed git ruby rsync gnupg shellcheck python
       - uses: actions/checkout@v4
       - name: Run tests
         run: ./test/run.sh

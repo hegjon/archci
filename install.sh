@@ -36,7 +36,7 @@ fi
 
 if [[ $role == master ]]; then
 	echo "==> master: packages"
-	pacman -S --needed --noconfirm git ruby rsync rclone openssh btrfs-progs libmicrohttpd
+	pacman -S --needed --noconfirm git ruby rsync rclone openssh btrfs-progs libmicrohttpd python
 	echo "==> master: archci user and directories"
 	# A real shell is needed: sshd runs the forced command through it.
 	getent passwd archci >/dev/null || useradd --system --home-dir /var/lib/archci --create-home --shell /bin/bash archci
