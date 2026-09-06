@@ -3,8 +3,9 @@
 A headless build farm for Arch Linux. One master watches
 [archlinux/packaging/state](https://gitlab.archlinux.org/archlinux/packaging/state)
 for released package versions, any number of workers pull jobs over ssh and
-build them in clean btrfs-snapshotted chroots with devtools, and the master
-publishes a pacman repository plus build logs to Cloudflare R2.
+build them in clean btrfs-snapshotted chroots with devtools, and a separate
+signer verifies, signs, and publishes the pacman repository to Cloudflare R2.
+The master holds no signing key.
 
 
 > **Status: prototype.** This runs end to end but is not production-hardened.
@@ -219,7 +220,9 @@ claimed=2026-09-05T07:41:12Z
 
 ## Install
 
-Both roles are Arch or Omarchy machines. Copy or clone this directory there.
+All three roles (master, worker, signer) run on Arch or Omarchy machines. Copy
+or clone this directory to each, then run `install.sh` with the role. The signer
+needs only R2 access; the master and workers share a VPC.
 
 ### Master
 
