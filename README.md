@@ -520,7 +520,16 @@ This is a prototype demo, treat it accordingly:
 - It may change, be rebuilt, or disappear without notice.
 
 So try it only on a throwaway machine, a VM or container, never a system you
-care about. With the release public key imported (see "Using the repo") and
+care about. Fetch and trust the demo key (published in the bucket), then add the
+repo:
+
+```
+curl -O https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/release.pub
+pacman-key --add release.pub
+pacman-key --lsign-key 5C13914714B1585B1F83848E5D1E8741C64D4DDE
+```
+
+`/etc/pacman.conf`:
 
 ```
 [core]
@@ -528,7 +537,7 @@ SigLevel = Required
 Server = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch
 ```
 
-pacman syncs and installs from it exactly as shown above.
+Then `pacman -Sy` and install as shown above.
 
 ## Notes and limits
 
