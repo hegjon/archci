@@ -500,6 +500,36 @@ file, which is how the tests run without network or root. Run them with
   with real gpg keys, and the R2 hand-off (master stage, signer verify, reject,
   release-sign, publish, drain) against a local rclone stand-in, in a temp dir.
 
+## Test instance
+
+A live prototype runs on Digital Ocean and publishes what it builds to R2:
+
+- **Repository URL:** `https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev`
+  (the `[core]` repo lives under `core/os/x86_64/`).
+- **Fleet:** one master, two build workers, and one signer, all small droplets
+  (1 vCPU, 1 GB). It is working alphabetically through Arch `core`, then `extra`.
+- **Release key:** the throwaway demo key, fingerprint
+  `5C13914714B1585B1F83848E5D1E8741C64D4DDE` (uid `archci release TEST`).
+
+This is a prototype demo, treat it accordingly:
+
+- The release key is a **throwaway** whose passphrase is not secret, so the
+  signatures prove the pipeline works, not that the packages are trustworthy.
+- The workers are undersized, so large packages (gcc, glibc, …) fail; expect
+  gaps.
+- It may change, be rebuilt, or disappear without notice.
+
+So try it only on a throwaway machine, a VM or container, never a system you
+care about. With the release public key imported (see "Using the repo") and
+
+```
+[core]
+SigLevel = Required
+Server = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch
+```
+
+pacman syncs and installs from it exactly as shown above.
+
 ## Notes and limits
 
 - Nothing is queued up front: with an empty `built/`, every package in
