@@ -12,8 +12,9 @@ The master holds no signing key.
 > Before relying on it, see the checklist in "Notes and limits" (real release
 > key, bigger workers, a custom domain for the repo, and so on).
 
-Everything is plain bash, two small ruby scripts, ssh, git, rsync, btrfs,
-systemd timers and journald. There is no daemon: the queue is a directory of
+Everything is plain bash and a few small ruby scripts (the scanner, the
+next-package picker, and status, sharing one library), plus ssh, git, rsync,
+btrfs, systemd timers and journald. There is no daemon: the queue is a directory of
 files, and moving a file between `pending/`, `running/`, `done/` and `failed/`
 is the whole state machine.
 
@@ -179,10 +180,10 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
 master/   archci-scan, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
 worker/   archci-worker, archci-build
-signer/   archci-sign, archci-authorize-builder
+signer/   archci-sign, archci-sign-health, archci-authorize-builder
 systemd/  scan, reaper and stage timers (master); archci-worker@.service and
-          archci-build@.service (worker); archci-sign timer (signer);
-          journal-remote drop-ins for the master
+          archci-build@.service (worker); archci-sign and archci-sign-health
+          timers (signer); journal-remote drop-ins for the master
 ```
 
 `install.sh` copies `lib/` plus the role's directory to `/usr/local/lib/archci`
@@ -313,8 +314,9 @@ register each worker's builder key with `archci-authorize-builder`, export the
 release public key for clients, and:
 
 ```
-archci-sign --unlock              # enter the passphrase once per session
-systemctl start archci-sign.timer # sign new packages every 2 minutes
+archci-sign --unlock                     # enter the passphrase once per session
+systemctl start archci-sign.timer        # sign new packages every 2 minutes
+systemctl start archci-sign-health.timer # warn if signing stalls
 journalctl -u archci-sign -f
 ```
 
