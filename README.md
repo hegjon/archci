@@ -1,5 +1,7 @@
 # archci
 
+[![CI](https://github.com/hegjon/archci/actions/workflows/ci.yml/badge.svg)](https://github.com/hegjon/archci/actions/workflows/ci.yml)
+
 A headless build farm for Arch Linux. One master watches
 [archlinux/packaging/state](https://gitlab.archlinux.org/archlinux/packaging/state)
 for released package versions, any number of workers pull jobs over ssh and

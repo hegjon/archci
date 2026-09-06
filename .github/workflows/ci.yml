@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Arch container: the integration test uses repo-add, bsdtar and zstd.
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm --needed git ruby rsync gnupg shellcheck
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: ./test/run.sh
