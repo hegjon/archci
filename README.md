@@ -6,6 +6,11 @@ for released package versions, any number of workers pull jobs over ssh and
 build them in clean btrfs-snapshotted chroots with devtools, and the master
 publishes a pacman repository plus build logs to Cloudflare R2.
 
+
+> **Status: prototype.** This runs end to end but is not production-hardened.
+> Before relying on it, see the checklist in "Notes and limits" (real release
+> key, bigger workers, a custom domain for the repo, and so on).
+
 Everything is plain bash, two small ruby scripts, ssh, git, rsync, btrfs,
 systemd timers and journald. There is no daemon: the queue is a directory of
 files, and moving a file between `pending/`, `running/`, `done/` and `failed/`
@@ -412,6 +417,11 @@ file, which is how the tests run without network or root. Run them with
 - Unsigned packages transit the R2 `staging/` prefix. Keep it private (never
   served publicly) and use scoped R2 tokens: the master writes only `staging/`,
   the signer reads `staging/` and writes the release prefix.
+- Prototype gaps to close before production: the release key is generated with a
+  passphrase but must be a real key you control (not a throwaway); serve the
+  release bucket from a custom domain rather than the rate-limited r2.dev URL;
+  give workers enough RAM (1 GB is too little for large packages); and decide on
+  release-key longevity (see the signing section).
 - Worker ssh keys are shared secrets; rotate by running `archci-authorize` with
   a new key and deleting the old line from `~archci/.ssh/authorized_keys`.
 

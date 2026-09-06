@@ -43,6 +43,7 @@ mapfile -t rels < <(rclone lsf -R --files-only "$ARCHCI_R2_STAGING" 2>/dev/null 
 archci_log "staging holds ${#rels[@]} package(s) to sign"
 
 declare -A touched=()
+declare -A dbready=()   # per-repo: is the local db authoritative for release (safe to prune)?
 signed=0 rejected=0
 for rel in "${rels[@]}"; do
 	[[ $rel == *..* || $rel == /* ]] && { archci_log "skip suspicious path: $rel"; continue; }
@@ -68,10 +69,20 @@ for rel in "${rels[@]}"; do
 	# publish package + signature to the release area
 	rclone copyto "$work/$rel" "$ARCHCI_R2_RELEASE/$rel"
 	rclone copyto "$work/$rel.sig" "$ARCHCI_R2_RELEASE/$rel.sig"
-	# add to the release database (seed the local db from release on a fresh signer)
-	if [[ ! -f $localrepo/$reldir/$db.db.tar.gz ]]; then
-		rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.db.tar.gz" "$localrepo/$reldir/$db.db.tar.gz" 2>/dev/null || true
-		rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.files.tar.gz" "$localrepo/$reldir/$db.files.tar.gz" 2>/dev/null || true
+	# Add to the release database. The first time this run touches a repo,
+	# establish whether the local db is authoritative for the release area:
+	# it is if it already existed locally, or if it seeds cleanly from release.
+	# If neither (a fresh signer whose seed failed), mark it not-ready so the
+	# prune below is skipped and cannot delete live release packages.
+	if [[ -z ${dbready[$reldir]+set} ]]; then
+		if [[ -f $localrepo/$reldir/$db.db.tar.gz ]]; then
+			dbready[$reldir]=1
+		elif rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.db.tar.gz" "$localrepo/$reldir/$db.db.tar.gz" 2>/dev/null; then
+			rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.files.tar.gz" "$localrepo/$reldir/$db.files.tar.gz" 2>/dev/null || true
+			dbready[$reldir]=1
+		else
+			dbready[$reldir]=0
+		fi
 	fi
 	cp "$work/$rel" "$localrepo/$rel"
 	repo-add -R -q "$localrepo/$reldir/$db.db.tar.gz" "$localrepo/$rel" >/dev/null
@@ -92,8 +103,18 @@ for reldir in "${!touched[@]}"; do
 		rclone copyto "$src" "$ARCHCI_R2_RELEASE/$reldir/$db.${pair%%:*}"
 		rclone copyto "$src" "$ARCHCI_R2_RELEASE/$reldir/$db.${pair##*:}"
 	done
-	# prune release packages no longer in the database (superseded versions)
+	# Prune release packages no longer in the database (superseded versions),
+	# but only when the local db is authoritative for release (see above): a
+	# transient db-loss must never delete live release packages.
+	if [[ ${dbready[$reldir]} != 1 ]]; then
+		archci_log "skipping prune of [$db]: local database was not seeded from release this run"
+		continue
+	fi
 	mapfile -t indb < <(bsdtar -xOf "$localrepo/$reldir/$db.db.tar.gz" '*/desc' 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
+	if (( ${#indb[@]} == 0 )); then
+		archci_log "skipping prune of [$db]: local database is empty or unreadable"
+		continue
+	fi
 	while IFS= read -r f; do
 		[[ $f == *.pkg.tar.zst ]] || continue
 		printf '%s\n' "${indb[@]}" | grep -qxF "$f" && continue

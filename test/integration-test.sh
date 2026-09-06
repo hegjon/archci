@@ -220,6 +220,23 @@ out=$(ARCHCI_R2_STAGING=$hstg ARCHCI_R2_RELEASE=$tmp/hx ARCHCI_RCLONE_CONFIG=/de
       ARCHCI_RELEASE_GNUPGHOME=$gpgL ARCHCI_RELEASE_KEY=archci-release ARCHCI_STAGING_WARN=2 "$health" 2>&1)
 [[ $out == *"LOCKED"* ]] || fail "health must ALERT when the key is locked and staging has packages: $out"
 
+echo "--- sign prune guard: keep release packages when the local db was not seeded"
+pg=$tmp/prune-guard
+mkdir -p "$pg/release/core/os/x86_64" "$pg/staging/core/os/x86_64" "$tmp/pg-signer"
+# release already holds a package but NO database, so the seed-from-release fails
+mkpkg "$pg/release/core/os/x86_64" survivor 1-1
+: >"$pg/release/core/os/x86_64/survivor-1-1-x86_64.pkg.tar.zst.sig"
+# a new, validly builder-signed package (trusted key $gpgb) is waiting in staging
+mkpkg "$pg/staging/core/os/x86_64" newpkg 1-1
+np=$pg/staging/core/os/x86_64/newpkg-1-1-x86_64.pkg.tar.zst
+gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$np.buildsig" "$np"
+out=$(ARCHCI_R2_STAGING=$pg/staging ARCHCI_R2_RELEASE=$pg/release ARCHCI_RCLONE_CONFIG=/dev/null \
+      ARCHCI_RELEASE_GNUPGHOME=$gpgr ARCHCI_RELEASE_KEY=archci-release ARCHCI_BUILDER_KEYRING=$gpgk \
+      ARCHCI_SIGNER_HOME=$tmp/pg-signer "$here/../signer/archci-sign" 2>&1)
+[[ $out == *"skipping prune"* ]] || fail "guard should skip prune when the db was not seeded: $out"
+[[ -f $pg/release/core/os/x86_64/survivor-1-1-x86_64.pkg.tar.zst ]] || fail "prune guard must not delete the survivor"
+[[ -f $pg/release/core/os/x86_64/newpkg-1-1-x86_64.pkg.tar.zst ]] || fail "the new package should still be released"
+
 echo "--- status"
 "$status" | head -5
 "$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 0 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["core"] == 1'
