@@ -331,6 +331,63 @@ a backlog warning past `ARCHCI_STAGING_WARN`. Re-run `archci-sign --unlock` when
 you see it. The journal streams to the master, so
 `journalctl -D /var/log/journal/remote -t archci-sign-health` surfaces it there.
 
+### Using the repo (client)
+
+On a client, import the release public key and point pacman at the release URL:
+
+```
+pacman-key --add release.pub && pacman-key --lsign-key <fingerprint>
+```
+
+`/etc/pacman.conf`:
+
+```
+[core]
+SigLevel = Required
+Server = https://<r2 release domain>/$repo/os/$arch
+```
+
+It then behaves like any pacman repository. Queried from the prototype part way
+through building `core` (67 packages so far, abridged):
+
+```
+$ pacman -Sl core
+core acl 2.4.0-1
+core attr 2.6.0-1
+core audit 4.2.1-1
+core bash 5.3.15-1
+core binutils 2.47-4
+core btrfs-progs 7.1-1
+core cryptsetup 2.8.7-1
+core dbus 1.16.2-1
+core e2fsprogs 1.47.4-1
+core glib2 2.88.3-1
+core gnupg 2.4.9-3
+core iproute2 7.2.0-1
+...
+core python-brotli 1.2.0-1
+
+$ pacman -Si core/iproute2
+Repository      : core
+Name            : iproute2
+Version         : 7.2.0-1
+Description     : IP Routing Utilities
+Architecture    : x86_64
+URL             : https://git.kernel.org/pub/scm/network/iproute2/iproute2.git
+Licenses        : GPL-2.0-or-later
+Provides        : iproute
+Depends On      : glibc  libxtables.so=12-64  libcap  libcap.so=2-64  libelf  libbpf  libbpf.so=1-64
+Download Size   : 1214.64 KiB
+Installed Size  : 3181.61 KiB
+Packager        : Unknown Packager
+Build Date      : Tue Aug 18 07:37:09 2026
+Validated By    : SHA-256 Sum
+```
+
+(`Packager` is "Unknown Packager" because the farm builds without a configured
+`PACKAGER`; the package's authenticity comes from the release signature, which
+pacman verifies against the imported key on download.)
+
 ## Monitoring workers from the master
 
 Workers stream their journal to the master with `systemd-journal-upload`
