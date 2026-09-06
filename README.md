@@ -384,9 +384,10 @@ Build Date      : Tue Aug 18 07:37:09 2026
 Validated By    : SHA-256 Sum
 ```
 
-(`Packager` is "Unknown Packager" because the farm builds without a configured
-`PACKAGER`; the package's authenticity comes from the release signature, which
-pacman verifies against the imported key on download.)
+(These 67 packages were built before `ARCHCI_PACKAGER` was set, so they show
+`Unknown Packager`; builds now stamp `PACKAGER` from `ARCHCI_PACKAGER`. Either
+way the package's authenticity comes from the release signature, which pacman
+verifies against the imported key on download, not from that field.)
 
 ## Monitoring workers from the master
 

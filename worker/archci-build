@@ -99,6 +99,7 @@ export SRCDEST=$ARCHCI_WORKER_HOME/srcdest
 SOURCE_DATE_EPOCH=$(git -C "$srcdir" log -1 --format=%ct)
 export SOURCE_DATE_EPOCH
 export BUILDTOOL=archci BUILDTOOLVER=1
+export PACKAGER=$ARCHCI_PACKAGER
 
 say "Building %s %s in %s" "$job_pkgbase" "$job_version" "$copy"
 cd "$srcdir"

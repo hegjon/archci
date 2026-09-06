@@ -62,6 +62,8 @@ archci_load_conf
 : "${ARCHCI_BUILD_USER:=archci}"
 : "${ARCHCI_CHROOTS:=/var/lib/archbuild}"
 : "${ARCHCI_MAKEPKG_ARGS:=--skippgpcheck}"
+# PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
+: "${ARCHCI_PACKAGER:=archci build farm <archci@localhost>}"
 : "${ARCHCI_CHROOT_UPDATE_MINUTES:=60}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=300}"
