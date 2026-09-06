@@ -414,3 +414,7 @@ file, which is how the tests run without network or root. Run them with
   the signer reads `staging/` and writes the release prefix.
 - Worker ssh keys are shared secrets; rotate by running `archci-authorize` with
   a new key and deleting the old line from `~archci/.ssh/authorized_keys`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
