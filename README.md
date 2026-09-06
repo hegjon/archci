@@ -15,8 +15,8 @@ The master holds no signing key.
 > key, bigger workers, a custom domain for the repo, and so on).
 
 Everything is plain bash and a few small ruby scripts (the scanner, the
-next-package picker, and status, sharing one library), plus ssh, git, rsync,
-btrfs, systemd timers and journald. There is no daemon: the queue is a directory of
+next-package picker, and status, sharing one library), plus `ssh`, `git`, `rsync`,
+`btrfs`, `systemd` timers and `journald`. There is no daemon: the queue is a directory of
 files, and moving a file between `pending/`, `running/`, `done/` and `failed/`
 is the whole state machine.
 
