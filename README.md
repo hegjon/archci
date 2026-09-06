@@ -310,6 +310,15 @@ systemctl start archci-sign.timer # sign new packages every 2 minutes
 journalctl -u archci-sign -f
 ```
 
+The release key is unlocked into `gpg-agent`, whose cache expires (default one
+day, `max-cache-ttl` in the release keyring's `gpg-agent.conf`). When it lapses
+signing stops silently and packages pile up in staging, so `archci-sign-health`
+(a timer) tests the key with `gpg --pinentry-mode error` and checks the staging
+depth, and warns loudly into the journal — `ALERT: release key is LOCKED ...` or
+a backlog warning past `ARCHCI_STAGING_WARN`. Re-run `archci-sign --unlock` when
+you see it. The journal streams to the master, so
+`journalctl -D /var/log/journal/remote -t archci-sign-health` surfaces it there.
+
 ## Monitoring workers from the master
 
 Workers stream their journal to the master with `systemd-journal-upload`
@@ -364,6 +373,7 @@ archci-build job.file /tmp/out      reproduce a build by hand on a worker (root)
 archci-sign --unlock                cache the release passphrase for the session
 archci-sign                         sign and publish staged packages now
 journalctl -u archci-sign -f        release-signing activity
+journalctl -u archci-sign-health    stall alerts (locked key, staging backlog)
 archci-authorize-builder key.pub    trust a worker's builder key
 ```
 

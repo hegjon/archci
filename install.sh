@@ -132,10 +132,11 @@ elif [[ $role == signer ]]; then
 		printf 'default-cache-ttl 86400\nmax-cache-ttl 86400\nallow-loopback-pinentry\n' \
 			>"$ARCHCI_RELEASE_GNUPGHOME/gpg-agent.conf"
 	fi
-	echo "==> signer: systemd timer"
-	install -m 644 systemd/archci-sign.service systemd/archci-sign.timer "$unitdir/"
+	echo "==> signer: systemd timers"
+	install -m 644 systemd/archci-sign.service systemd/archci-sign.timer \
+		systemd/archci-sign-health.service systemd/archci-sign-health.timer "$unitdir/"
 	systemctl daemon-reload
-	systemctl enable archci-sign.timer
+	systemctl enable archci-sign.timer archci-sign-health.timer
 	cat <<-MSG
 
 	Signer installed. It talks only to R2, never to the master. Next:

@@ -200,6 +200,26 @@ gpg --homedir "$relpub" --batch --verify "$rel/hello-1-1-x86_64.pkg.tar.zst.sig"
 # staging is drained (both the released and the rejected package removed)
 [[ -z $(find "$staging" -name '*.pkg.tar.zst' 2>/dev/null) ]] || fail "staging must be drained"
 
+echo "--- sign-health: quiet when healthy, warns on lock or backlog"
+health=$here/../signer/archci-sign-health
+hstg=$tmp/hstaging; mkdir -p "$hstg/core/os/x86_64"
+# unlocked ($gpgr has no passphrase) and staging empty -> silent
+out=$(ARCHCI_R2_STAGING=$hstg ARCHCI_R2_RELEASE=$tmp/hx ARCHCI_RCLONE_CONFIG=/dev/null \
+      ARCHCI_RELEASE_GNUPGHOME=$gpgr ARCHCI_RELEASE_KEY=archci-release ARCHCI_STAGING_WARN=2 "$health" 2>&1)
+[[ -z $out ]] || fail "health must be silent when unlocked and staging empty: $out"
+# unlocked but a backlog above the threshold -> WARNING
+mkpkg "$hstg/core/os/x86_64" p1 1-1; mkpkg "$hstg/core/os/x86_64" p2 1-1
+out=$(ARCHCI_R2_STAGING=$hstg ARCHCI_R2_RELEASE=$tmp/hx ARCHCI_RCLONE_CONFIG=/dev/null \
+      ARCHCI_RELEASE_GNUPGHOME=$gpgr ARCHCI_RELEASE_KEY=archci-release ARCHCI_STAGING_WARN=2 "$health" 2>&1)
+[[ $out == *"not draining"* ]] || fail "health must warn on staging backlog: $out"
+# a locked key (passphrase set, agent cache cleared) with a backlog -> ALERT
+gpgL=$tmp/gpg-locked; mkdir -p "$gpgL"; chmod 700 "$gpgL"
+gpg --homedir "$gpgL" --batch --pinentry-mode loopback --passphrase pw --quick-generate-key 'archci-release <l@t>' ed25519 sign never 2>/dev/null
+gpgconf --homedir "$gpgL" --kill gpg-agent 2>/dev/null || true
+out=$(ARCHCI_R2_STAGING=$hstg ARCHCI_R2_RELEASE=$tmp/hx ARCHCI_RCLONE_CONFIG=/dev/null \
+      ARCHCI_RELEASE_GNUPGHOME=$gpgL ARCHCI_RELEASE_KEY=archci-release ARCHCI_STAGING_WARN=2 "$health" 2>&1)
+[[ $out == *"LOCKED"* ]] || fail "health must ALERT when the key is locked and staging has packages: $out"
+
 echo "--- status"
 "$status" | head -5
 "$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 0 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["core"] == 1'

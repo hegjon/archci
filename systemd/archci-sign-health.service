@@ -1,0 +1,8 @@
+[Unit]
+Description=archci signer: warn if release signing is stalled
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/archci-sign-health

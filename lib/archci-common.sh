@@ -52,6 +52,8 @@ archci_load_conf
 : "${ARCHCI_RELEASE_KEY:=archci-release}"
 : "${ARCHCI_BUILDER_KEYRING:=/etc/archci/builder-keyring}"
 : "${ARCHCI_SIGNER_HOME:=/var/lib/archci-signer}"
+# archci-sign-health warns when at least this many packages sit unsigned in staging.
+: "${ARCHCI_STAGING_WARN:=20}"
 : "${ARCHCI_SNAPSHOTS:=5}"
 : "${ARCHCI_MASTER:=archci@master}"
 : "${ARCHCI_JOURNAL_URL:=http://${ARCHCI_MASTER#*@}:19532}"
