@@ -145,8 +145,13 @@ if [[ $job_arch != any && $job_arch != x86_64 && $ARCHCI_IGNOREARCH == 1 ]]; the
 	extra_makepkg_args+=(--ignorearch)
 fi
 (( ${#extra_makepkg_args[@]} )) && mcp_args+=(-- "${extra_makepkg_args[@]}")
+# Through a pipe on purpose: systemd-nspawn (arch-nspawn's --console=autopipe)
+# passes the container's stdout through when it is a pipe or a file, but drops
+# it when it is the unit's journal stream socket, which left every line makepkg
+# printed inside the chroot out of the journal and of build.log. pipefail
+# makes rc makechrootpkg's own status.
 rc=0
-makechrootpkg "${mcp_args[@]}" || rc=$?
+makechrootpkg "${mcp_args[@]}" 2>&1 | cat || rc=$?
 (( rc == 0 )) || echo "==> makechrootpkg exited with $rc"
 
 shopt -s nullglob
