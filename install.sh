@@ -1,14 +1,34 @@
 #!/bin/bash
-# install.sh master|worker -- install archci on this Arch/Omarchy machine.
+# install.sh master|worker|signer -- install archci on this Arch/Omarchy machine.
+#
+# Two ways in. From a source checkout, the files are copied to /usr/local
+# first. From the archci package (PKGBUILD), where this script is
+# /usr/bin/archci-setup, the files and units are already in place under
+# /usr/lib/archci and /usr/lib/systemd/system, and only the role setup runs:
+# packages, user, directories, keys, timers.
 set -euo pipefail
-cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+self=$(readlink -f "${BASH_SOURCE[0]}")
+cd "$(dirname "$self")"
 role=${1:-}
-[[ $role == master || $role == worker || $role == signer ]] || { echo "usage: $0 master|worker|signer" >&2; exit 2; }
+[[ $role == master || $role == worker || $role == signer ]] || { echo "usage: ${0##*/} master|worker|signer" >&2; exit 2; }
 (( EUID == 0 )) || { echo "run as root" >&2; exit 1; }
 
-libdir=/usr/local/lib/archci
-bindir=/usr/local/bin
+if [[ $self == /usr/lib/archci/install.sh ]]; then
+	packaged=1
+	libdir=/usr/lib/archci
+	bindir=/usr/bin
+else
+	packaged=0
+	libdir=/usr/local/lib/archci
+	bindir=/usr/local/bin
+fi
 unitdir=/etc/systemd/system
+
+# install_unit FILE... -> into $unitdir, unless the package already ships them.
+install_unit() {
+	(( packaged )) && return 0
+	install -m 644 "$@" "$unitdir/"
+}
 
 # btrfs subvolume when possible (cheap snapshots), plain directory otherwise.
 mksubvol() {
@@ -23,17 +43,22 @@ mksubvol() {
 
 # Same layout as the source tree: lib/ is shared, master/ or worker/ per role,
 # arch/ holds chroot configs for arches devtools has none for (worker).
-echo "==> installing lib/ and $role/ to $libdir"
-install -d -m 755 "$libdir/lib" "$libdir/$role" /etc/archci
-install -m 644 lib/* "$libdir/lib/"
-for f in "$role"/*; do
-	install -m 755 "$f" "$libdir/$role/"
-	ln -sf "$libdir/$role/${f##*/}" "$bindir/${f##*/}"
-done
-if [[ $role == worker ]]; then
-	rm -rf "$libdir/arch"
-	cp -r arch "$libdir/arch"
-	chmod -R u=rwX,go=rX "$libdir/arch"
+if (( packaged )); then
+	echo "==> archci is installed as a package under $libdir"
+	install -d -m 755 /etc/archci
+else
+	echo "==> installing lib/ and $role/ to $libdir"
+	install -d -m 755 "$libdir/lib" "$libdir/$role" /etc/archci
+	install -m 644 lib/* "$libdir/lib/"
+	for f in "$role"/*; do
+		install -m 755 "$f" "$libdir/$role/"
+		ln -sf "$libdir/$role/${f##*/}" "$bindir/${f##*/}"
+	done
+	if [[ $role == worker ]]; then
+		rm -rf "$libdir/arch"
+		cp -r arch "$libdir/arch"
+		chmod -R u=rwX,go=rX "$libdir/arch"
+	fi
 fi
 if [[ ! -e /etc/archci/archci.conf ]]; then
 	install -m 644 archci.conf.example /etc/archci/archci.conf
@@ -55,10 +80,12 @@ if [[ $role == master ]]; then
 	mksubvol /var/lib/archci/incoming
 	chown archci:archci /var/lib/archci/repo /var/lib/archci/incoming
 	echo "==> master: systemd timers"
-	install -m 644 systemd/archci-scan.* systemd/archci-reaper.* systemd/archci-stage.* "$unitdir/"
+	install_unit systemd/archci-scan.* systemd/archci-reaper.* systemd/archci-stage.*
 	echo "==> master: receive worker journals (systemd-journal-remote on port 19532)"
-	install -D -m 644 systemd/systemd-journal-remote.service.d/archci.conf "$unitdir/systemd-journal-remote.service.d/archci.conf"
-	install -D -m 644 systemd/journal-remote.conf /etc/systemd/journal-remote.conf.d/archci.conf
+	if (( ! packaged )); then
+		install -D -m 644 systemd/systemd-journal-remote.service.d/archci.conf "$unitdir/systemd-journal-remote.service.d/archci.conf"
+		install -D -m 644 systemd/journal-remote.conf /etc/systemd/journal-remote.conf.d/archci.conf
+	fi
 	systemctl daemon-reload
 	systemctl enable --now archci-scan.timer archci-reaper.timer archci-stage.timer
 	systemctl enable --now systemd-journal-remote.socket
@@ -106,7 +133,7 @@ elif [[ $role == worker ]]; then
 	gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --armor \
 		--export "archci-builder@${HOSTNAME%%.*}" >/etc/archci/builder_key.pub
 	echo "==> worker: systemd unit"
-	install -m 644 systemd/archci-worker@.service systemd/archci-build@.service "$unitdir/"
+	install_unit systemd/archci-worker@.service systemd/archci-build@.service
 	echo "==> worker: stream the journal to the master (systemd-journal-upload)"
 	source lib/archci-common.sh
 	install -d -m 755 /etc/systemd/journal-upload.conf.d
@@ -145,8 +172,8 @@ elif [[ $role == signer ]]; then
 			>"$ARCHCI_RELEASE_GNUPGHOME/gpg-agent.conf"
 	fi
 	echo "==> signer: systemd timers"
-	install -m 644 systemd/archci-sign.service systemd/archci-sign.timer \
-		systemd/archci-sign-health.service systemd/archci-sign-health.timer "$unitdir/"
+	install_unit systemd/archci-sign.service systemd/archci-sign.timer \
+		systemd/archci-sign-health.service systemd/archci-sign-health.timer
 	systemctl daemon-reload
 	systemctl enable archci-sign.timer archci-sign-health.timer
 	cat <<-MSG

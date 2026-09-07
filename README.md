@@ -226,7 +226,8 @@ systemd/  scan, reaper and stage timers (master); archci-worker@.service and
 
 `install.sh` copies `lib/` plus the role's directory (and `arch/` on a worker)
 to `/usr/local/lib/archci` with the same layout and symlinks the role's
-scripts into `/usr/local/bin`.
+scripts into `/usr/local/bin`. `PKGBUILD` packages the whole tree the same
+way under `/usr/lib/archci` (see Install).
 
 ## Layout on the master (`/var/lib/archci`)
 
@@ -264,9 +265,22 @@ claimed=2026-09-05T07:41:12Z
 
 ## Install
 
-All three roles (master, worker, signer) run on Arch or Omarchy machines. Copy
-or clone this directory to each, then run `install.sh` with the role. The signer
-needs only R2 access; the master and workers share a VPC.
+All three roles (master, worker, signer) run on Arch or Omarchy machines.
+Either clone this directory to each and run `install.sh` with the role, which
+copies the tree to `/usr/local/lib/archci`, or install the package and run
+`archci-setup` with the role:
+
+```
+makepkg -si            # in a checkout: builds archci-git from the git repository
+archci-setup master    # or worker, signer: users, directories, keys, timers
+```
+
+The package (`PKGBUILD`, `archci-git`) puts the tree in `/usr/lib/archci`,
+the commands in `/usr/bin`, the units in `/usr/lib/systemd/system` and the
+config in `/etc/archci/archci.conf`; `archci-setup` is `install.sh` running
+from there, doing only the role setup. Role dependencies are `optdepends`
+that the setup installs. The signer needs only R2 access; the master and
+workers share a VPC.
 
 ### Master
 
