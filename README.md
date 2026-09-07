@@ -226,8 +226,9 @@ systemd/  scan, reaper and stage timers (master); archci-worker@.service and
 
 `install.sh` copies `lib/` plus the role's directory (and `arch/` on a worker)
 to `/usr/local/lib/archci` with the same layout and symlinks the role's
-scripts into `/usr/local/bin`. `PKGBUILD` packages the whole tree the same
-way under `/usr/lib/archci` (see Install).
+scripts into `/usr/local/bin`. `PKGBUILD` packages the tree the same way
+under `/usr/lib/archci`, one package per role, without `install.sh` (see
+Install).
 
 ## Layout on the master (`/var/lib/archci`)
 
@@ -265,22 +266,26 @@ claimed=2026-09-05T07:41:12Z
 
 ## Install
 
-All three roles (master, worker, signer) run on Arch or Omarchy machines.
-Either clone this directory to each and run `install.sh` with the role, which
-copies the tree to `/usr/local/lib/archci`, or install the package and run
-`archci-setup` with the role:
+All three roles (master, worker, signer) run on Arch or Omarchy machines. Copy
+or clone this directory to each, then run `install.sh` with the role. The signer
+needs only R2 access; the master and workers share a VPC.
 
-```
-makepkg -si            # in a checkout: builds archci-git from the git repository
-archci-setup master    # or worker, signer: users, directories, keys, timers
-```
+There are also packages: `PKGBUILD` is a split package built from the git
+repository (`makepkg -s` in a checkout), one package per role on top of a
+shared one:
 
-The package (`PKGBUILD`, `archci-git`) puts the tree in `/usr/lib/archci`,
-the commands in `/usr/bin`, the units in `/usr/lib/systemd/system` and the
-config in `/etc/archci/archci.conf`; `archci-setup` is `install.sh` running
-from there, doing only the role setup. Role dependencies are `optdepends`
-that the setup installs. The signer needs only R2 access; the master and
-workers share a VPC.
+- `archci-git`: `lib/` under `/usr/lib/archci`, the config as
+  `/etc/archci/archci.conf`, and the `archci` user (sysusers)
+- `archci-master-git`, `archci-worker-git`, `archci-signer-git`: the role's
+  scripts as `/usr/bin` commands, its units in `/usr/lib/systemd/system`,
+  its `/var/lib/archci*` directories (tmpfiles), and its dependencies
+
+`install.sh` is not part of them; with a role package installed, do the rest
+of that role's setup by hand, following the role sections below: for a
+master authorize worker keys and enable the scan, reaper and stage timers;
+for a worker generate `/etc/archci/worker_key` and the builder key, write the
+journal-upload drop-in, and enable `archci-worker@1`; for a signer create the
+release keyring and enable the sign timers.
 
 ### Master
 

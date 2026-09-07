@@ -1,0 +1,12 @@
+# master state (ARCHCI_HOME): queue, built records, logs, pool
+d /var/lib/archci 0755 archci archci -
+d /var/lib/archci/queue 0755 archci archci -
+d /var/lib/archci/queue/pending 0755 archci archci -
+d /var/lib/archci/queue/running 0755 archci archci -
+d /var/lib/archci/queue/done 0755 archci archci -
+d /var/lib/archci/queue/failed 0755 archci archci -
+d /var/lib/archci/built 0755 archci archci -
+d /var/lib/archci/logs 0755 archci archci -
+d /var/lib/archci/lock 0755 archci archci -
+d /var/lib/archci/incoming 0755 archci archci -
+d /var/lib/archci/repo 0755 archci archci -

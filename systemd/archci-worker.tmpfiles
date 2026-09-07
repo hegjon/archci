@@ -1,0 +1,5 @@
+# worker state (ARCHCI_WORKER_HOME): jobs and builds run as root, sources as archci
+d /var/lib/archci-worker 0755 root root -
+d /var/lib/archci-worker/jobs 0755 root root -
+d /var/lib/archci-worker/build 0755 root root -
+d /var/lib/archci-worker/srcdest 0755 archci archci -

@@ -1,0 +1,4 @@
+# signer state (ARCHCI_SIGNER_HOME)
+d /var/lib/archci-signer 0755 root root -
+d /var/lib/archci-signer/work 0755 root root -
+d /var/lib/archci-signer/repo 0755 root root -

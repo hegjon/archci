@@ -1,0 +1,3 @@
+# archci user for every role: master (ssh forced command needs a shell),
+# worker (makechrootpkg -U), signer.
+u archci - "archci build farm" /var/lib/archci /bin/bash
