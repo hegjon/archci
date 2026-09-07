@@ -187,6 +187,13 @@ cmd_report() {
 	logdir=$ARCHCI_HOME/logs/$job_repo/$job_pkgbase/$job_version/$job_arch
 	mkdir -p "$logdir"
 	[[ -f $inc/build.log ]] && mv "$inc/build.log" "$logdir/attempt-$job_attempt.log"
+	# makepkg's own logs (<pkg>-<ver>-<arch>-{prepare,build,check,package}.log)
+	# travel with the results; they hold the compiler and test output that the
+	# unit journal does not, and they are all a failed build leaves behind.
+	local mlog
+	for mlog in "$inc"/*.log; do
+		[[ -f $mlog ]] && mv "$mlog" "$logdir/attempt-$job_attempt-${mlog##*/}"
+	done
 
 	if [[ $status == success ]] && ! ingest "$id" "$inc"; then
 		status=failure
