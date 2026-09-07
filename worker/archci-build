@@ -34,19 +34,30 @@ source /usr/share/devtools/lib/archroot.sh
 
 say() { printf "==> $1\n" "${@:2}"; }
 
-profile=$(archci_profile "$job_repo")
-chroot=$ARCHCI_CHROOTS/$profile-$job_arch
-pacconf=/usr/share/devtools/pacman.conf.d/$profile.conf
-mkconf=/usr/share/devtools/makepkg.conf.d/$job_arch.conf
-[[ -f $pacconf ]] || archci_die "no devtools pacman.conf for repo $job_repo ($pacconf)"
-[[ -f $mkconf ]] || archci_die "no devtools makepkg.conf for $job_arch ($mkconf)"
+# The arch we build in: the job's, or this worker's own for an "any" package.
+arch=$job_arch
+[[ $arch == any ]] && arch=$ARCHCI_ARCH
+[[ $arch == "$ARCHCI_ARCH" ]] || archci_die "job $job_id is for $job_arch but this worker builds $ARCHCI_ARCH"
+profile=${job_profile:-$(archci_profile "$job_repo")}
+chroot=$ARCHCI_CHROOTS/$profile-$arch
+# Chroot configs. devtools only ships x86_64 ones, so a port arch takes its
+# makepkg.conf (and optionally its pacman <profile>.conf) from an overlay:
+# /etc/archci/<arch>/ (local), then arch/<arch>/ shipped with archci, then
+# devtools. The devtools pacman.conf includes the host's mirrorlist and
+# arch-nspawn copies the host's pacman trust, so a native port worker whose own
+# pacman already uses the port's repo and key needs no pacman override.
+pacconf=$(archci_arch_conf "$arch" "$profile.conf" /usr/share/devtools/pacman.conf.d/"$profile.conf")
+mkconf=$(archci_arch_conf "$arch" makepkg.conf /usr/share/devtools/makepkg.conf.d/"$arch.conf")
+[[ -f $pacconf ]] || archci_die "no pacman.conf for repo $job_repo on $arch ($pacconf)"
+[[ -f $mkconf ]] || archci_die "no makepkg.conf for $arch (devtools has none; add /etc/archci/$arch/makepkg.conf)"
 base_packages=(base-devel)
 [[ $profile == multilib* ]] && base_packages+=(multilib-devel)
 copy=archci-$instance
 srcdir=$ARCHCI_WORKER_HOME/build/$instance/$job_pkgbase
 
 echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
-echo "    repo=$job_repo profile=$profile chroot=$chroot copy=$copy commit=$job_commit"
+echo "    repo=$job_repo arch=$job_arch profile=$profile chroot=$chroot copy=$copy commit=$job_commit"
+echo "    pacman.conf=$pacconf makepkg.conf=$mkconf"
 
 # --- clean chroot: create once, refresh periodically, recreate on devtools bumps
 prepare_root() {
@@ -75,20 +86,35 @@ lock 9 "$chroot/root.lock" "Waiting for the clean chroot"
 prepare_root
 lock_close 9
 
-# --- sources: the packaging repo at exactly the released commit
-say "Fetching %s at %s" "$job_pkgbase" "$job_commit"
+# --- sources: the package directory of the PKGBUILD repository at exactly
+# the job's commit. One bare mirror per worker host is shared by its
+# instances (fetches serialized by a lock); the directory is exported from it
+# with git archive, so no working tree is ever checked out.
+subdir=$ARCHCI_PKGBUILDS_DIR/$job_pkgbase
+say "Fetching %s at %s from %s" "$subdir" "$job_commit" "$ARCHCI_PKGBUILDS_URL"
+export GIT_TERMINAL_PROMPT=0
+mirror=$ARCHCI_WORKER_HOME/pkgbuilds.git
+(
+	exec 7>"$mirror.lock"
+	flock 7
+	if [[ ! -d $mirror ]]; then
+		git clone -q --bare "$ARCHCI_PKGBUILDS_URL" "$mirror"
+	fi
+	# The URL is config; follow it even on an existing mirror.
+	git -C "$mirror" remote set-url origin "$ARCHCI_PKGBUILDS_URL"
+	if ! git -C "$mirror" cat-file -e "$job_commit^{commit}" 2>/dev/null; then
+		# Fetch the bare sha; a server that refuses that still serves the branch.
+		git -C "$mirror" fetch -q origin "$job_commit" 2>/dev/null ||
+			git -C "$mirror" fetch -q origin "+refs/heads/$ARCHCI_PKGBUILDS_BRANCH:refs/heads/$ARCHCI_PKGBUILDS_BRANCH"
+	fi
+	git -C "$mirror" cat-file -e "$job_commit^{commit}" 2>/dev/null
+) || archci_die "commit $job_commit is not in $ARCHCI_PKGBUILDS_URL"
 rm -rf "$srcdir"
 mkdir -p "$srcdir"
-export GIT_TERMINAL_PROMPT=0
-url=$ARCHCI_PKGBUILD_URL/$(archci_gitlab_path "$job_pkgbase").git
-git -c init.defaultBranch=main init -q "$srcdir"
-git -C "$srcdir" remote add origin "$url"
-if ! git -C "$srcdir" fetch -q --depth=1 origin "$job_commit" 2>/dev/null; then
-	# Server refused fetching a bare sha; the release tag reaches the same commit.
-	git -C "$srcdir" fetch -q --depth=1 origin "refs/tags/$job_tag" || git -C "$srcdir" fetch -q origin
-fi
-git -C "$srcdir" checkout -q "$job_commit"
-[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $url at $job_commit"
+depth=$(( $(printf '%s' "$subdir" | tr -cd / | wc -c) + 1 ))
+git -C "$mirror" archive --format=tar "$job_commit" "$subdir" | tar -x --strip-components="$depth" -C "$srcdir" ||
+	archci_die "no $subdir in $ARCHCI_PKGBUILDS_URL at $job_commit"
+[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $subdir at $job_commit"
 chmod -R a+rX "$srcdir"
 
 # --- build
@@ -96,7 +122,7 @@ mkdir -p "$outdir" "$ARCHCI_WORKER_HOME/srcdest"
 chown "$ARCHCI_BUILD_USER" "$ARCHCI_WORKER_HOME/srcdest" "$outdir"
 export PKGDEST=$outdir LOGDEST=$outdir SRCPKGDEST=$outdir
 export SRCDEST=$ARCHCI_WORKER_HOME/srcdest
-SOURCE_DATE_EPOCH=$(git -C "$srcdir" log -1 --format=%ct)
+SOURCE_DATE_EPOCH=$(git -C "$mirror" log -1 --format=%ct "$job_commit")
 export SOURCE_DATE_EPOCH
 export BUILDTOOL=archci BUILDTOOLVER=1
 export PACKAGER=$ARCHCI_PACKAGER
@@ -108,12 +134,17 @@ mcp_args=(-c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
 # --skippgpcheck: this is a rebuild farm, so upstream source authenticity is
 # not re-verified here (there is no central bundle of packagers' upstream
 # keys). The source is still pinned by the PKGBUILD sha256sums and by the exact
-# git commit taken from the trusted packaging repo. Set it empty to require
+# git commit taken from the trusted PKGBUILD repository. Set it empty to require
 # signatures (then seed the build user's keyring yourself).
-if [[ -n $ARCHCI_MAKEPKG_ARGS ]]; then
-	read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
-	mcp_args+=(-- "${extra_makepkg_args[@]}")
+extra_makepkg_args=()
+[[ -n $ARCHCI_MAKEPKG_ARGS ]] && read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
+# PKGBUILDs carried from Arch declare arch=(x86_64) unless a patch in the
+# repository adds the port arch; a port arch builds them anyway (the Arch
+# Linux Ports RFC keeps the arch array as is and has the tooling ignore it).
+if [[ $job_arch != any && $job_arch != x86_64 && $ARCHCI_IGNOREARCH == 1 ]]; then
+	extra_makepkg_args+=(--ignorearch)
 fi
+(( ${#extra_makepkg_args[@]} )) && mcp_args+=(-- "${extra_makepkg_args[@]}")
 rc=0
 makechrootpkg "${mcp_args[@]}" || rc=$?
 (( rc == 0 )) || echo "==> makechrootpkg exited with $rc"

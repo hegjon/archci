@@ -12,7 +12,9 @@ write_files:
     permissions: '0644'
     content: |
       ARCHCI_MASTER="archci@master"
-      ARCHCI_REPOS="core extra"
+      ARCHCI_PKGBUILDS_URL=https://github.com/hegjon/omarchy-pkgs.git
+      # the arch this worker builds; the master must list it in ARCHCI_ARCHES
+      ARCHCI_ARCH=x86_64
   - path: /etc/archci/worker_key
     permissions: '0600'
     content: |

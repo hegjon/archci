@@ -1,5 +1,5 @@
 [Unit]
-Description=archci: scan Arch packaging state and enqueue builds
+Description=archci: sync the PKGBUILD repository and report outstanding builds
 After=network-online.target
 Wants=network-online.target
 RequiresMountsFor=/var/lib/archci

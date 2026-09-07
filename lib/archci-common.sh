@@ -26,9 +26,27 @@ archci_load_conf
 
 : "${ARCHCI_HOME:=/var/lib/archci}"
 : "${ARCHCI_ARCH:=x86_64}"
-: "${ARCHCI_REPOS:=core extra}"
-: "${ARCHCI_STATE_URL:=https://gitlab.archlinux.org/archlinux/packaging/state.git}"
-: "${ARCHCI_PKGBUILD_URL:=https://gitlab.archlinux.org/archlinux/packaging/packages}"
+# Master: architectures workers may claim jobs for (worker claims carry their
+# arch). Upstream releases only x86_64 (plus "any"), so every arch here builds
+# the x86_64 release list; a port arch needs its own workers and an
+# arch/<arch>/makepkg.conf on them. ARCHCI_ANY_ARCH is the arch whose workers
+# build the arch-independent ("any") packages, pooled for every arch.
+: "${ARCHCI_ARCHES:=$ARCHCI_ARCH}"
+: "${ARCHCI_ANY_ARCH:=${ARCHCI_ARCHES%% *}}"
+# The PKGBUILD repository: one git repository holding every package the farm
+# builds as <ARCHCI_PKGBUILDS_DIR>/<name>/PKGBUILD plus .omarchy/package.json
+# (the omarchy-pkgs layout). Its branch is the release list: a package is
+# outstanding when the version its PKGBUILD declares is not the one last
+# built. Switching to another fork is this one URL.
+: "${ARCHCI_PKGBUILDS_URL:=https://github.com/hegjon/omarchy-pkgs.git}"
+: "${ARCHCI_PKGBUILDS_BRANCH:=master}"
+: "${ARCHCI_PKGBUILDS_DIR:=pkgbuilds}"
+# Name of the pacman repository the farm produces ($repo in the client's
+# Server line, the database name, and the repo/<repo>/os/<arch> pool).
+: "${ARCHCI_REPO:=omarchy}"
+# Only build packages whose .omarchy/package.json "source" is listed
+# (e.g. "arch" for those carried from Arch Linux). Empty: every package.
+: "${ARCHCI_PKG_SOURCES:=}"
 : "${ARCHCI_MAX_ATTEMPTS:=3}"
 : "${ARCHCI_STALE_MINUTES:=30}"
 : "${ARCHCI_RETRY_MINUTES:=180}"
@@ -62,12 +80,18 @@ archci_load_conf
 : "${ARCHCI_BUILD_USER:=archci}"
 : "${ARCHCI_CHROOTS:=/var/lib/archbuild}"
 : "${ARCHCI_MAKEPKG_ARGS:=--skippgpcheck}"
+# Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
+: "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
 : "${ARCHCI_PACKAGER:=archci build farm <archci@localhost>}"
 : "${ARCHCI_CHROOT_UPDATE_MINUTES:=60}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=300}"
 export "${!ARCHCI_@}"
+
+# Master: the PKGBUILD repository clone and the package index over it.
+ARCHCI_PKGBUILDS_CLONE=$ARCHCI_HOME/pkgbuilds
+ARCHCI_PKGBUILDS_INDEX=$ARCHCI_HOME/pkgbuilds.index
 
 # Master queue. A job is one small key=value file that moves between these.
 Q_PENDING=$ARCHCI_HOME/queue/pending
@@ -85,38 +109,50 @@ archci_log() {
 archci_die() { archci_log "$@"; exit 1; }
 archci_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# Job ids look like "<prio>-<epoch>-<repo>,<pkgbase>,<version>"; they double as
-# file names, rsync targets and log paths, so they are validated strictly.
-archci_valid_id()     { [[ $1 =~ ^[0-9]-[0-9]+-[a-z0-9-]+,[a-zA-Z0-9@._+-]+,[a-zA-Z0-9@._+:~-]+$ ]]; }
+# Job ids look like "<prio>-<epoch>-<repo>,<pkgbase>,<version>,<arch>"; they
+# double as file names, rsync targets and log paths, so they are validated
+# strictly. (The arch suffix is optional so jobs from before it are still valid.)
+archci_valid_id()     { [[ $1 =~ ^[0-9]-[0-9]+-[a-z0-9-]+,[a-zA-Z0-9@._+-]+,[a-zA-Z0-9@._+:~-]+(,[a-z0-9_]+)?$ ]]; }
 archci_valid_worker() { [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; }
+archci_valid_arch()   { [[ $1 =~ ^[a-z0-9_]{1,32}$ ]]; }
+# Is ARCH one of ARCHCI_ARCHES?
+archci_enabled_arch() { [[ " $ARCHCI_ARCHES " == *" $1 "* ]]; }
+# May a worker of arch WORKER_ARCH build a job of arch JOB_ARCH?
+archci_can_build()    { [[ $2 == "$1" || ( $2 == any && $1 == "$ARCHCI_ANY_ARCH" ) ]]; }
+
+# archci_arch_conf ARCH FILE DEFAULT -> the chroot config FILE for ARCH: from
+# /etc/archci/ARCH/ if present, else arch/ARCH/ in the archci tree, else DEFAULT.
+archci_arch_conf() {
+	local d
+	for d in /etc/archci/$1 "$ARCHCI_ROOT/arch/$1"; do
+		[[ -f $d/$2 ]] && { printf '%s\n' "$d/$2"; return 0; }
+	done
+	printf '%s\n' "$3"
+}
 
 # archci_read_job FILE -> job_id job_repo job_arch job_pkgbase job_version
-#                         job_tag job_commit job_attempt job_worker
+#                         job_commit job_profile job_attempt job_worker
+# pkgbase is the package directory under ARCHCI_PKGBUILDS_DIR (its PKGBUILD's
+# own pkgbase may differ for a split package); commit is the PKGBUILD
+# repository commit the build is pinned to. (tag is accepted from old files.)
 archci_read_job() {
 	local line
-	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_attempt=0 job_worker=''
+	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker=''
 	while IFS= read -r line || [[ -n $line ]]; do
-		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|attempt|worker)=(.*)$ ]] || continue
+		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker)=(.*)$ ]] || continue
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 	done <"$1"
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]
 }
 
-# Packaging repo -> devtools build profile (name of pacman.conf.d/<profile>.conf).
-# core has no profile of its own; Arch builds core packages with the extra one.
+# devtools build profile (name of pacman.conf.d/<profile>.conf) for a package:
+# multilib packages need the multilib one, everything else builds with extra
+# (Arch builds core with it too). archci-pkgs decides per package from
+# .omarchy/package.json arch_repo and a lib32- prefix; this is the fallback
+# for a job file without a profile, keyed by its repo name.
 archci_profile() {
 	case $1 in
-		core) echo extra ;;
-		*) echo "$1" ;;
+		multilib*) echo multilib ;;
+		*) echo extra ;;
 	esac
-}
-
-# pkgbase -> GitLab project path. Same rules as devtools' gitlab_project_name_to_path.
-archci_gitlab_path() {
-	printf '%s' "$1" | sed -E \
-		-e 's/([a-zA-Z0-9]+)\+([a-zA-Z]+)/\1-\2/g' \
-		-e 's/\+/plus/g' \
-		-e 's/[^a-zA-Z0-9_\-\.]/-/g' \
-		-e 's/[_\-]{2,}/-/g' \
-		-e 's/^tree$/unix-tree/'
 }

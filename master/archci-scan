@@ -1,17 +1,20 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# archci-scan -- sync archlinux/packaging/state and report what is outstanding.
+# archci-scan -- sync the PKGBUILD repository and report what is outstanding.
 #
-# The state repo has one file per package in <repo>-<arch>/<pkgbase>:
-#   "<pkgbase> <version> <tag> <commit>"
-# Nothing is queued here: archci-job claim asks archci-next for the next
-# package just in time, comparing state/ with built/<repo>-<arch>/<pkgbase>.
+# The repository (ARCHCI_PKGBUILDS_URL, branch ARCHCI_PKGBUILDS_BRANCH) holds
+# one directory per package under ARCHCI_PKGBUILDS_DIR; its PKGBUILD version is
+# the release list. Nothing is queued here: archci-job claim asks archci-next
+# for the next package just in time, comparing the package index
+# (archci-pkgs) with built/<repo>-<arch>/<name>.
 require_relative '../lib/archci'
 
 cfg = Archci.config
 home = Archci.home
-state = File.join(home, 'state')
+clone = File.join(home, 'pkgbuilds')
+url = cfg['ARCHCI_PKGBUILDS_URL']
+branch = cfg['ARCHCI_PKGBUILDS_BRANCH']
 
 File.open(File.join(home, 'lock', 'scan.lock'), File::RDWR | File::CREAT) do |lock|
   unless lock.flock(File::LOCK_EX | File::LOCK_NB)
@@ -19,14 +22,20 @@ File.open(File.join(home, 'lock', 'scan.lock'), File::RDWR | File::CREAT) do |lo
     exit 0
   end
 
-  if File.directory?(File.join(state, '.git'))
-    ok = system('git', '-C', state, 'pull', '-q', '--ff-only')
+  if File.directory?(File.join(clone, '.git'))
+    # The URL and branch are config: follow them even on an existing clone.
+    ok = system('git', '-C', clone, 'remote', 'set-url', 'origin', url) &&
+         system('git', '-C', clone, 'fetch', '-q', 'origin', branch) &&
+         system('git', '-C', clone, 'checkout', '-q', '--detach', 'FETCH_HEAD')
   else
-    ok = system('git', 'clone', '-q', '--depth=1', cfg['ARCHCI_STATE_URL'], state)
+    ok = system('git', 'clone', '-q', '--branch', branch, url, clone)
   end
-  abort 'archci-scan: could not sync the state repo' unless ok
+  abort "archci-scan: could not sync #{url} (#{branch})" unless ok
+  # Refresh the package index now, off the claim path.
+  Archci.packages(refresh: true)
 end
 
 outstanding = Archci.outstanding
 updates = outstanding.count { |e| e['prio'] == 1 }
-Archci.log "state synced: #{updates} update(s) and #{outstanding.size - updates} unbuilt package(s) outstanding"
+Archci.log "#{url} #{branch} synced: #{Archci.packages.size} package(s), " \
+           "#{updates} update(s) and #{outstanding.size - updates} unbuilt outstanding"

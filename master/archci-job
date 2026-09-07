@@ -1,15 +1,20 @@
 #!/bin/bash
 # archci-job -- master-side queue operations (runs as the archci user).
 #
-#   claim WORKER              hand the next job to WORKER and print it: the first
-#                             pending file, else the next outstanding package
-#                             (archci-next), chosen just in time
+#   claim WORKER [ARCH]       hand the next job to WORKER (of ARCH, default
+#                             ARCHCI_ARCH) and print it: the first pending file
+#                             the worker can build, else the next outstanding
+#                             package (archci-next ARCH), chosen just in time
 #   heartbeat ID              mark a running job as still alive
 #   report ID STATUS          finish a job: success | failure | abandoned
 #                             (results are expected in incoming/ID/)
 #   requeue ID                move a running/failed job back to pending
 #   retry ID                  reset the attempt counter and requeue
-#   enqueue REPO PKGBASE [P]  queue the currently released version, priority P (default 0)
+#   enqueue PKGBASE [P] [ARCH]
+#                             queue the package's current version (from the
+#                             PKGBUILD repository clone), priority P (default
+#                             0), for ARCH (default ARCHCI_ARCH; "any" for an
+#                             arch-independent package)
 #   reap                      requeue stale running jobs and due retries, prune done/
 #
 # Jobs are files; moving them between queue/{pending,running,done,failed} is
@@ -48,19 +53,19 @@ requeue_file() {  # requeue_file FILE  (lock held)
 	rm -rf "${ARCHCI_HOME:?}/incoming/${name%.job}"
 }
 
-# write_job DEST PRIO REPO PKGBASE VERSION TAG COMMIT -> prints the file name
+# write_job DEST PRIO REPO ARCH PKGBASE VERSION COMMIT PROFILE -> prints the file name
 write_job() {
-	local dest=$1 prio=$2 repo=$3 pkgbase=$4 version=$5 tag=$6 commit=$7 id
-	id="$prio-$(date +%s)-$repo,$pkgbase,$version"
-	archci_valid_id "$id" || archci_die "cannot form a valid job id for $repo/$pkgbase $version"
+	local dest=$1 prio=$2 repo=$3 arch=$4 pkgbase=$5 version=$6 commit=$7 profile=$8 id
+	id="$prio-$(date +%s)-$repo,$pkgbase,$version,$arch"
+	archci_valid_id "$id" || archci_die "cannot form a valid job id for $repo/$pkgbase $version $arch"
 	cat >"$dest/$id.job.tmp" <<-JOB
 		id=$id
 		repo=$repo
-		arch=$ARCHCI_ARCH
+		arch=$arch
 		pkgbase=$pkgbase
 		version=$version
-		tag=$tag
 		commit=$commit
+		profile=$profile
 		attempt=0
 		created=$(archci_now)
 	JOB
@@ -79,19 +84,27 @@ find_job() {  # find_job ID DIR... -> path
 
 # ---------------------------------------------------------------------------
 cmd_claim() {
-	local worker=$1
+	local worker=$1 warch=${2:-$ARCHCI_ARCH}
 	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
+	archci_valid_arch "$warch" || archci_die "invalid arch: $warch"
+	archci_enabled_arch "$warch" || archci_die "arch $warch is not enabled on this master (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
 	lock_queue
-	local name='' pend
+	local name='' pend p
 	local LC_ALL=C                       # deterministic, ASCII filename order
 	shopt -s nullglob; pend=("$Q_PENDING"/*.job); shopt -u nullglob
-	(( ${#pend[@]} )) && name=${pend[0]##*/}
+	# The first pending job this worker's arch can build (its own arch, or "any"
+	# if it is the any arch).
+	for p in "${pend[@]}"; do
+		archci_read_job "$p" || continue
+		archci_can_build "$warch" "$job_arch" || continue
+		name=${p##*/}; break
+	done
 	if [[ -z $name ]]; then
 		# Nothing queued by hand or for retry: pick the next outstanding package now.
-		local prio repo pkgbase version tag commit
-		read -r prio repo pkgbase version tag commit < <("$ARCHCI_MASTER_DIR/archci-next") || true
+		local prio repo arch pkgbase version commit profile
+		read -r prio repo arch pkgbase version commit profile < <("$ARCHCI_MASTER_DIR/archci-next" "$warch") || true
 		[[ -n ${commit:-} ]] || exit 0
-		name=$(write_job "$Q_PENDING" "$prio" "$repo" "$pkgbase" "$version" "$tag" "$commit")
+		name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile")
 	fi
 	mv "$Q_PENDING/$name" "$Q_RUNNING/$name"
 	archci_read_job "$Q_RUNNING/$name" || archci_die "corrupt job file $name"
@@ -114,7 +127,9 @@ cmd_heartbeat() {
 # does not build the database; the signer does, from released (signed)
 # packages (see README "Signing"). Each package keeps its builder signature
 # (.buildsig) alongside for the signer to verify, then archci-stage moves both
-# to the R2 staging area.
+# to the R2 staging area. A package is pooled under the arch in its file name;
+# an arch-independent (-any) package is pooled once per enabled arch, since
+# pacman fetches every package from the client's own $repo/os/$arch.
 ingest() {
 	local id=$1 inc=$2 p
 	shopt -s nullglob
@@ -128,16 +143,21 @@ ingest() {
 		exec 8>"$ARCHCI_HOME/lock/repo.lock"
 		flock 8
 		for p in "${pkgs[@]}"; do
-			local base=${p##*/} dir
-			if [[ $base == *-debug-"$job_version"-*.pkg.tar.zst ]]; then
-				dir=$ARCHCI_HOME/repo/$job_repo-debug/os/$job_arch
-			else
-				dir=$ARCHCI_HOME/repo/$job_repo/os/$job_arch
+			local base=${p##*/} repo=$job_repo parch arches a dir
+			[[ $base == *-debug-"$job_version"-*.pkg.tar.zst ]] && repo=$job_repo-debug
+			parch=${base%.pkg.tar.zst}; parch=${parch##*-}
+			if [[ $parch == any ]]; then arches=$ARCHCI_ARCHES
+			elif archci_enabled_arch "$parch" && archci_can_build "$parch" "$job_arch"; then arches=$parch
+			else archci_log "$id: refusing $base: arch $parch is not $job_arch or enabled"; exit 1
 			fi
-			mkdir -p "$dir"
-			mv "$p" "$dir/$base" || exit 1
-			# builder signature travels with the package; the signer verifies it
-			if [[ -f $p.buildsig ]]; then mv "$p.buildsig" "$dir/$base.buildsig"; fi
+			for a in $arches; do
+				dir=$ARCHCI_HOME/repo/$repo/os/$a
+				mkdir -p "$dir"
+				cp --reflink=auto "$p" "$dir/$base" || exit 1
+				# builder signature travels with the package; the signer verifies it
+				if [[ -f $p.buildsig ]]; then cp "$p.buildsig" "$dir/$base.buildsig"; fi
+			done
+			rm -f "$p" "$p.buildsig"
 		done
 	) || return 1
 	mkdir -p "$ARCHCI_HOME/built/$job_repo-$job_arch"
@@ -164,7 +184,7 @@ cmd_report() {
 		return 0
 	fi
 
-	logdir=$ARCHCI_HOME/logs/$job_repo/$job_pkgbase/$job_version
+	logdir=$ARCHCI_HOME/logs/$job_repo/$job_pkgbase/$job_version/$job_arch
 	mkdir -p "$logdir"
 	[[ -f $inc/build.log ]] && mv "$inc/build.log" "$logdir/attempt-$job_attempt.log"
 
@@ -204,22 +224,35 @@ cmd_retry() {
 }
 
 cmd_enqueue() {
-	local repo=$1 pkgbase=$2 prio=${3:-0} statefile name version tag commit old
-	statefile=$ARCHCI_HOME/state/$repo-$ARCHCI_ARCH/$pkgbase
-	[[ -f $statefile ]] || archci_die "no state entry $repo-$ARCHCI_ARCH/$pkgbase (run archci-scan first?)"
-	read -r name version tag commit <"$statefile"
-	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected state line in $statefile"
+	local pkgbase=$1 prio=${2:-0} arch=${3:-$ARCHCI_ARCH} repo=$ARCHCI_REPO line name version commit parch profile old
+	archci_valid_arch "$arch" || archci_die "invalid arch: $arch"
+	[[ $arch == any ]] || archci_enabled_arch "$arch" || archci_die "arch $arch is not enabled (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
+	line=$("$ARCHCI_MASTER_DIR/archci-pkgs" "$pkgbase")
+	[[ -n $line ]] || archci_die "no package $pkgbase in the PKGBUILD repository (run archci-scan first?)"
+	read -r name version commit parch profile _ <<<"$line"
+	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected index line: $line"
+	if [[ $parch == any ]]; then
+		[[ $arch == any ]] || archci_die "$pkgbase is an arch-independent package; enqueue it with ARCH=any"
+	else
+		[[ $arch != any ]] || archci_die "$pkgbase is not an arch-independent package (arch=$parch)"
+	fi
 	lock_queue
-	for old in "$Q_PENDING"/*-"$repo,$pkgbase,"*.job; do
+	for old in "$Q_PENDING"/*-"$repo,$pkgbase,"*",$arch.job"; do
 		[[ -e $old ]] && rm -f "$old"
 	done
-	name=$(write_job "$Q_PENDING" "$prio" "$repo" "$pkgbase" "$version" "$tag" "$commit")
+	name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile")
 	archci_log "enqueued ${name%.job}"
 }
 
 cmd_reap() {
 	local now file age commit n=0
 	now=$(date +%s)
+	# Current commit of every package, to drop jobs a newer commit supersedes.
+	local -A current=()
+	local name c
+	while read -r name _ c _; do
+		[[ -n $c ]] && current[$name]=$c
+	done < <("$ARCHCI_MASTER_DIR/archci-pkgs" 2>/dev/null || true)
 	lock_queue
 	shopt -s nullglob
 	for file in "$Q_RUNNING"/*.job; do
@@ -230,11 +263,11 @@ cmd_reap() {
 		requeue_file "$file"
 		(( ++n ))
 	done
-	# A newer release supersedes queued and failed jobs; claim picks the new commit up.
+	# A newer commit of the package supersedes queued and failed jobs; claim
+	# picks the new one up if its version is still not the built one.
 	for file in "$Q_PENDING"/*.job "$Q_FAILED"/*.job; do
 		archci_read_job "$file" || continue
-		[[ -f $ARCHCI_HOME/state/$job_repo-$job_arch/$job_pkgbase ]] || continue
-		read -r _ _ _ commit <"$ARCHCI_HOME/state/$job_repo-$job_arch/$job_pkgbase"
+		commit=${current[$job_pkgbase]:-}
 		if [[ -n $commit && $commit != "$job_commit" ]]; then
 			archci_log "$job_id: superseded by commit ${commit:0:12}, dropping"
 			rm -f "$file"
@@ -258,12 +291,12 @@ cmd_reap() {
 cmd=${1:-}
 shift || true
 case $cmd in
-	claim)     (( $# == 1 )) || archci_die "usage: archci-job claim WORKER";        cmd_claim "$1" ;;
+	claim)     (( $# == 1 || $# == 2 )) || archci_die "usage: archci-job claim WORKER [ARCH]"; cmd_claim "$@" ;;
 	heartbeat) (( $# == 1 )) || archci_die "usage: archci-job heartbeat ID";        cmd_heartbeat "$1" ;;
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
 	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID";            cmd_retry "$1" ;;
-	enqueue)   (( $# >= 2 )) || archci_die "usage: archci-job enqueue REPO PKGBASE [PRIO]"; cmd_enqueue "$@" ;;
+	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
 	reap)      cmd_reap ;;
-	*) sed -n '2,13p' "$0" >&2; exit 2 ;;
+	*) sed -n '2,18p' "$0" >&2; exit 2 ;;
 esac

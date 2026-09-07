@@ -40,9 +40,10 @@ on_term() {
 }
 trap on_term TERM INT
 
-archci_log "worker $worker started, master $ARCHCI_MASTER"
+archci_valid_arch "$ARCHCI_ARCH" || archci_die "invalid ARCHCI_ARCH: $ARCHCI_ARCH"
+archci_log "worker $worker ($ARCHCI_ARCH) started, master $ARCHCI_MASTER"
 while true; do
-	if ! master claim "$worker" >"$claim"; then
+	if ! master claim "$worker" "$ARCHCI_ARCH" >"$claim"; then
 		archci_log "master unreachable, retrying in ${ARCHCI_IDLE_SLEEP}s"
 		rm -f "$claim"
 		sleep "$ARCHCI_IDLE_SLEEP"
@@ -61,7 +62,7 @@ while true; do
 	fi
 	reported=0
 	# Unit instance and job directory share a name made of safe unit-name characters.
-	name=$(printf '%s' "$job_repo-$job_pkgbase-$job_version-a$job_attempt" | tr -c 'A-Za-z0-9:_.-' '_')
+	name=$(printf '%s' "$job_repo-$job_pkgbase-$job_version-$job_arch-a$job_attempt" | tr -c 'A-Za-z0-9:_.-' '_')
 	jobdir=$jobsdir/$name
 	outdir=$jobdir/out
 	rm -rf "$jobdir"

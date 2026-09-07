@@ -1,53 +1,73 @@
 #!/bin/bash
 # shellcheck disable=SC2010,SC2012  # test assertions use ls on controlled temp fixtures
 # Exercise the master queue on a throwaway ARCHCI_HOME without network or root:
-# scan (from a fake state repo) -> just-in-time claim -> heartbeat -> report
-# success/failure -> reap. Fake packages are minimal but real enough for repo-add.
+# scan (from a fake PKGBUILD repository) -> just-in-time claim -> heartbeat ->
+# report success/failure -> reap. Fake packages are minimal but real enough for
+# repo-add.
 set -euo pipefail
 here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-export ARCHCI_CONF=/dev/null ARCHCI_HOME=$tmp/home ARCHCI_REPOS="core extra" ARCHCI_ARCH=x86_64
+export ARCHCI_CONF=/dev/null ARCHCI_HOME=$tmp/home ARCHCI_REPO=omarchy ARCHCI_ARCH=x86_64
 export ARCHCI_MAX_ATTEMPTS=2 ARCHCI_STALE_MINUTES=0 ARCHCI_RETRY_MINUTES=0 JOURNAL_STREAM=1
 job=$here/../master/archci-job
 scan=$here/../master/archci-scan
 next=$here/../master/archci-next
 status=$here/../master/archci-status
 fail() { echo "FAIL: $*" >&2; exit 1; }
-# mkpkg DIR NAME VERSION -- smallest thing repo-add accepts as a package
+# mkpkg DIR NAME VERSION [ARCH] -- smallest thing repo-add accepts as a package
 mkpkg() {
-	local d=$tmp/mkpkg; rm -rf "$d"; mkdir -p "$d"
-	printf 'pkgname = %s\npkgbase = %s\npkgver = %s\npkgdesc = fake\nurl = x\nbuilddate = 1\npackager = t\nsize = 0\narch = x86_64\n' \
-		"$2" "${2%-debug}" "$3" >"$d/.PKGINFO"
-	bsdtar -C "$d" -cf - .PKGINFO | zstd -q >"$1/$2-$3-x86_64.pkg.tar.zst"
+	local d=$tmp/mkpkg arch=${4:-x86_64}; rm -rf "$d"; mkdir -p "$d"
+	printf 'pkgname = %s\npkgbase = %s\npkgver = %s\npkgdesc = fake\nurl = x\nbuilddate = 1\npackager = t\nsize = 0\narch = %s\n' \
+		"$2" "${2%-debug}" "$3" "$arch" >"$d/.PKGINFO"
+	bsdtar -C "$d" -cf - .PKGINFO | zstd -q >"$1/$2-$3-$arch.pkg.tar.zst"
 }
 
 mkdir -p "$ARCHCI_HOME"/{queue/{pending,running,done,failed},built,logs,lock,incoming,repo}
-# fake packaging/state repo
-state=$tmp/state
-mkdir -p "$state"/{core,extra}-x86_64
-git -C "$state" init -q -b main
-echo "linux 7.2.3.arch1-2 7.2.3.arch1-2 5ad4989865a52c7b0a7b49f4117714e0b2b31d3d" >"$state/core-x86_64/linux"
-echo "libsigc++ 2.12.2-1 2.12.2-1 7cb18d882646b8e41e895f98b79be961178c3d38" >"$state/extra-x86_64/libsigc++"
-echo "acl 1:2.3.2-1 1-2.3.2-1 1111111111111111111111111111111111111111" >"$state/core-x86_64/acl"
-git -C "$state" add -A && git -C "$state" -c user.name=t -c user.email=t@t commit -q -m init
-export ARCHCI_STATE_URL=file://$state
+# fake PKGBUILD repository in the omarchy-pkgs layout: pkgbuilds/<name>/PKGBUILD
+# plus .omarchy/package.json
+pkgs=$tmp/pkgs
+git -C "$tmp" init -q -b master "$pkgs"
+# mkpkgbuild NAME VERSION [ARCH] [JSON] -- VERSION is [epoch:]pkgver-pkgrel
+mkpkgbuild() {
+	local d=$pkgs/pkgbuilds/$1 v=$2 epoch='' arch=${3:-x86_64}
+	[[ $v == *:* ]] && { epoch=${v%%:*}; v=${v#*:}; }
+	mkdir -p "$d/.omarchy"
+	printf 'pkgname=%s\npkgver=%s\npkgrel=%s\n%sarch=(%s)\n' "$1" "${v%-*}" "${v##*-}" "${epoch:+epoch=$epoch
+}" "$arch" >"$d/PKGBUILD"
+	printf '%s\n' "${4:-{\"source\": \"arch\"\}}" >"$d/.omarchy/package.json"
+}
+commit_pkgs() { git -C "$pkgs" add -A && git -C "$pkgs" -c user.name=t -c user.email=t@t commit -q -m "$1"; }
+pkgcommit() { git -C "$pkgs" log -1 --format=%H -- "pkgbuilds/$1"; }
+mkpkgbuild linux 7.2.3.arch1-2
+mkpkgbuild libsigc++ 2.12.2-1
+mkpkgbuild acl 1:2.3.2-1
+mkpkgbuild skipped 1-1 x86_64 '{"source": "local", "skip_build": true}'
+commit_pkgs init
+export ARCHCI_PKGBUILDS_URL=file://$pkgs
 
-echo "--- scan: syncs state only, stores no backlog"
+echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 "$scan"
 (( $(ls "$ARCHCI_HOME/queue/pending" | wc -l) == 0 )) || fail "scan must not create pending jobs"
-[[ $("$next") == "5 core acl 1:2.3.2-1 1-2.3.2-1 1111111111111111111111111111111111111111" ]] || fail "archci-next: $("$next")"
+[[ -d $ARCHCI_HOME/pkgbuilds/.git ]] || fail "scan must clone the PKGBUILD repository"
+[[ $("$next") == "5 omarchy x86_64 acl 1:2.3.2-1 $(pkgcommit acl) extra" ]] || fail "archci-next: $("$next")"
+"$here/../master/archci-pkgs" | grep -q '^skipped 1-1 .* skip$' || fail "archci-pkgs must list skip_build packages as skip"
+[[ $("$next" | wc -l) == 1 ]] || fail "next prints one line"
+! ARCHCI_PKG_SOURCES=local "$next" | grep -q . || fail "ARCHCI_PKG_SOURCES must filter by package.json source"
 "$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding" unless j["outstanding"] == {"updates"=>0, "backlog"=>3}'
 
 echo "--- claim picks the next outstanding package just in time"
 out=$("$job" claim worker-1)
 id=$(sed -n 's/^id=//p' <<<"$out")
-[[ $id == 5-*-core,acl,1:2.3.2-1 ]] || fail "expected acl first (sorted), got $id"
-[[ $("$next") == "5 core linux "* ]] || fail "a running package must not be offered again"
+[[ $id == 5-*-omarchy,acl,1:2.3.2-1,x86_64 ]] || fail "expected acl first (sorted), got $id"
+grep -q '^arch=x86_64$' <<<"$out" || fail "claim without an arch defaults to ARCHCI_ARCH"
+grep -q '^profile=extra$' <<<"$out" || fail "job carries the build profile"
+grep -q "^commit=$(pkgcommit acl)$" <<<"$out" || fail "job pins the package directory's commit"
+[[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "a running package must not be offered again"
 grep -q '^attempt=1$' <<<"$out" || fail "attempt should be 1"
 [[ -f $ARCHCI_HOME/queue/running/$id.job ]] || fail "job not in running/"
 "$job" heartbeat "$id"
-! "$job" heartbeat "9-1-core,nope,1-1" 2>/dev/null || fail "heartbeat of unknown job must fail"
+! "$job" heartbeat "9-1-omarchy,nope,1-1" 2>/dev/null || fail "heartbeat of unknown job must fail"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
@@ -57,17 +77,17 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 : >"$inc/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig"   # carried through to the signer
 "$job" report "$id" success
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
-[[ $(<"$ARCHCI_HOME/built/core-x86_64/acl") == "1:2.3.2-1 1111111111111111111111111111111111111111" ]] || fail "built record wrong"
-[[ -f $ARCHCI_HOME/repo/core/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
-[[ -f $ARCHCI_HOME/repo/core/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"
+[[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"
 [[ -e $ARCHCI_HOME/stage.needed ]] || fail "stage flag missing"
-[[ -f $ARCHCI_HOME/logs/core/acl/1:2.3.2-1/attempt-1.log ]] || fail "log not archived"
+[[ -f $ARCHCI_HOME/logs/omarchy/acl/1:2.3.2-1/x86_64/attempt-1.log ]] || fail "log not archived"
 [[ ! -e $inc ]] || fail "incoming not cleaned"
-[[ $("$next") == "5 core linux "* ]] || fail "built package must not be outstanding"
+[[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"
 
 echo "--- report failure, retry, give up"
 id=$(sed -n 's/^id=//p' < <("$job" claim worker-2))
-[[ $id == *core,linux,* ]] || fail "expected linux next, got $id"
+[[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
 "$job" report "$id" failure
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
 grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be final yet"
@@ -75,16 +95,16 @@ grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be fin
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "reaper should have requeued"
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "attempt kept across requeue"
 id2=$(sed -n 's/^id=//p' < <("$job" claim worker-2))
-[[ $id2 == "$id" ]] || fail "retry should be claimed first (prio 5 vs libsigc++ prio 5, older ts)"
+[[ $id2 == "$id" ]] || fail "retry should be claimed first (prio 5 vs linux prio 5, older ts)"
 "$job" report "$id" failure
 grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final after max attempts"
 "$job" reap
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "final job must stay failed"
-[[ $("$next") == "5 extra libsigc++ "* ]] || fail "a final failure at the same commit must be skipped"
+[[ $("$next") == "5 omarchy x86_64 linux "* ]] || fail "a final failure at the same commit must be skipped"
 
 echo "--- success reported with empty upload counts as failure"
 id=$(sed -n 's/^id=//p' < <("$job" claim worker-3))
-[[ $id == *libsigc++* ]] || fail "expected libsigc++, got $id"
+[[ $id == *linux* ]] || fail "expected linux, got $id"
 "$job" report "$id" success
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "empty success must fail"
 
@@ -98,17 +118,27 @@ id=$(sed -n 's/^id=//p' < <("$job" claim worker-4))
 "$job" report "$id" abandoned
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "abandoned must not count an attempt"
 
-echo "--- a new upstream version supersedes a pending job and a final failure"
-echo "libsigc++ 2.12.3-1 2.12.3-1 8888888888888888888888888888888888888888" >"$state/extra-x86_64/libsigc++"
-echo "linux 7.2.4.arch1-1 7.2.4.arch1-1 2222222222222222222222222222222222222222" >"$state/core-x86_64/linux"
-git -C "$state" -c user.name=t -c user.email=t@t commit -qam bump
+echo "--- a new commit of a package supersedes a pending job and a final failure"
+mkpkgbuild linux 7.2.3.arch1-2 x86_64 '{"source": "arch", "note": "metadata only"}'   # same version, new commit
+mkpkgbuild libsigc++ 2.12.3-1
+commit_pkgs bump
 "$scan"
 "$job" reap
-ls "$ARCHCI_HOME/queue/pending" | grep -q 'libsigc++,2.12.2-1' && fail "superseded pending job not dropped"
+ls "$ARCHCI_HOME/queue/pending" | grep -q 'linux,7.2.3.arch1-2' && fail "superseded pending job not dropped"
 (( $(ls "$ARCHCI_HOME/queue/failed" | wc -l) == 0 )) || fail "superseded final failure not dropped"
-[[ $("$next") == "5 core linux 7.2.4.arch1-1 "* ]] || fail "new linux release should be next: $("$next")"
-"$job" enqueue core acl 0
-ls "$ARCHCI_HOME/queue/pending" | grep -q '^0-.*core,acl' || fail "manual enqueue"
+[[ $("$next") == "5 omarchy x86_64 libsigc++ 2.12.3-1 $(pkgcommit libsigc++) extra" ]] || fail "new libsigc++ version should be next: $("$next")"
+"$job" enqueue acl 0
+ls "$ARCHCI_HOME/queue/pending" | grep -q '^0-.*omarchy,acl' || fail "manual enqueue"
+! "$job" enqueue skipped 0 2>/dev/null || true   # skip_build packages may still be enqueued by hand
+ls "$ARCHCI_HOME/queue/pending" | grep -q 'omarchy,skipped,1-1' || fail "manual enqueue of a skip_build package"
+rm -f "$ARCHCI_HOME"/queue/pending/*skipped*
+! "$job" enqueue nosuch 0 2>/dev/null || fail "enqueue of an unknown package must fail"
+
+echo "--- a same-version commit does not rebuild a built package"
+mkpkgbuild acl 1:2.3.2-1 x86_64 '{"source": "arch", "note": "metadata only"}'
+commit_pkgs acl-metadata
+"$scan"
+[[ $("$next") != *" acl "* ]] || fail "acl was built at this version; a metadata commit must not rebuild it"
 
 echo "--- ssh forced command + restricted rsync upload"
 cat >"$tmp/fakessh" <<'SH'
@@ -177,25 +207,25 @@ export ARCHCI_BUILDER_KEYRING=$gpgk ARCHCI_SIGNER_HOME=$tmp/signer
 mkdir -p "$ARCHCI_SIGNER_HOME"
 
 # a good package (built + builder-signed by the trusted key) lands in the master pool
-mkpkg "$ARCHCI_HOME/repo/core/os/x86_64" hello 1-1
-hp=$ARCHCI_HOME/repo/core/os/x86_64/hello-1-1-x86_64.pkg.tar.zst
+mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" hello 1-1
+hp=$ARCHCI_HOME/repo/omarchy/os/x86_64/hello-1-1-x86_64.pkg.tar.zst
 gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$hp.buildsig" "$hp"
 # an untrusted package (signed by the attacker key) also lands in the pool
-mkpkg "$ARCHCI_HOME/repo/core/os/x86_64" evil 1-1
-ep=$ARCHCI_HOME/repo/core/os/x86_64/evil-1-1-x86_64.pkg.tar.zst
+mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" evil 1-1
+ep=$ARCHCI_HOME/repo/omarchy/os/x86_64/evil-1-1-x86_64.pkg.tar.zst
 gpg --homedir "$gpgx" --batch --detach-sign -u evil -o "$ep.buildsig" "$ep"
 
 "$here/../master/archci-stage" --force
 [[ ! -e $hp && ! -e $ep ]] || fail "stage must move packages out of the pool"
-[[ -f $staging/core/os/x86_64/hello-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not staged"
+[[ -f $staging/omarchy/os/x86_64/hello-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not staged"
 
 "$here/../signer/archci-sign"
 # the trusted package is released and signed; the attacker package is rejected
-rel=$release/core/os/x86_64
+rel=$release/omarchy/os/x86_64
 [[ -f $rel/hello-1-1-x86_64.pkg.tar.zst && -f $rel/hello-1-1-x86_64.pkg.tar.zst.sig ]] || fail "trusted package not released+signed"
-[[ ! -e $release/core/os/x86_64/evil-1-1-x86_64.pkg.tar.zst ]] || fail "attacker package must not be released"
-[[ -f $rel/core.db.tar.gz && -f $rel/core.db ]] || fail "release database (both names) missing"
-bsdtar -xOf "$rel/core.db.tar.gz" '*/desc' | grep -qxF 'hello-1-1-x86_64.pkg.tar.zst' || fail "hello not in release db"
+[[ ! -e $release/omarchy/os/x86_64/evil-1-1-x86_64.pkg.tar.zst ]] || fail "attacker package must not be released"
+[[ -f $rel/omarchy.db.tar.gz && -f $rel/omarchy.db ]] || fail "release database (both names) missing"
+bsdtar -xOf "$rel/omarchy.db.tar.gz" '*/desc' | grep -qxF 'hello-1-1-x86_64.pkg.tar.zst' || fail "hello not in release db"
 gpg --homedir "$relpub" --batch --verify "$rel/hello-1-1-x86_64.pkg.tar.zst.sig" "$rel/hello-1-1-x86_64.pkg.tar.zst" 2>/dev/null || fail "released signature must verify for clients"
 # staging is drained (both the released and the rejected package removed)
 [[ -z $(find "$staging" -name '*.pkg.tar.zst' 2>/dev/null) ]] || fail "staging must be drained"
@@ -239,5 +269,70 @@ out=$(ARCHCI_R2_STAGING=$pg/staging ARCHCI_R2_RELEASE=$pg/release ARCHCI_RCLONE_
 
 echo "--- status"
 "$status" | head -5
-"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 0 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["core"] == 1'
+"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 0 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["omarchy-x86_64"] == 1 && j["arches"] == ["x86_64"] && j["repo"] == "omarchy" && j["pkgbuilds"]["packages"] == 3'
+
+echo "--- multi-arch: workers claim by arch, any packages are pooled for every arch"
+export ARCHCI_ARCHES="x86_64 aarch64"   # any packages default to the first: x86_64
+mkpkgbuild archlinux-keyring 20260901-1 any
+commit_pkgs any
+"$scan"
+# x86_64: linux, libsigc++ (acl built); any: archlinux-keyring; aarch64: acl, linux, libsigc++
+"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding #{j["outstanding"]}" unless j["outstanding"] == {"updates"=>0, "backlog"=>6}; abort "tracked #{j["tracked"]}" unless j["tracked"]["omarchy-aarch64"] == 3 && j["tracked"]["omarchy-any"] == 1 && j["any_arch"] == "x86_64"'
+! "$job" claim worker-6 riscv64 2>/dev/null || fail "claim for an arch not in ARCHCI_ARCHES must fail"
+[[ $("$next" aarch64) == "5 omarchy aarch64 acl "* ]] || fail "aarch64 backlog should start at acl: $("$next" aarch64)"
+[[ $(ARCHCI_IGNOREARCH=0 "$next" aarch64) == "" ]] || fail "with ARCHCI_IGNOREARCH=0 only packages listing aarch64 are offered"
+out=$("$job" claim arm-1 aarch64)
+id=$(sed -n 's/^id=//p' <<<"$out")
+[[ $id == 5-*-omarchy,acl,1:2.3.2-1,aarch64 ]] || fail "aarch64 job id: $id"
+grep -q '^arch=aarch64$' <<<"$out" || fail "job arch"
+[[ $("$next" aarch64) == "5 omarchy aarch64 libsigc++ "* ]] || fail "running aarch64 acl must not be offered again"
+[[ $("$next" x86_64) == "5 omarchy x86_64 libsigc++ "* ]] || fail "an aarch64 build must not block x86_64: $("$next" x86_64)"
+inc=$ARCHCI_HOME/incoming/$id
+echo log >"$inc/build.log"; mkpkg "$inc" acl 1:2.3.2-1 x86_64
+"$job" report "$id" success
+[[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "an aarch64 job uploading an x86_64 package must fail"
+"$job" retry "$id"
+id=$(sed -n 's/^id=//p' < <("$job" claim arm-1 aarch64))
+[[ $id == *,acl,*,aarch64 ]] || fail "retry should be claimed first: $id"
+inc=$ARCHCI_HOME/incoming/$id
+echo log >"$inc/build.log"; mkpkg "$inc" acl 1:2.3.2-1 aarch64
+: >"$inc/acl-1:2.3.2-1-aarch64.pkg.tar.zst.buildsig"
+"$job" report "$id" success
+[[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "aarch64 job not done"
+[[ $(<"$ARCHCI_HOME/built/omarchy-aarch64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "aarch64 built record"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/aarch64/acl-1:2.3.2-1-aarch64.pkg.tar.zst.buildsig ]] || fail "aarch64 package not pooled with its buildsig"
+[[ ! -e $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-aarch64.pkg.tar.zst ]] || fail "aarch64 package must not land in x86_64"
+[[ -f $ARCHCI_HOME/logs/omarchy/acl/1:2.3.2-1/aarch64/attempt-1.log ]] || fail "aarch64 log path"
+# the any package: offered only to x86_64 workers, pooled into every arch
+! "$job" enqueue archlinux-keyring 0 2>/dev/null || fail "an any package must be enqueued with ARCH=any"
+"$job" enqueue archlinux-keyring 0 any
+! "$job" enqueue acl 0 any 2>/dev/null || fail "an x86_64 package must not be enqueued as any"
+! "$job" enqueue acl 0 riscv64 2>/dev/null || fail "enqueue for an arch not enabled must fail"
+id=$(sed -n 's/^id=//p' < <("$job" claim arm-2 aarch64))
+[[ $id == *,libsigc++,*,aarch64 ]] || fail "an aarch64 worker must skip the pending any job: $id"
+id=$(sed -n 's/^id=//p' < <("$job" claim worker-7 x86_64))
+[[ $id == 0-*-omarchy,archlinux-keyring,20260901-1,any ]] || fail "x86_64 worker should get the any job: $id"
+inc=$ARCHCI_HOME/incoming/$id
+echo log >"$inc/build.log"; mkpkg "$inc" archlinux-keyring 20260901-1 any
+: >"$inc/archlinux-keyring-20260901-1-any.pkg.tar.zst.buildsig"
+"$job" report "$id" success
+[[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "any job not done"
+[[ $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring") == "20260901-1 $(pkgcommit archlinux-keyring)" ]] || fail "any built record"
+for a in x86_64 aarch64; do
+	[[ -f $ARCHCI_HOME/repo/omarchy/os/$a/archlinux-keyring-20260901-1-any.pkg.tar.zst ]] || fail "any package not pooled for $a"
+	[[ -f $ARCHCI_HOME/repo/omarchy/os/$a/archlinux-keyring-20260901-1-any.pkg.tar.zst.buildsig ]] || fail "any buildsig not pooled for $a"
+done
+[[ ! -e $inc ]] || fail "incoming not cleaned"
+[[ $("$next" x86_64) != *archlinux-keyring* ]] || fail "built any package must not be outstanding"
+"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "built #{j["built"]}" unless j["built"]["omarchy-any"] == 1 && j["built"]["omarchy-aarch64"] == 1 && j["built"]["omarchy-x86_64"] == 1'
+
+echo "--- the PKGBUILD repository URL is config: a scan follows a changed one"
+pkgs2=$tmp/pkgs2
+git clone -q "$pkgs" "$pkgs2"
+mkdir -p "$pkgs2/pkgbuilds/lib32-thing/.omarchy"
+printf 'pkgname=lib32-thing\npkgver=1\npkgrel=1\narch=(x86_64)\n' >"$pkgs2/pkgbuilds/lib32-thing/PKGBUILD"
+echo '{"source": "aur"}' >"$pkgs2/pkgbuilds/lib32-thing/.omarchy/package.json"
+git -C "$pkgs2" add -A && git -C "$pkgs2" -c user.name=t -c user.email=t@t commit -qm fork
+ARCHCI_PKGBUILDS_URL=file://$pkgs2 "$scan"
+ARCHCI_PKGBUILDS_URL=file://$pkgs2 "$here/../master/archci-pkgs" lib32-thing | grep -q '^lib32-thing 1-1 [0-9a-f]* x86_64 multilib aur build$' || fail "fork's package missing or wrong profile"
 echo "ALL OK"

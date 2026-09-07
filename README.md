@@ -2,12 +2,20 @@
 
 [![CI](https://github.com/hegjon/archci/actions/workflows/ci.yml/badge.svg)](https://github.com/hegjon/archci/actions/workflows/ci.yml)
 
-A headless build farm for Arch Linux. One master watches
-[archlinux/packaging/state](https://gitlab.archlinux.org/archlinux/packaging/state)
-for released package versions, any number of workers pull jobs over ssh and
-build them in clean btrfs-snapshotted chroots with devtools, and a separate
-signer verifies, signs, and publishes the pacman repository to Cloudflare R2.
-The master holds no signing key.
+A headless build farm for Arch Linux packages. One master watches a git
+repository of PKGBUILDs, by default
+[omarchy-pkgs](https://github.com/hegjon/omarchy-pkgs), for version changes,
+any number of workers pull jobs over ssh and build them in clean
+btrfs-snapshotted chroots with devtools, and a separate signer verifies,
+signs, and publishes the pacman repository to Cloudflare R2. The master holds
+no signing key.
+
+The PKGBUILD repository is the manifest: what gets built is exactly what is
+merged there, at the commit the master saw. Packages carried from Arch Linux
+itself (`source: arch` in omarchy-pkgs, refreshed by its `bin/sync-arch`),
+from the AUR, or written locally all look the same to the farm. The
+repository URL is one config line (`ARCHCI_PKGBUILDS_URL`), so moving from
+one fork to another, say to `omacom/omarchy-pkgs`, is a config change.
 
 
 > **Status: prototype.** This runs end to end but is not production-hardened.
@@ -22,12 +30,11 @@ is the whole state machine.
 
 ```mermaid
 flowchart LR
-  subgraph GL["gitlab.archlinux.org"]
-    ST["packaging/state"]
-    PK["packaging/packages"]
+  subgraph GH["PKGBUILD repository (github.com/hegjon/omarchy-pkgs)"]
+    PK["pkgbuilds/&lt;name&gt;/PKGBUILD + .omarchy/package.json"]
   end
   subgraph MASTER["master (holds no key)"]
-    SCAN["archci-scan: state to queue"]
+    SCAN["archci-scan: pull + index"]
     JOB["archci-job: claim / report (ssh)"]
     REAP["archci-job reap: stale / retry"]
     STAGE["archci-stage: pool to staging"]
@@ -43,10 +50,10 @@ flowchart LR
     STG[("staging/ : unsigned pkgs + .buildsig")]
     REL[("release/ : signed pkgs + db")]
   end
-  ST -->|git pull| SCAN
+  PK -->|git pull| SCAN
   WL -->|ssh claim / report| JOB
   WL --> BUILD
-  PK -->|git fetch commit| BUILD
+  PK -->|git archive at commit| BUILD
   BUILD -->|rsync pkg + .buildsig| JOB
   JOB --> STAGE --> STG --> SIGN --> REL
   REL -->|"pacman, SigLevel=Required"| CLIENTS["clients"]
@@ -54,24 +61,45 @@ flowchart LR
 
 ## How it works
 
-**Scanning.** `archci-scan` (ruby, every 10 min) only pulls the state repo.
-Each file `<repo>-<arch>/<pkgbase>` there holds `pkgbase version tag commit`.
-The backlog is never written down: when a worker asks for work, `archci-next`
-walks the state files and compares each with `built/<repo>-<arch>/<pkgbase>`
-(`version commit` of the last successful build), skipping packages that are
-running, queued, waiting for a retry or given up on. Updates to packages
-already in our repo come first, then the never-built rest, alphabetically.
-That walk is about 8,200 small files for core plus extra and takes well
-under a second, once per claim.
+**Scanning.** `archci-scan` (ruby, every 10 min) pulls the PKGBUILD
+repository (`ARCHCI_PKGBUILDS_URL`, branch `ARCHCI_PKGBUILDS_BRANCH`) into
+`pkgbuilds/` and refreshes the package index. `archci-pkgs` builds that index
+from every `pkgbuilds/<name>/` holding a PKGBUILD and `.omarchy/package.json`:
+the version the PKGBUILD declares (read the way makepkg does, by sourcing it
+at file scope with `CARCH` set), the last commit that touched the directory,
+its `arch` array, the devtools profile (`multilib` for `arch_repo: multilib`
+or a `lib32-` name, else `extra`), the package's `source`, and whether
+`skip_build` is set. The index is cached per clone HEAD, so a claim reads one
+file. The backlog is never written down: when a worker asks for work,
+`archci-next <arch>` walks the index and compares each package's version with
+`built/<repo>-<arch>/<name>` (`version commit` of the last successful build),
+skipping packages that are running, queued, waiting for a retry or given up
+on. Updates to packages already in our repo come first, then the never-built
+rest, alphabetically. A commit that changes a package directory without
+changing its version does not rebuild it, the same rule omarchy-pkgs' own
+pipeline follows; it does drop a pending or failed job for the older commit.
+`ARCHCI_PKG_SOURCES` restricts the farm to packages with a given `source`,
+for example `arch` for those carried from Arch Linux.
 
-**Workers.** `archci-worker@N` runs `ssh master claim <host>-N`. The master's
-forced command (`archci-shell`) takes the first file in `queue/pending/`
-(manual enqueues and retries), or else asks `archci-next` for the next
-outstanding package and writes a job for it. The job goes to `running/`
-stamped with the worker name and attempt, and is printed. The worker then:
+**Architectures.** `ARCHCI_ARCHES` on the master lists the arches it builds
+(default `x86_64`); each worker sends its own `ARCHCI_ARCH` with every claim
+and only gets jobs for it. A package whose PKGBUILD says `arch=(any)` is one
+job, given to workers of `ARCHCI_ANY_ARCH` (default: the first arch listed),
+and the resulting package is pooled into every arch's directory, because
+pacman fetches all packages from the client's own `$repo/os/$arch`. Every
+other package is offered to every enabled arch: a port arch builds PKGBUILDs
+that only list x86_64 with `--ignorearch` (see "Building for arm64" below),
+unless `ARCHCI_IGNOREARCH=0` limits it to packages that list the arch.
 
-1. fetches the packaging repo at exactly the released commit
-   (`archci-build` maps pkgbase to the GitLab path the same way devtools does),
+**Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>`. The
+master's forced command (`archci-shell`) takes the first file in
+`queue/pending/` (manual enqueues and retries) the worker's arch can build,
+or else asks `archci-next` for the next outstanding package and writes a job
+for it. The job goes to `running/` stamped with the worker name and attempt,
+and is printed. The worker then:
+
+1. exports `pkgbuilds/<name>/` from the PKGBUILD repository at exactly the
+   job's commit (`git archive` out of a bare mirror the worker keeps),
 2. starts `archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service`, a
    oneshot template unit, with a blocking `systemctl start`. The build has its
    own unit, cgroup and journal, and the unit's `TimeoutStartSec` (12 h, change
@@ -79,7 +107,9 @@ stamped with the worker name and attempt, and is printed. The worker then:
 3. inside that unit, builds with `makechrootpkg -c -l archci-N` in
    `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
    btrfs subvolume and each build gets a fresh snapshot of it, refreshed with
-   `pacman -Syuu` at most once an hour,
+   `pacman -Syuu` at most once an hour. The chroot's `makepkg.conf` and
+   pacman `<profile>.conf` come from `/etc/archci/<arch>/`, then
+   `arch/<arch>/` in the archci tree, then devtools,
 4. signs each package with the worker's own builder key (`<pkg>.buildsig`,
    internal provenance, see Signing below),
 5. takes the build's journal as `build.log`, and rsyncs it with the packages,
@@ -98,13 +128,15 @@ a worker can be destroyed at any time. On `systemctl stop` the worker reports
 
 **Master.** The master holds no signing key and builds no database. On `report
 success` the packages and their builder signatures are pooled into
-`repo/<repo>/os/<arch>/` (debug packages go to `<repo>-debug`) and the built
-record is written. `archci-stage` (a timer) then `rclone move`s the pool to the
-R2 staging area, so the master keeps only packages not yet staged. Failures
-keep their log under `logs/<repo>/<pkgbase>/<version>/attempt-N.log` and are
-retried after 3 hours, up to 3 attempts. A newer upstream release drops any
-pending or failed job for the older commit; the new commit is simply
-outstanding again.
+`repo/<repo>/os/<arch>/` by the arch in the package's file name (debug
+packages go to `<repo>-debug`, `-any` packages into every enabled arch; a
+package of another arch fails the job) and the built record is written.
+`archci-stage` (a timer) then `rclone move`s the pool to the R2 staging area,
+so the master keeps only packages not yet staged. Failures keep their log
+under `logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log` and are retried
+after 3 hours, up to 3 attempts. A newer commit of the package drops any
+pending or failed job for the older one; if its version is still not the
+built one it is simply outstanding again.
 
 **Signer.** Everything from staging on is the signer's job; see Signing below.
 It verifies each package's builder signature, adds the client-facing release
@@ -112,10 +144,13 @@ signature, runs `repo-add`, publishes packages + `.sig` + database to the R2
 release area that clients use, and deletes the package from staging.
 
 Builds use dependencies from the official Arch mirrors, not from our own
-output, so packages can be built in any order and workers stay simple. Point
-the chroot at our R2 repo instead by adding it to a copy of
-`/usr/share/devtools/pacman.conf.d/extra.conf` if you want a self-hosting
-rebuild.
+output, so packages can be built in any order and workers stay simple. A
+package that depends on another package of the same repository (most
+`omarchy-*` packages do) needs that repository in the chroot: copy
+`/usr/share/devtools/pacman.conf.d/extra.conf` to
+`/etc/archci/<arch>/extra.conf` on the workers and add the repository, our
+own R2 release area or the one the PKGBUILDs were written for, above
+`[core]`.
 
 ## Signing
 
@@ -180,36 +215,42 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 
 ```
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
-master/   archci-scan, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
+master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
 worker/   archci-worker, archci-build
+arch/     chroot configs for arches devtools ships none for (aarch64/makepkg.conf)
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
 systemd/  scan, reaper and stage timers (master); archci-worker@.service and
           archci-build@.service (worker); archci-sign and archci-sign-health
           timers (signer); journal-remote drop-ins for the master
 ```
 
-`install.sh` copies `lib/` plus the role's directory to `/usr/local/lib/archci`
-with the same layout and symlinks the role's scripts into `/usr/local/bin`.
+`install.sh` copies `lib/` plus the role's directory (and `arch/` on a worker)
+to `/usr/local/lib/archci` with the same layout and symlinks the role's
+scripts into `/usr/local/bin`.
 
 ## Layout on the master (`/var/lib/archci`)
 
 ```
-state/                      clone of packaging/state
+pkgbuilds/                  clone of the PKGBUILD repository (ARCHCI_PKGBUILDS_BRANCH)
+pkgbuilds.index             package index over it, keyed by the clone's HEAD (archci-pkgs)
 queue/{pending,running,done,failed}/<jobid>.job
-built/<repo>-<arch>/<pkgbase>     "version commit" of the last good build
+built/<repo>-<arch>/<name>  "version commit" of the last good build
+                            (one directory per arch, plus <repo>-any)
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
 repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume)
-logs/<repo>/<pkgbase>/<version>/attempt-N.log
+logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log
 ```
 
 The released repository lives on R2, not on the master. The signer keeps only
 the databases locally, in `/var/lib/archci-signer/repo/`.
 
-A job file:
+A job file (the id ends with the arch; `any` for an arch-independent package;
+`pkgbase` is the package directory, `commit` the PKGBUILD repository commit
+the build is pinned to, `profile` the devtools build profile):
 
 ```
-id=1-1788594133-core,linux,7.2.3.arch1-2
-repo=core
+id=1-1788594133-omarchy,linux,7.2.3.arch1-2,x86_64
+repo=omarchy
 arch=x86_64
 pkgbase=linux
 version=7.2.3.arch1-2
@@ -254,8 +295,13 @@ timers. Then:
    endpoint = https://<account-id>.r2.cloudflarestorage.com
    ```
 
-2. Edit `/etc/archci/archci.conf`: `ARCHCI_R2_STAGING="r2:<bucket>/staging"`
-   and `ARCHCI_REPOS`. The master needs no release credentials; the signer
+2. Edit `/etc/archci/archci.conf`: `ARCHCI_R2_STAGING="r2:<bucket>/staging"`,
+   `ARCHCI_ARCHES`, and the PKGBUILD repository: `ARCHCI_PKGBUILDS_URL`
+   (default `https://github.com/hegjon/omarchy-pkgs.git`; set it to
+   `https://github.com/omacom/omarchy-pkgs.git` to follow that fork, on the
+   workers too), `ARCHCI_PKGBUILDS_BRANCH` (`master`), `ARCHCI_REPO`
+   (`omarchy`, the pacman repository name produced) and optionally
+   `ARCHCI_PKG_SOURCES`. The master needs no release credentials; the signer
    publishes the release area.
 
 3. Authorize worker keys: `archci-authorize worker_key.pub`. This appends
@@ -266,7 +312,7 @@ timers. Then:
 Clients read the release area (see Signer):
 
 ```
-[core]
+[omarchy]
 Server = https://<r2 release domain>/$repo/os/$arch
 ```
 
@@ -298,6 +344,46 @@ of this on first boot, so workers are created and destroyed with
 `doctl compute droplet create/delete`. The same worker key can be shared by
 all droplets; workers are identified by hostname, which on DO is the droplet
 name. The master may run `archci-worker@1` too if `master` resolves to itself.
+
+### Building for arm64 (aarch64)
+
+Arch Linux itself releases only x86_64: PKGBUILDs carried from it say
+`arch=(x86_64)`, devtools ships no aarch64 `makepkg.conf`, and the official
+mirrors carry no aarch64 binaries. archci therefore treats aarch64 as a port,
+the way the [Arch Linux Ports](https://ports.archlinux.page/) project does: it
+builds the same package list at the same commits, passes `--ignorearch` to
+makepkg, and takes the base system for the chroot from a third-party aarch64
+repo. Expect a long tail of packages that need patches (the kernel,
+bootloaders, x86 assembly). Those patches live in the PKGBUILD repository:
+omarchy-pkgs keeps them in `pkgbuilds/<name>/.omarchy/patches/` and reapplies
+them on every sync from Arch, so a fix is a pull request there, and the
+farm builds it once merged. Until then the package stays in `queue/failed`.
+
+1. **Master:** `ARCHCI_ARCHES="x86_64 aarch64"` in `/etc/archci/archci.conf`.
+   The `any` packages keep being built by x86_64 workers (`ARCHCI_ANY_ARCH`)
+   and are pooled for both arches.
+2. **A native aarch64 worker.** Digital Ocean has no ARM droplets; Hetzner
+   CAX, Oracle Ampere and AWS Graviton do. Install Arch for aarch64 from the
+   Ports project (bootstrap tarballs and the pacman.conf `Server` line are on
+   its [aarch64 page](https://ports.archlinux.page/aarch64/), ARMv8.2 and up
+   only) or [Arch Linux ARM](https://archlinuxarm.org/). Point the host's
+   `/etc/pacman.d/mirrorlist` at that repo and trust its signing key with
+   `pacman-key`: devtools' pacman.conf includes the host mirrorlist and
+   `arch-nspawn` copies the host's pacman trust into the chroot, so the
+   chroot needs no pacman config of its own. Then `./install.sh worker` with
+   `ARCHCI_ARCH=aarch64` in `/etc/archci/archci.conf`. The chroot's
+   `makepkg.conf` is `arch/aarch64/makepkg.conf` from this tree (devtools'
+   x86_64 flags with `-march=armv8-a` and `-mbranch-protection=standard`);
+   copy it to `/etc/archci/aarch64/makepkg.conf` to change it, and put a
+   `/etc/archci/aarch64/extra.conf` there if the chroot should use a
+   different pacman config than the host, for example this repo's own
+   aarch64 output.
+3. Watch `archci-status`: `built` is reported per `<repo>-<arch>`, and
+   `archci-job enqueue REPO PKGBASE 0 aarch64` queues one package by hand.
+
+QEMU user-mode emulation (`qemu-user-static-binfmt`) on an x86_64 worker
+does run `makechrootpkg` for aarch64, but it is 5 to 20 times slower and
+breaks test suites and JIT-heavy builds; use it for a smoke test, not a fleet.
 
 ### Signer
 
@@ -348,7 +434,8 @@ Server = https://<r2 release domain>/$repo/os/$arch
 ```
 
 It then behaves like any pacman repository. Queried from the prototype part way
-through building `core` (67 packages so far, abridged):
+through building `core` (67 packages so far, abridged; this instance predates
+the switch to a PKGBUILD repository and still serves `[core]`):
 
 ```
 $ pacman -Sl core
@@ -505,15 +592,18 @@ file, which is how the tests run without network or root. Run them with
 A live prototype runs on Digital Ocean and publishes what it builds to R2:
 
 - **Repository URL:** `https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev`
-  (the `[core]` repo lives under `core/os/x86_64/`).
+  (the `[omarchy]` repo lives under `omarchy/os/x86_64/`).
 - **Fleet:** one master, two build workers, and one signer, all small droplets
-  (1 vCPU, 1 GB). It is working alphabetically through Arch `core`, then `extra`.
+  (1 vCPU, 1 GB). It builds the `source: arch` packages of
+  [hegjon/omarchy-pkgs](https://github.com/hegjon/omarchy-pkgs)
+  (`ARCHCI_PKG_SOURCES=arch`).
 - **Release key:** the throwaway demo key, fingerprint
-  `5C13914714B1585B1F83848E5D1E8741C64D4DDE` (uid `archci release TEST`).
+  `1E29618FAE38DE36160903CD60A80B4278269BB3` (uid `archci release TEST`), with
+  no passphrase, so the signer runs unattended.
 
 This is a prototype demo, treat it accordingly:
 
-- The release key is a **throwaway** whose passphrase is not secret, so the
+- The release key is a **throwaway** without a passphrase, so the
   signatures prove the pipeline works, not that the packages are trustworthy.
 - The workers are undersized, so large packages (gcc, glibc, …) fail; expect
   gaps.
@@ -526,13 +616,13 @@ repo:
 ```
 curl -O https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/release.pub
 pacman-key --add release.pub
-pacman-key --lsign-key 5C13914714B1585B1F83848E5D1E8741C64D4DDE
+pacman-key --lsign-key 1E29618FAE38DE36160903CD60A80B4278269BB3
 ```
 
 `/etc/pacman.conf`:
 
 ```
-[core]
+[omarchy]
 SigLevel = Required
 Server = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch
 ```
@@ -541,16 +631,22 @@ Then `pacman -Sy` and install as shown above.
 
 ## Notes and limits
 
-- Nothing is queued up front: with an empty `built/`, every package in
-  `ARCHCI_REPOS` (about 8,200 for core+extra) is outstanding and gets built
-  in repo order, then name order, as workers ask for work.
-- Packages are built independently against the official mirrors. If the
-  mirror the worker uses lags behind the state repo, a build that needs the
-  newer dependency fails and is retried later.
+- Nothing is queued up front: with an empty `built/`, every package in the
+  PKGBUILD repository (minus `skip_build` and anything `ARCHCI_PKG_SOURCES`
+  excludes) is outstanding and gets built in name order, as workers ask for
+  work.
+- Packages are built independently against the official mirrors (plus
+  whatever `/etc/archci/<arch>/extra.conf` adds). If a build needs a newer
+  dependency than the mirror has, or a sibling from this repository that is
+  not published yet, it fails and is retried later.
+- The master sources every PKGBUILD at file scope (as the `archci` user, in
+  a clean environment) to read its version, the same thing `makepkg
+  --printsrcinfo` does. The PKGBUILD repository is trusted input; do not
+  point `ARCHCI_PKGBUILDS_URL` at one you would not run.
 - Upstream source PGP signatures are not verified (`ARCHCI_MAKEPKG_ARGS`
   defaults to `--skippgpcheck`): there is no central keyring of packagers'
   upstream keys, so a rebuild farm cannot check them. The build is still
-  pinned to the packaging repo's exact commit and the PKGBUILD sha256sums.
+  pinned to the PKGBUILD repository's exact commit and the PKGBUILD sha256sums.
   Clear the setting and seed the build user's keyring to enforce them.
 - Packages are signed by the `signer` role, never on the master; the database
   is left unsigned (`DatabaseOptional`). See Signing above. A built package

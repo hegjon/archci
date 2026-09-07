@@ -4,13 +4,34 @@
 ## Common ---------------------------------------------------------------------
 # Master state: queue, built records, repo, logs (should be a btrfs subvolume).
 ARCHCI_HOME=/var/lib/archci
+# Worker: the architecture this machine builds (uname -m). Master: the default
+# arch for "archci-job enqueue" and for workers too old to send theirs.
 ARCHCI_ARCH=x86_64
-# packaging/state directories to track, as "<repo>" (arch appended automatically).
-ARCHCI_REPOS="core extra"
-ARCHCI_STATE_URL=https://gitlab.archlinux.org/archlinux/packaging/state.git
-ARCHCI_PKGBUILD_URL=https://gitlab.archlinux.org/archlinux/packaging/packages
+# The PKGBUILD repository: one git repository with a directory per package,
+# <ARCHCI_PKGBUILDS_DIR>/<name>/PKGBUILD plus .omarchy/package.json (the
+# omarchy-pkgs layout). The branch is the release list: a package is built
+# when the version its PKGBUILD declares is not the one last built. To move to
+# another fork (e.g. https://github.com/omacom/omarchy-pkgs.git) change the
+# URL on master and workers; the next scan and build follow it.
+ARCHCI_PKGBUILDS_URL=https://github.com/hegjon/omarchy-pkgs.git
+ARCHCI_PKGBUILDS_BRANCH=master
+ARCHCI_PKGBUILDS_DIR=pkgbuilds
+# Name of the pacman repository produced: $repo in the client's Server line,
+# the database name, and the repo/<repo>/os/<arch> pool.
+ARCHCI_REPO=omarchy
+# Only build packages whose package.json "source" is listed, e.g. "arch" for
+# the ones carried from Arch Linux. Empty: every package in the repository.
+ARCHCI_PKG_SOURCES=""
 
 ## Master ---------------------------------------------------------------------
+# Architectures workers may claim jobs for; a worker sends its ARCHCI_ARCH with
+# each claim. Upstream releases only x86_64, so a port arch (e.g. aarch64)
+# builds the same released commits with --ignorearch, needs its own native
+# workers, and takes its chroot configs from arch/<arch>/ (see README "arm64").
+ARCHCI_ARCHES="x86_64"
+# Whose workers build the arch-independent ("any") packages; they are pooled
+# for every arch in ARCHCI_ARCHES. Default: the first arch above.
+#ARCHCI_ANY_ARCH=x86_64
 # How many times a job may be built before it is parked in queue/failed for good.
 ARCHCI_MAX_ATTEMPTS=3
 # A running job without a worker heartbeat for this long goes back to pending.
@@ -58,6 +79,10 @@ ARCHCI_CHROOTS=/var/lib/archbuild
 # source is still pinned by sha256sums and the packaging-repo commit. Empty to
 # enforce signatures (seed the build user's keyring first).
 ARCHCI_MAKEPKG_ARGS=--skippgpcheck
+# On a port arch (anything but x86_64) also pass --ignorearch, since PKGBUILDs
+# carried from Arch declare arch=(x86_64) only. 0 to build just packages that
+# list the arch (read on the master too: such packages are then not offered).
+ARCHCI_IGNOREARCH=1
 # Stamped into every package (shown as Packager in pacman -Si). Use your identity.
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
 ARCHCI_CHROOT_UPDATE_MINUTES=60

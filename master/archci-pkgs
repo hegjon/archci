@@ -1,0 +1,81 @@
+#!/bin/bash
+# archci-pkgs [NAME...] -- list the packages in the PKGBUILD repository clone.
+#
+# One line per directory under <clone>/$ARCHCI_PKGBUILDS_DIR holding a PKGBUILD
+# and .omarchy/package.json (the omarchy-pkgs layout):
+#
+#   <name> <version> <commit> <arch> <profile> <source> <build|skip>
+#
+#   name     the directory name; it is the job's pkgbase (the PKGBUILD's own
+#            pkgbase may differ for a split package)
+#   version  epoch:pkgver-pkgrel as the PKGBUILD declares it
+#   commit   the last commit that touched the directory; a job pins it
+#   arch     "any", or the PKGBUILD's arch array joined with commas
+#   profile  devtools build profile: multilib for multilib packages, else extra
+#   source   .omarchy/package.json "source" (aur, arch, local)
+#   build    "skip" when package.json sets skip_build, else "build"
+#
+# The list is cached in $ARCHCI_HOME/pkgbuilds.index keyed by the clone's HEAD,
+# so archci-next (once per claim) just reads a file; archci-scan refreshes it
+# after every pull. Versions come from sourcing each PKGBUILD at file scope
+# with CARCH set, the way makepkg reads them; the repository is trusted input.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+
+clone=$ARCHCI_PKGBUILDS_CLONE
+index=$ARCHCI_PKGBUILDS_INDEX
+# The clone, the index and its lock belong to the archci user. Run as that
+# user when invoked by root (archci-status, archci-job enqueue), so git does
+# not refuse the clone as "dubiously owned" and no root-owned file is left
+# behind for the scan timer to trip over.
+owner=$(stat -c %U "$ARCHCI_HOME" 2>/dev/null || echo root)
+if (( EUID == 0 )) && [[ $owner != root ]]; then
+	exec runuser -u "$owner" -- "$0" "$@"
+fi
+[[ -d $clone/.git ]] || archci_die "no PKGBUILD repository at $clone (run archci-scan first)"
+command -v jq >/dev/null || archci_die "jq is not installed"
+head=$(git -C "$clone" rev-parse HEAD)
+
+index_current() { [[ -f $index && $(head -1 "$index") == "# $head" ]]; }
+
+generate() {
+	local dir name version arches commit source build profile
+	printf '# %s\n' "$head"
+	for dir in "$clone/$ARCHCI_PKGBUILDS_DIR"/*/; do
+		dir=${dir%/}
+		name=${dir##*/}
+		[[ -f $dir/PKGBUILD && -f $dir/.omarchy/package.json ]] || continue
+		version='' arches=''
+		# shellcheck disable=SC2016  # the single-quoted script runs in the child bash
+		read -r version arches < <(env -i PATH="$PATH" CARCH="$ARCHCI_ANY_ARCH" bash -c '
+			cd "$1" && source ./PKGBUILD >/dev/null 2>&1
+			printf "%s %s\n" "${epoch:+$epoch:}${pkgver:-}-${pkgrel:-}" "$(IFS=,; printf "%s" "${arch[*]:-}")"' _ "$dir") || true
+		if [[ ! $name =~ ^[a-zA-Z0-9@._+-]+$ || ! $version =~ ^[a-zA-Z0-9@._+:~-]+-[a-zA-Z0-9.]+$ ]]; then
+			archci_log "skipping $name: cannot read pkgver/pkgrel from its PKGBUILD"
+			continue
+		fi
+		commit=$(git -C "$clone" log -1 --format=%H -- "$ARCHCI_PKGBUILDS_DIR/$name")
+		read -r source build profile < <(jq -r '
+			[(.source // "local"), (if .skip_build == true then "skip" else "build" end), (.arch_repo // "-")]
+			| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; continue; }
+		if [[ $profile == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
+		printf '%s %s %s %s %s %s %s\n' "$name" "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build"
+	done
+}
+
+if ! index_current; then
+	exec 8>"$ARCHCI_HOME/lock/index.lock"
+	flock 8
+	if ! index_current; then
+		tmp=$(mktemp "$index.XXXXXX")
+		generate >"$tmp"
+		mv "$tmp" "$index"
+	fi
+	flock -u 8
+fi
+
+if (( $# )); then
+	awk -v names=" $* " 'NR > 1 && index(names, " " $1 " ")' "$index"
+else
+	tail -n +2 "$index"
+fi

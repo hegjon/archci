@@ -1,12 +1,14 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# archci-next -- print the next package to build, or nothing if all is built.
-# Output: "<prio> <repo> <pkgbase> <version> <tag> <commit>". Used by
-# archci-job claim when queue/pending is empty; safe to run by hand.
+# archci-next [ARCH] -- print the next package to build for a worker of ARCH
+# (default: every enabled arch), or nothing if all is built.
+# Output: "<prio> <repo> <arch> <pkgbase> <version> <commit> <profile>", where
+# <arch> is the job's arch: the worker's, or "any". Used by archci-job claim
+# when queue/pending holds nothing for the worker; safe to run by hand.
 require_relative '../lib/archci'
 
-entry = Archci.outstanding(limit: 1).first
+entry = Archci.outstanding(arch: ARGV[0], limit: 1).first
 exit 0 unless entry
 
-puts entry.values_at('prio', 'repo', 'pkgbase', 'version', 'tag', 'commit').join(' ')
+puts entry.values_at('prio', 'repo', 'arch', 'pkgbase', 'version', 'commit', 'profile').join(' ')

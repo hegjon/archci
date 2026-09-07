@@ -21,7 +21,8 @@ mksubvol() {
 	fi
 }
 
-# Same layout as the source tree: lib/ is shared, master/ or worker/ per role.
+# Same layout as the source tree: lib/ is shared, master/ or worker/ per role,
+# arch/ holds chroot configs for arches devtools has none for (worker).
 echo "==> installing lib/ and $role/ to $libdir"
 install -d -m 755 "$libdir/lib" "$libdir/$role" /etc/archci
 install -m 644 lib/* "$libdir/lib/"
@@ -29,14 +30,20 @@ for f in "$role"/*; do
 	install -m 755 "$f" "$libdir/$role/"
 	ln -sf "$libdir/$role/${f##*/}" "$bindir/${f##*/}"
 done
+if [[ $role == worker ]]; then
+	rm -rf "$libdir/arch"
+	cp -r arch "$libdir/arch"
+	chmod -R u=rwX,go=rX "$libdir/arch"
+fi
 if [[ ! -e /etc/archci/archci.conf ]]; then
 	install -m 644 archci.conf.example /etc/archci/archci.conf
 	echo "    wrote /etc/archci/archci.conf -- edit it"
 fi
 
 if [[ $role == master ]]; then
+	source lib/archci-common.sh
 	echo "==> master: packages"
-	pacman -S --needed --noconfirm git ruby rsync rclone openssh btrfs-progs libmicrohttpd python
+	pacman -S --needed --noconfirm git ruby jq rsync rclone openssh btrfs-progs libmicrohttpd python
 	echo "==> master: archci user and directories"
 	# A real shell is needed: sshd runs the forced command through it.
 	getent passwd archci >/dev/null || useradd --system --home-dir /var/lib/archci --create-home --shell /bin/bash archci
@@ -67,6 +74,8 @@ if [[ $role == master ]]; then
 	       endpoint = https://<account-id>.r2.cloudflarestorage.com
 	     and set ARCHCI_R2_STAGING="r2:<bucket>/staging" in /etc/archci/archci.conf.
 	     Ideally use a token that can only write the staging prefix.
+	     ARCHCI_PKGBUILDS_URL there is the repository of PKGBUILDs to build
+	     (default $ARCHCI_PKGBUILDS_URL).
 	  2. The master holds NO signing key and builds no database. It moves built
 	     packages to STAGING; the signer verifies, signs and publishes them.
 	  3. Authorize each worker SSH key:  archci-authorize /path/to/worker_key.pub
@@ -105,9 +114,12 @@ elif [[ $role == worker ]]; then
 	systemctl daemon-reload
 	systemctl enable archci-worker@1.service
 	systemctl enable --now systemd-journal-upload.service
+	if [[ $ARCHCI_ARCH != "$(uname -m)" ]]; then
+		echo "WARNING: ARCHCI_ARCH=$ARCHCI_ARCH but this machine is $(uname -m); set ARCHCI_ARCH in /etc/archci/archci.conf" >&2
+	fi
 	cat <<-MSG
 
-	Worker installed. Next:
+	Worker installed (arch $ARCHCI_ARCH; the master must list it in ARCHCI_ARCHES). Next:
 	  1. Make sure "master" resolves to the master's private address (/etc/hosts),
 	     or change ARCHCI_MASTER and ARCHCI_JOURNAL_URL in /etc/archci/archci.conf
 	     and rerun this script.
