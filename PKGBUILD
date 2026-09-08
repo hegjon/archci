@@ -44,9 +44,9 @@ _install_role() {
     ln -s "$_libdir/$f" "$pkgdir/usr/bin/${f##*/}"
   done
   for f in "$@"; do
-    install -m644 "systemd/$f" "$pkgdir/usr/lib/systemd/system/$f"
+    install -m644 "config/systemd/$f" "$pkgdir/usr/lib/systemd/system/$f"
   done
-  install -Dm644 "systemd/archci-$role.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/archci-$role.conf"
+  install -Dm644 "config/systemd/archci-$role.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/archci-$role.conf"
 }
 
 package_archci-git() {
@@ -59,7 +59,7 @@ package_archci-git() {
   cd "$pkgbase"
   (cd lib && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/lib/{}" \;)
   install -Dm644 archci.conf.example "$pkgdir/etc/archci/archci.conf"
-  install -Dm644 systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
+  install -Dm644 config/systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgbase/README.md"
   install -Dm644 docs/*.md -t "$pkgdir/usr/share/doc/$pkgbase/docs"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgbase/LICENSE"
@@ -76,14 +76,14 @@ package_archci-master-git() {
   _install_role master archci-scan.service archci-scan.timer \
     archci-reaper.service archci-reaper.timer archci-stage.service archci-stage.timer
   cd "$srcdir/$pkgbase"
-  install -Dm644 systemd/systemd-journal-remote.service.d/archci.conf \
+  install -Dm644 config/systemd/systemd-journal-remote.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-remote.service.d/archci.conf"
-  install -Dm644 systemd/systemd-journal-remote.socket.d/archci.conf \
+  install -Dm644 config/systemd/systemd-journal-remote.socket.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-remote.socket.d/archci.conf"
-  install -Dm644 systemd/journal-remote.conf "$pkgdir/usr/lib/systemd/journal-remote.conf.d/archci.conf"
+  install -Dm644 config/systemd/journal-remote.conf "$pkgdir/usr/lib/systemd/journal-remote.conf.d/archci.conf"
   # sshd reads worker keys from /etc/archci/authorized_keys; a hook reloads sshd
-  install -Dm644 ssh/sshd_config.d/archci.conf "$pkgdir/etc/ssh/sshd_config.d/archci.conf"
-  install -Dm644 pacman/archci-sshd.hook "$pkgdir/usr/share/libalpm/hooks/archci-sshd.hook"
+  install -Dm644 config/ssh/sshd_config.d/archci.conf "$pkgdir/etc/ssh/sshd_config.d/archci.conf"
+  install -Dm644 config/pacman/archci-sshd.hook "$pkgdir/usr/share/libalpm/hooks/archci-sshd.hook"
 }
 
 package_archci-worker-git() {
@@ -97,8 +97,8 @@ package_archci-worker-git() {
     archci-worker-setup.service archci-logging-remote.service
   cd "$srcdir/$pkgbase"
   # the archci journal namespace the units log to, and its upload to the master
-  install -Dm644 systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
-  install -Dm644 systemd/systemd-journal-upload.service.d/archci.conf \
+  install -Dm644 config/systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
+  install -Dm644 config/systemd/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
   # Chroot makepkg.conf for aarch64, which devtools ships none for: derived
   # from devtools' x86_64 one (and its conf.d) with arch/aarch64/makepkg.conf.sed,
@@ -133,7 +133,7 @@ package_archci-worker-qemu-aarch64-git() {
   replaces=(archci-worker-aarch64-git)
 
   cd "$srcdir/$pkgbase"
-  install -Dm644 systemd/archci-worker-aarch64@.service "$pkgdir/usr/lib/systemd/system/archci-worker-aarch64@.service"
+  install -Dm644 config/systemd/archci-worker-aarch64@.service "$pkgdir/usr/lib/systemd/system/archci-worker-aarch64@.service"
   cd arch/aarch64/qemu
   install -Dm644 binfmt.d/qemu-aarch64-static.conf "$pkgdir/etc/binfmt.d/qemu-aarch64-static.conf"
   install -Dm644 setarch-aliases.d/aarch64 "$pkgdir/usr/share/devtools/setarch-aliases.d/aarch64"
@@ -154,6 +154,6 @@ package_archci-signer-git() {
   _install_role signer archci-sign.service archci-sign.timer \
     archci-sign-health.service archci-sign-health.timer
   cd "$srcdir/$pkgbase"
-  install -Dm600 gnupg/release-gpg-agent.conf "$pkgdir/etc/archci/release-gnupg/gpg-agent.conf"
+  install -Dm600 config/gnupg/release-gpg-agent.conf "$pkgdir/etc/archci/release-gnupg/gpg-agent.conf"
   chmod 700 "$pkgdir/etc/archci/release-gnupg"
 }

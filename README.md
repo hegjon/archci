@@ -216,19 +216,19 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ```
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
-ssh/      sshd_config.d/archci.conf: sshd reads worker keys from /etc/archci/authorized_keys
-worker/   archci-worker, archci-build
-arch/     chroot configs for arches devtools ships none for (aarch64/makepkg.conf)
+worker/   archci-worker, archci-build, archci-worker-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
-systemd/  scan, reaper and stage timers (master); archci-worker@.service and
-          archci-build@.service (worker); archci-sign and archci-sign-health
-          timers (signer); journal-remote drop-ins for the master
+arch/     chroot configs for arches devtools ships none for (aarch64/makepkg.conf.sed, qemu/)
+config/   what the packages install outside /usr/lib/archci:
+  systemd/  units and timers per role, the worker's journal tunnel and
+            namespace, tmpfiles and sysusers, journal-remote drop-ins (master)
+  ssh/      sshd_config.d/archci.conf: worker keys from /etc/archci/authorized_keys
+  pacman/   the hook that reloads sshd when that drop-in is installed
+  gnupg/    the signer's release keyring gpg-agent.conf
 ```
 
-`systemd/` also holds `archci-logging-remote.service`, a worker's journal
-tunnel (see [docs/monitoring.md](docs/monitoring.md)). `PKGBUILD` packages the tree with the same
-layout under `/usr/lib/archci`, one package per role (see
-Install).
+`PKGBUILD` packages the tree with the same layout under `/usr/lib/archci`,
+one package per role (see Install).
 
 ## Layout on the master (`/var/lib/archci`)
 
