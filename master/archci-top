@@ -49,11 +49,12 @@ end
 def journal_tail(dir, unit)
   return ['', ''] unless File.directory?(dir)
 
-  out, = Open3.capture2('journalctl', '-D', dir, '-u', unit, '-n', '40', '-o', 'cat', '--no-pager', err: File::NULL)
-  lines = out.lines.map(&:strip).reject(&:empty?)
-  phase = lines.reverse.find { |l| l =~ /^==> Starting (\w+)\(\)/ }&.sub(/^==> Starting (\w+)\(\).*/, '\1')
-  phase ||= lines.reverse.find { |l| l.start_with?('==> ') }&.sub(/^==> /, '')&.slice(0, 24)
-  [phase.to_s, lines.last.to_s]
+  base = ['journalctl', '-D', dir, '-u', unit, '-o', 'cat', '--no-pager', '-n', '1']
+  last, = Open3.capture2(*base, err: File::NULL)
+  # the newest makepkg marker ("==> Starting build()...", "==> Making package: ...")
+  marker, = Open3.capture2(*base, '-g', '^==> (Starting|Making package|Retrieving|Validating|Verifying|Extracting|Creating|Updating|Synchronizing)', err: File::NULL)
+  phase = marker.strip.sub(/^==> Starting (\w+)\(\).*/, '\1').sub(/^==> /, '').split(/[ :(]/).first.to_s.downcase
+  [phase, last.strip]
 rescue StandardError
   ['', '']
 end
@@ -93,12 +94,12 @@ def frame(cfg, home, repo, journal)
   end
   out << ''
 
-  out << format('%-8s %-22s %-4s %-3s %4s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'PHASE', 'PACKAGE  last output')
+  out << format('%-8s %-22s %-8s %-3s %4s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'PHASE', 'PACKAGE  | last output')
   running.each do |j|
     claimed = j['claimed'] ? Time.iso8601(j['claimed']) : j['mtime']
     hb = ((now - j['mtime']) / 60).round
     phase, last = journal_tail(journal, unit_name(j))
-    line = format('%-8s %-22s %-4s %-3d %3dm  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
+    line = format('%-8s %-22s %-8s %-3d %3dm  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
                   phase[0, 9], "#{j['pkgbase']} #{j['version']}", last.empty? ? '' : "| #{last}")
     out << line[0, width]
   end
