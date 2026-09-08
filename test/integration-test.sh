@@ -77,7 +77,7 @@ grep -q '^build=5120$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
-ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker-1 .* 0.10 .* acl x86_64" || fail "archci-top must show the worker's stats and job"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker-1 .* 0.10 .* x86_64 *acl" || fail "archci-top must show the worker's stats and job"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q " 3.7  1840M  2100M  5120M " || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"

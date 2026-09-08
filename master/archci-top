@@ -88,8 +88,8 @@ def frame(cfg, home, repo, journal)
   out << format('%-22s %6s %5s %5s %5s  %s', 'WORKER', 'LOAD', 'MEM%', 'DISK%', 'CPUS', 'BUILDING')
   workers.sort.each do |w, j|
     if j
-      out << format('%-22s %6s %5s %5s %5s  %s %s', w, j['load'] || '-', j['mem'] || '-', j['disk'] || '-', j['cpus'] || '-',
-                    j['pkgbase'], j['arch'])
+      out << format('%-22s %6s %5s %5s %5s  %-8s %s', w, j['load'] || '-', j['mem'] || '-', j['disk'] || '-', j['cpus'] || '-',
+                    j['arch'], j['pkgbase'])
     else
       out << format('%-22s %6s %5s %5s %5s  %s', w, '-', '-', '-', '-', 'idle')
     end
