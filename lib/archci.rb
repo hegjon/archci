@@ -166,6 +166,55 @@ module Archci
     limit ? ordered.first(limit) : ordered
   end
 
+  # Everything archci-status prints and archci-top draws, computed once from
+  # the queue, the built records and the package index. JSON-serialisable:
+  # archci-status --json emits it as is.
+  def self.snapshot(now = Time.now)
+    cfg = config
+    repo = cfg['ARCHCI_REPO']
+    counts = QUEUES.to_h { |q| [q, Dir.glob(File.join(queue(q), '*.job')).size] }
+    # built and tracked are keyed like the built/ directories: "<repo>-<arch>"
+    # per enabled arch, plus "<repo>-any" for the arch-independent packages.
+    pkgs = packages.reject { |p| p['skip'] }
+    any_count = pkgs.count { |p| p['arches'] == ['any'] }
+    sets = arches.map { |a| ["#{repo}-#{a}", pkgs.size - any_count] } << ["#{repo}-any", any_count]
+    outstanding = self.outstanding
+    updates = outstanding.count { |e| e['prio'] == 1 }
+    job = lambda do |j|
+      { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
+        'worker' => j['worker'], 'attempt' => j['attempt'] }
+    end
+    running = jobs('running').sort_by { |j| j['claimed'].to_s }.map do |j|
+      job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i,
+                   'heartbeat_age_min' => ((now - j['mtime']) / 60).round,
+                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'],
+                   'cpu' => j['cpu'], 'rss_mib' => j['rss'], 'peak_mib' => j['peak'], 'build_mib' => j['build'])
+    end
+    failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
+      job[j].merge('final' => j['final'] == '1', 'finished' => j['finished'],
+                   'log' => "logs/#{j['repo']}/#{j['pkgbase']}/#{j['version']}/#{j['arch']}/attempt-#{j['attempt']}.log")
+    end
+    done = jobs('done').sort_by { |j| -j['mtime'].to_i }
+    recent = done.first(50).map { |j| job[j].merge('finished' => j['finished']) }
+    {
+      'generated' => now.utc.iso8601,
+      'pkgbuilds' => { 'url' => cfg['ARCHCI_PKGBUILDS_URL'], 'branch' => cfg['ARCHCI_PKGBUILDS_BRANCH'],
+                       'packages' => pkgs.size },
+      'repo' => repo,
+      'arches' => arches,
+      'any_arch' => any_arch,
+      'queue' => counts,
+      'done_last_hour' => done.count { |j| now - j['mtime'] < 3600 },
+      'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
+      'tracked' => sets.to_h,
+      'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
+      'workers' => (running + recent).filter_map { |j| j['worker'] }.tally,
+      'running' => running,
+      'failed' => failed,
+      'recent' => recent
+    }
+  end
+
   # Claim order among packages of one class: Arch's core before extra before
   # multilib, then this repository's own (local) packages, then AUR ones.
   ORIGIN_RANK = { %w[arch core] => 0, %w[arch extra] => 1, %w[arch multilib] => 2 }.freeze

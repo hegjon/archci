@@ -1,76 +1,30 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# archci-status [--json] -- what the master is doing right now.
+# archci-status [--json] -- what the master is doing right now (Archci.snapshot,
+# which archci-top draws from as well).
 require_relative '../lib/archci'
 
-cfg = Archci.config
-home = Archci.home
-arches = Archci.arches
-repo = cfg['ARCHCI_REPO']
-now = Time.now
-
-counts = Archci::QUEUES.to_h { |q| [q, Dir.glob(File.join(Archci.queue(q), '*.job')).size] }
-# built and tracked are keyed like the built/ directories: "<repo>-<arch>" per
-# enabled arch, plus "<repo>-any" for the arch-independent packages.
-packages = Archci.packages.reject { |p| p['skip'] }
-any_count = packages.count { |p| p['arches'] == ['any'] }
-sets = arches.map { |a| ["#{repo}-#{a}", packages.size - any_count] } << ["#{repo}-any", any_count]
-built = sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] }
-tracked = sets.to_h
-
-outstanding = Archci.outstanding
-updates = outstanding.count { |e| e['prio'] == 1 }
-
-running = Archci.jobs('running').map do |j|
-  { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
-    'worker' => j['worker'], 'attempt' => j['attempt'], 'claimed' => j['claimed'],
-    'heartbeat_age_min' => ((now - j['mtime']) / 60).round,
-    'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'],
-    'cpu' => j['cpu'], 'rss_mib' => j['rss'], 'peak_mib' => j['peak'], 'build_mib' => j['build'] }
-end
-failed = Archci.jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
-  { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
-    'worker' => j['worker'], 'attempt' => j['attempt'], 'final' => j['final'] == '1',
-    'finished' => j['finished'],
-    'log' => "logs/#{j['repo']}/#{j['pkgbase']}/#{j['version']}/#{j['arch']}/attempt-#{j['attempt']}.log" }
-end
-recent = Archci.jobs('done').sort_by { |j| -j['mtime'].to_i }.first(50).map do |j|
-  { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
-    'worker' => j['worker'], 'finished' => j['finished'] }
-end
-workers = (running + recent).filter_map { |j| j['worker'] }.tally
-
-report = {
-  'generated' => now.utc.iso8601,
-  'pkgbuilds' => { 'url' => cfg['ARCHCI_PKGBUILDS_URL'], 'branch' => cfg['ARCHCI_PKGBUILDS_BRANCH'],
-                   'packages' => packages.size },
-  'repo' => repo,
-  'arches' => arches,
-  'any_arch' => Archci.any_arch,
-  'queue' => counts,
-  'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
-  'tracked' => tracked,
-  'built' => built,
-  'workers' => workers,
-  'running' => running,
-  'failed' => failed,
-  'recent' => recent
-}
+report = Archci.snapshot
 
 if ARGV.include?('--json')
   puts JSON.pretty_generate(report)
   exit
 end
 
+running = report['running']
+failed = report['failed']
+recent = report['recent']
+out = report['outstanding']
+
 puts "archci master status  (#{report['generated']})"
 puts
 puts format('  pkgbuilds: %s (%s), %d package(s) -> repo [%s]',
-            cfg['ARCHCI_PKGBUILDS_URL'], cfg['ARCHCI_PKGBUILDS_BRANCH'], packages.size, repo)
-puts format('  queue: %s', counts.map { |q, n| "#{q}=#{n}" }.join('  '))
-puts format('  outstanding: %d update(s), %d unbuilt', updates, outstanding.size - updates)
-puts format('  built: %s', built.map { |r, n| "#{r} #{n}/#{tracked[r]}" }.join('  '))
-puts format('  arches: %s (any packages built on %s)', arches.join(' '), Archci.any_arch)
+            report['pkgbuilds']['url'], report['pkgbuilds']['branch'], report['pkgbuilds']['packages'], report['repo'])
+puts format('  queue: %s', report['queue'].map { |q, n| "#{q}=#{n}" }.join('  '))
+puts format('  outstanding: %d update(s), %d unbuilt', out['updates'], out['backlog'])
+puts format('  built: %s', report['built'].map { |r, n| "#{r} #{n}/#{report['tracked'][r]}" }.join('  '))
+puts format('  arches: %s (any packages built on %s)', report['arches'].join(' '), report['any_arch'])
 puts
 unless running.empty?
   puts '  running:'
