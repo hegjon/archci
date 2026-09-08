@@ -37,7 +37,7 @@ pacman-key --lsign-key 1E29618FAE38DE36160903CD60A80B4278269BB3
 
 ```
 [hegjon-test]
-SigLevel = Required
+SigLevel = Required DatabaseOptional
 Server = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch
 ```
 

@@ -441,7 +441,7 @@ pacman-key --add release.pub && pacman-key --lsign-key <fingerprint>
 
 ```
 [core]
-SigLevel = Required
+SigLevel = Required DatabaseOptional
 Server = https://<r2 release domain>/$repo/os/$arch
 ```
 
