@@ -71,14 +71,14 @@ grep -q '^attempt=1$' <<<"$out" || fail "attempt should be 1"
 "$job" heartbeat "$id"
 "$job" heartbeat "$id" load=1.50 mem=42 disk=61 cpus=4
 grep -q '^load=1.50$' "$ARCHCI_HOME/queue/running/$id.job" || fail "heartbeat stats not kept with the job"
-"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 cpu=3.7 rss=1840 peak=2100 build=5120
-grep -q '^build=5120$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats not kept"
+"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 cpu=3.7 rss=1840 peak=2100 build=5.0G
+grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats not kept"
 (( $(grep -c '^load=' "$ARCHCI_HOME/queue/running/$id.job") == 1 )) || fail "heartbeat stats must be replaced, not appended"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker-1 .* 0.10 .* x86_64 *acl" || fail "archci-top must show the worker's stats and job"
-ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q " 3.7  1840M  2100M  5120M " || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q " 3.7  1840M  2100M   5.0G " || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id

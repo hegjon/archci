@@ -98,7 +98,7 @@ def frame(journal)
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = journal_tail(journal, unit_name(j))
     line = format('%-8s %-22s %-8s %-3d %4s %5s %6s %6s %6s  %-9s %s %s', elapsed(since), j['worker'], j['arch'], j['attempt'], hb,
-                  j['cpu'] || '-', mib[j['rss_mib']], mib[j['peak_mib']], mib[j['build_mib']],
+                  j['cpu'] || '-', mib[j['rss_mib']], mib[j['peak_mib']], j['build'] || '-',
                   phase[0, 9], "#{j['pkgbase']} #{j['version']}", last.empty? ? '' : "| #{last}")
     out << line[0, width]
   end

@@ -188,7 +188,7 @@ module Archci
       job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i,
                    'heartbeat_age_min' => ((now - j['mtime']) / 60).round,
                    'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'],
-                   'cpu' => j['cpu'], 'rss_mib' => j['rss'], 'peak_mib' => j['peak'], 'build_mib' => j['build'])
+                   'cpu' => j['cpu'], 'rss_mib' => j['rss'], 'peak_mib' => j['peak'], 'build' => j['build'])
     end
     failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
       job[j].merge('final' => j['final'] == '1', 'finished' => j['finished'],

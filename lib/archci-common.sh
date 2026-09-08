@@ -199,8 +199,9 @@ archci_job_stats() {
 		printf '%s %s\n' "$usage" "$now" >"$jobdir/cpu.prev"
 		mem=$(( $(<"$cg/memory.current") / 1048576 ))
 		peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
+		# human-readable (du -h: 39M, 2.1G), shown as is
 		build=0
-		[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$(du -sm "$copydir/build" 2>/dev/null | cut -f1)
+		[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$(du -sh "$copydir/build" 2>/dev/null | cut -f1)
 		printf '%srss=%s peak=%s build=%s\n' "${cpu:+cpu=$cpu }" "$mem" "$peak" "${build:-0}"
 	}
 }
