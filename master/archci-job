@@ -5,7 +5,8 @@
 #                             print it: the first pending file
 #                             the worker can build, else the next outstanding
 #                             package (archci-next ARCH), chosen just in time
-#   heartbeat ID              mark a running job as still alive
+#   heartbeat ID [K=V...]     mark a running job as still alive; the worker's
+#                             load=, mem=, disk=, cpus= are kept with the job
 #   report ID STATUS          finish a job: success | failure | abandoned
 #                             (results are expected in incoming/ID/)
 #   requeue ID                move a running/failed job back to pending
@@ -34,7 +35,7 @@ rewrite_job() {
 	shift 2
 	tmp=$dest.tmp
 	{
-		grep -Ev '^(worker|claimed|status|finished|final)=' "$file"
+		grep -Ev '^(worker|claimed|status|finished|final|load|mem|disk|cpus)=' "$file"
 		printf '%s\n' "$@"
 	} >"$tmp"
 	mv "$tmp" "$dest"
@@ -117,10 +118,20 @@ cmd_claim() {
 }
 
 cmd_heartbeat() {
-	local id=$1
+	local id=$1 file stat
+	shift
 	archci_valid_id "$id" || archci_die "invalid job id"
-	[[ -f $Q_RUNNING/$id.job ]] || archci_die "job $id is not running"
-	touch "$Q_RUNNING/$id.job"
+	file=$Q_RUNNING/$id.job
+	[[ -f $file ]] || archci_die "job $id is not running"
+	for stat in "$@"; do
+		[[ $stat =~ ^(load|mem|disk|cpus)=[A-Za-z0-9./-]{1,32}$ ]] || archci_die "bad heartbeat stat: $stat"
+	done
+	if (( $# )); then
+		{ grep -Ev '^(load|mem|disk|cpus)=' "$file"; printf '%s\n' "$@"; } >"$file.tmp"
+		mv "$file.tmp" "$file"   # the new mtime is the heartbeat
+	else
+		touch "$file"
+	fi
 }
 
 # Pool the uploaded packages (archci_pool) and record what was built.
@@ -270,7 +281,7 @@ cmd=${1:-}
 shift || true
 case $cmd in
 	claim)     (( $# == 2 )) || archci_die "usage: archci-job claim WORKER ARCH"; cmd_claim "$@" ;;
-	heartbeat) (( $# == 1 )) || archci_die "usage: archci-job heartbeat ID";        cmd_heartbeat "$1" ;;
+	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; cmd_heartbeat "$@" ;;
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
 	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID";            cmd_retry "$1" ;;

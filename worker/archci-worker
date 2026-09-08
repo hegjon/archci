@@ -83,11 +83,14 @@ while true; do
 	printf '%s\n' "$ARCHCI_ARCH" >"$jobdir/arch"   # the arch this instance builds, for archci-build
 	archci_log "building $job_id as archci-build@$name"
 
-	# Keep the master's stale-job reaper away while the build runs.
+	# Keep the master's stale-job reaper away while the build runs. Each beat
+	# carries this machine's load, memory, chroot disk use and core count, which
+	# the master keeps with the job for archci-top and archci-status.
 	(
 		trap - TERM INT
 		while sleep "$ARCHCI_HEARTBEAT_SECONDS"; do
-			master heartbeat "$job_id" || archci_log "heartbeat for $job_id failed"
+			# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
+			master heartbeat "$job_id" $(archci_worker_stats) || archci_log "heartbeat for $job_id failed"
 		done
 	) &
 	heartbeat=$!

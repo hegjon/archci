@@ -52,6 +52,8 @@ archci_load_conf
 : "${ARCHCI_STALE_MINUTES:=30}"
 : "${ARCHCI_RETRY_MINUTES:=180}"
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
+# Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
+: "${ARCHCI_REMOTE_JOURNAL:=/var/log/journal/remote}"
 # R2 (or any rclone remote). Master writes unsigned packages to STAGING; the
 # signer reads STAGING, signs, and writes the released repo to RELEASE. Both
 # empty = the R2 hand-off is idle. See README "Signing".
@@ -149,6 +151,19 @@ archci_read_job() {
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 	done <"$1"
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]
+}
+
+# archci_worker_stats -> "load=<1 min> mem=<used %> disk=<chroots %> cpus=<n>",
+# what a worker sends with each heartbeat (archci-job heartbeat validates the
+# tokens and keeps them in the job file).
+archci_worker_stats() {
+	local load total avail used=0 disk
+	read -r load _ </proc/loadavg
+	total=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+	avail=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
+	(( total > 0 )) && used=$(( (total - avail) * 100 / total ))
+	disk=$(df --output=pcent "$ARCHCI_CHROOTS" 2>/dev/null | tail -1 | tr -dc 0-9)
+	printf 'load=%s mem=%s disk=%s cpus=%s\n' "$load" "$used" "${disk:-0}" "$(nproc)"
 }
 
 # archci_watchdog SECONDS -- COMMAND... : run COMMAND with its output through a

@@ -69,7 +69,14 @@ grep -q "^commit=$(pkgcommit acl)$" <<<"$out" || fail "job pins the package dire
 grep -q '^attempt=1$' <<<"$out" || fail "attempt should be 1"
 [[ -f $ARCHCI_HOME/queue/running/$id.job ]] || fail "job not in running/"
 "$job" heartbeat "$id"
-! "$job" heartbeat "9-1-omarchy,nope,1-1" 2>/dev/null || fail "heartbeat of unknown job must fail"
+"$job" heartbeat "$id" load=1.50 mem=42 disk=61 cpus=4
+grep -q '^load=1.50$' "$ARCHCI_HOME/queue/running/$id.job" || fail "heartbeat stats not kept with the job"
+"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4
+(( $(grep -c '^load=' "$ARCHCI_HOME/queue/running/$id.job") == 1 )) || fail "heartbeat stats must be replaced, not appended"
+# shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
+! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
+! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker-1 .* 0.10 .* acl x86_64" || fail "archci-top must show the worker's stats and job"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id

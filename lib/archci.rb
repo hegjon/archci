@@ -20,7 +20,8 @@ module Archci
     'ARCHCI_PKG_SOURCES' => '',
     'ARCHCI_PKG_ALSO' => '',
     'ARCHCI_IGNOREARCH' => '1',
-    'ARCHCI_MAX_ATTEMPTS' => '3'
+    'ARCHCI_MAX_ATTEMPTS' => '3',
+    'ARCHCI_REMOTE_JOURNAL' => '/var/log/journal/remote'
   }.freeze
 
   ROOT = File.expand_path('..', __dir__)

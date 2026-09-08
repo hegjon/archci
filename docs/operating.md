@@ -50,6 +50,8 @@ journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
 journalctl -u archci-stage          staging to R2
 archci-job enqueue extra firefox    build the current release now (priority 0)
+archci-top                          live view: workers' load and memory, running
+                                    jobs with phase and last output, failures
 archci-job retry <jobid>            reset attempts of a failed job and requeue
 archci-job requeue <jobid>          put a running/failed job back, keep attempts
 archci-stage --force                move pooled packages to R2 staging now

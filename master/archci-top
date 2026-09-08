@@ -1,0 +1,129 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# archci-top [-n SECONDS] [--once] -- top-like view of the farm, redrawn from the
+# master's queue, the workers' heartbeats and their streamed journals.
+#
+#   header   queue depth, outstanding work, built per arch, done in the last hour
+#   workers  one row per worker seen recently: load, memory, chroot disk, cores,
+#            what it is building (from the heartbeat stats kept in the job file)
+#   jobs     one row per running job: elapsed, worker, attempt, heartbeat age,
+#            makepkg phase and the last output line (from the worker's journal
+#            streamed to ARCHCI_REMOTE_JOURNAL)
+#   failed   the newest failures
+# Ctrl-C quits.
+require_relative '../lib/archci'
+require 'open3'
+
+interval = 5
+once = false
+ARGV.each_with_index do |a, i|
+  case a
+  when '-n' then interval = ARGV[i + 1].to_f
+  when '--once' then once = true
+  when '-h', '--help'
+    puts 'usage: archci-top [-n SECONDS] [--once]'
+    exit
+  end
+end
+
+cfg = Archci.config
+home = Archci.home
+repo = cfg['ARCHCI_REPO']
+journal = cfg['ARCHCI_REMOTE_JOURNAL']
+
+def elapsed(seconds)
+  s = seconds.to_i
+  return format('%dd%02dh', s / 86_400, s % 86_400 / 3600) if s >= 86_400
+  return format('%dh%02dm', s / 3600, s % 3600 / 60) if s >= 3600
+
+  format('%dm%02ds', s / 60, s % 60)
+end
+
+# The build unit's name on the worker (archci-worker's rule) and, from its
+# journal streamed to the master, the makepkg phase and last output line.
+def unit_name(j)
+  "archci-build@#{"#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9:_.-]/, '_')}"
+end
+
+def journal_tail(dir, unit)
+  return ['', ''] unless File.directory?(dir)
+
+  out, = Open3.capture2('journalctl', '-D', dir, '-u', unit, '-n', '40', '-o', 'cat', '--no-pager', err: File::NULL)
+  lines = out.lines.map(&:strip).reject(&:empty?)
+  phase = lines.reverse.find { |l| l =~ /^==> Starting (\w+)\(\)/ }&.sub(/^==> Starting (\w+)\(\).*/, '\1')
+  phase ||= lines.reverse.find { |l| l.start_with?('==> ') }&.sub(/^==> /, '')&.slice(0, 24)
+  [phase.to_s, lines.last.to_s]
+rescue StandardError
+  ['', '']
+end
+
+def frame(cfg, home, repo, journal)
+  now = Time.now
+  width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
+  counts = Archci::QUEUES.to_h { |q| [q, Dir.glob(File.join(Archci.queue(q), '*.job')).size] }
+  outstanding = Archci.outstanding
+  updates = outstanding.count { |e| e['prio'] == 1 }
+  arches = Archci.arches
+  built = (arches + ['any']).map { |a| "#{a} #{Dir.glob(File.join(home, 'built', "#{repo}-#{a}", '*')).size}" }
+  done_hour = Dir.glob(File.join(Archci.queue('done'), '*.job')).count { |f| now - File.mtime(f) < 3600 }
+  running = Archci.jobs('running').sort_by { |j| j['claimed'].to_s }
+  recent = Archci.jobs('done').sort_by { |j| -j['mtime'].to_i }.first(20)
+  failed = Archci.jobs('failed').sort_by { |j| -j['mtime'].to_i }.first(5)
+
+  out = []
+  out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s', now.strftime('%H:%M:%S'), repo, arches.join(' '))
+  out << format('queue: pending %d  running %d  failed %d  done %d (%d in the last hour)    outstanding: %d update(s), %d unbuilt',
+                counts['pending'], counts['running'], counts['failed'], counts['done'], done_hour, updates, outstanding.size - updates)
+  out << format('built: %s', built.join('  '))
+  out << ''
+
+  # workers: everyone with a running job, plus those seen finishing recently
+  workers = {}
+  running.each { |j| workers[j['worker']] = j }
+  recent.each { |j| workers[j['worker']] ||= nil }
+  out << format('%-22s %6s %5s %5s %5s  %s', 'WORKER', 'LOAD', 'MEM%', 'DISK%', 'CPUS', 'BUILDING')
+  workers.sort.each do |w, j|
+    if j
+      out << format('%-22s %6s %5s %5s %5s  %s %s', w, j['load'] || '-', j['mem'] || '-', j['disk'] || '-', j['cpus'] || '-',
+                    j['pkgbase'], j['arch'])
+    else
+      out << format('%-22s %6s %5s %5s %5s  %s', w, '-', '-', '-', '-', 'idle')
+    end
+  end
+  out << ''
+
+  out << format('%-8s %-22s %-4s %-3s %4s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'PHASE', 'PACKAGE  last output')
+  running.each do |j|
+    claimed = j['claimed'] ? Time.iso8601(j['claimed']) : j['mtime']
+    hb = ((now - j['mtime']) / 60).round
+    phase, last = journal_tail(journal, unit_name(j))
+    line = format('%-8s %-22s %-4s %-3d %3dm  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
+                  phase[0, 9], "#{j['pkgbase']} #{j['version']}", last.empty? ? '' : "| #{last}")
+    out << line[0, width]
+  end
+  out << '(nothing running)' if running.empty?
+  out << ''
+  unless failed.empty?
+    out << 'FAILED (newest first)'
+    failed.each do |j|
+      out << format('  %-40s %-20s attempt %d%s  %s', "#{j['pkgbase']} #{j['version']} #{j['arch']}", j['worker'],
+                    j['attempt'], j['final'] == '1' ? ' GAVE UP' : '', j['finished'])[0, width]
+    end
+  end
+  out
+end
+
+if once
+  puts frame(cfg, home, repo, journal)
+  exit
+end
+
+trap('INT') { print "\e[?25h\n"; exit }
+print "\e[?25l"
+loop do
+  lines = frame(cfg, home, repo, journal)
+  print "\e[H\e[2J"
+  puts lines
+  sleep interval
+end
