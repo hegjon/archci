@@ -1,12 +1,13 @@
 #cloud-config
 # Digital Ocean user-data for a build worker. Assumes an Arch Linux image with
 # cloud-init (e.g. the official Arch cloud image uploaded as a custom image).
-# Builds the archci packages from git and installs the worker one. Fill in the
-# master's private IP in /etc/hosts and the shared worker key, then create
-# droplets with:  doctl compute droplet create ... --user-data-file worker.yaml
+# Installs the worker from the farm's own repository (docs/test-instance.md),
+# which the farm publishes its archci packages to. Fill in the master's
+# private IP in /etc/hosts and the shared worker key, then create droplets
+# with:  doctl compute droplet create ... --user-data-file worker.yaml
 # Workers are interchangeable: destroy one and its job is requeued by the master.
 package_update: true
-packages: [git, base-devel, btrfs-progs]
+packages: [btrfs-progs]
 
 write_files:
   - path: /etc/archci/archci.conf
@@ -37,11 +38,11 @@ write_files:
       Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
 
 runcmd:
-  # build the packages (makepkg refuses to run as root) and install the worker
-  - useradd -m builder
-  - sudo -u builder git clone https://github.com/hegjon/archci.git /home/builder/archci
-  - sudo -u builder bash -c 'cd /home/builder/archci && makepkg -s --noconfirm'
-  - pacman -U --noconfirm /home/builder/archci/archci-git-*.pkg.tar.zst /home/builder/archci/archci-worker-git-*.pkg.tar.zst
+  # trust the farm's release key and install the worker from its repository
+  - curl -sfO https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/release.pub
+  - pacman-key --add release.pub && pacman-key --lsign-key 1E29618FAE38DE36160903CD60A80B4278269BB3
+  - printf '\n[hegjon-test]\nSigLevel = Required\nServer = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch\n' >>/etc/pacman.conf
+  - pacman -Sy --noconfirm archci-worker
   # the shared fleet builder key, so every ephemeral worker signs with one key
   # the signer already trusts (archci-worker-setup would otherwise generate one)
   - install -d -m 700 /etc/archci/builder-gnupg

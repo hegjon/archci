@@ -18,6 +18,7 @@ module Archci
     'ARCHCI_PKGBUILDS_DIR' => 'pkgbuilds',
     'ARCHCI_REPO' => 'omarchy',
     'ARCHCI_PKG_SOURCES' => '',
+    'ARCHCI_PKG_ALSO' => '',
     'ARCHCI_IGNOREARCH' => '1',
     'ARCHCI_MAX_ATTEMPTS' => '3'
   }.freeze
@@ -122,9 +123,10 @@ module Archci
     end
 
     sources = cfg['ARCHCI_PKG_SOURCES'].to_s.split
+    also = cfg['ARCHCI_PKG_ALSO'].to_s.split   # built whatever their source
     ignorearch = cfg['ARCHCI_IGNOREARCH'] != '0'
     candidates = packages.reject do |p|
-      p['skip'] || (!sources.empty? && !sources.include?(p['source']))
+      p['skip'] || (!sources.empty? && !sources.include?(p['source']) && !also.include?(p['pkgbase']))
     end
 
     # An arch-independent package is one job, for workers of the any arch,

@@ -54,6 +54,7 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 "$here/../master/archci-pkgs" | grep -q '^skipped 1-1 .* skip$' || fail "archci-pkgs must list skip_build packages as skip"
 [[ $("$next" | wc -l) == 1 ]] || fail "next prints one line"
 ! ARCHCI_PKG_SOURCES=local "$next" | grep -q . || fail "ARCHCI_PKG_SOURCES must filter by package.json source"
+[[ $(ARCHCI_PKG_SOURCES=local ARCHCI_PKG_ALSO=acl "$next") == "5 omarchy x86_64 acl "* ]] || fail "ARCHCI_PKG_ALSO must build a named package regardless of source"
 "$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding" unless j["outstanding"] == {"updates"=>0, "backlog"=>3}'
 
 echo "--- claim picks the next outstanding package just in time"

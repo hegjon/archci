@@ -3,11 +3,14 @@
 A live prototype runs on Digital Ocean and publishes what it builds to R2:
 
 - **Repository URL:** `https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev`
-  (the `[omarchy]` repo lives under `omarchy/os/x86_64/`).
+  (the `[hegjon-test]` repo lives under `hegjon-test/os/<arch>/`, for
+  x86_64 and aarch64).
 - **Fleet:** one master, two build workers, and one signer, all small droplets
-  (1 vCPU, 1 GB). It builds the `source: arch` packages of
+  (1 vCPU, 1 GB), plus an emulated aarch64 worker. It builds the
+  `source: arch` packages of
   [hegjon/omarchy-pkgs](https://github.com/hegjon/omarchy-pkgs)
-  (`ARCHCI_PKG_SOURCES=arch`).
+  (`ARCHCI_PKG_SOURCES=arch`), and archci's own release packages from the
+  same repository, so the fleet upgrades itself with `pacman -Syu`.
 - **Release key:** the throwaway demo key, fingerprint
   `1E29618FAE38DE36160903CD60A80B4278269BB3` (uid `archci release TEST`), with
   no passphrase, so the signer runs unattended.
@@ -33,9 +36,12 @@ pacman-key --lsign-key 1E29618FAE38DE36160903CD60A80B4278269BB3
 `/etc/pacman.conf`:
 
 ```
-[omarchy]
+[hegjon-test]
 SigLevel = Required
 Server = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch
 ```
 
 Then `pacman -Sy` and install as shown in the README under "Using the repo".
+The archci packages themselves are there too: `pacman -S archci-worker`
+(or `archci-master`, `archci-signer`, `archci-worker-qemu-aarch64`) installs
+the tagged release, replacing the `-git` packages built from a checkout.

@@ -45,7 +45,9 @@ archci_load_conf
 : "${ARCHCI_REPO:=omarchy}"
 # Only build packages whose .omarchy/package.json "source" is listed
 # (e.g. "arch" for those carried from Arch Linux). Empty: every package.
+# ARCHCI_PKG_ALSO names packages built regardless of that filter.
 : "${ARCHCI_PKG_SOURCES:=}"
+: "${ARCHCI_PKG_ALSO:=}"
 : "${ARCHCI_MAX_ATTEMPTS:=3}"
 : "${ARCHCI_STALE_MINUTES:=30}"
 : "${ARCHCI_RETRY_MINUTES:=180}"
