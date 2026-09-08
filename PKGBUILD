@@ -61,6 +61,7 @@ package_archci-git() {
   install -Dm644 archci.conf.example "$pkgdir/etc/archci/archci.conf"
   install -Dm644 systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgbase/README.md"
+  install -Dm644 docs/*.md -t "$pkgdir/usr/share/doc/$pkgbase/docs"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgbase/LICENSE"
 }
 
@@ -107,7 +108,7 @@ package_archci-worker-git() {
 # next to the machine's own archci-worker@N. Ships what devtools lacks for that: the binfmt registration
 # with the C flag, the devtools setarch alias, the chroot pacman.conf pointed
 # at the Arch Linux Ports aarch64 repo, and that repo's key as a pacman keyring
-# the .install script populates (see README "Building for arm64"). A native
+# the .install script populates (see docs/arm64.md). A native
 # aarch64 machine needs none of this: archci-worker@N builds aarch64 there.
 package_archci-worker-qemu-aarch64-git() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: aarch64 instances on x86_64 under qemu user-mode emulation)'

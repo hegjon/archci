@@ -88,7 +88,7 @@ job, given to workers of `ARCHCI_ANY_ARCH` (default: the first arch listed),
 and the resulting package is pooled into every arch's directory, because
 pacman fetches all packages from the client's own `$repo/os/$arch`. Every
 other package is offered to every enabled arch: a port arch builds PKGBUILDs
-that only list x86_64 with `--ignorearch` (see "Building for arm64" below),
+that only list x86_64 with `--ignorearch` (see [docs/arm64.md](docs/arm64.md)),
 unless `ARCHCI_IGNOREARCH=0` limits it to packages that list the arch.
 
 **Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>`. The
@@ -226,7 +226,7 @@ systemd/  scan, reaper and stage timers (master); archci-worker@.service and
 ```
 
 `systemd/` also holds `archci-logging-remote.service`, a worker's journal
-tunnel (see "Monitoring workers"). `PKGBUILD` packages the tree with the same
+tunnel (see [docs/monitoring.md](docs/monitoring.md)). `PKGBUILD` packages the tree with the same
 layout under `/usr/lib/archci`, one package per role (see
 Install).
 
@@ -277,7 +277,7 @@ of a shared one:
   scripts as `/usr/bin` commands, its units in `/usr/lib/systemd/system`,
   its directories (tmpfiles), and its dependencies
 - `archci-worker-qemu-aarch64-git`: add-on for an x86_64 worker: aarch64 worker
-  instances under qemu user-mode emulation (see "Building for arm64")
+  instances under qemu user-mode emulation (see [docs/arm64.md](docs/arm64.md))
 
 What a package cannot ship as a file happens on first start: a worker's
 `archci-worker-setup.service` generates its keys and configures journal
@@ -395,71 +395,6 @@ of this on first boot, so workers are created and destroyed with
 all droplets; workers are identified by hostname, which on DO is the droplet
 name. The master may run `archci-worker@1` too if `master` resolves to itself.
 
-### Building for arm64 (aarch64)
-
-Arch Linux itself releases only x86_64: PKGBUILDs carried from it say
-`arch=(x86_64)`, devtools ships no aarch64 `makepkg.conf`, and the official
-mirrors carry no aarch64 binaries. archci therefore treats aarch64 as a port,
-the way the [Arch Linux Ports](https://ports.archlinux.page/) project does: it
-builds the same package list at the same commits, passes `--ignorearch` to
-makepkg, and takes the base system for the chroot from a third-party aarch64
-repo. Expect a long tail of packages that need patches (the kernel,
-bootloaders, x86 assembly). Those patches live in the PKGBUILD repository:
-omarchy-pkgs keeps them in `pkgbuilds/<name>/.omarchy/patches/` and reapplies
-them on every sync from Arch, so a fix is a pull request there, and the
-farm builds it once merged. Until then the package stays in `queue/failed`.
-
-1. **Master:** `ARCHCI_ARCHES="x86_64 aarch64"` in `/etc/archci/archci.conf`.
-   The `any` packages keep being built by x86_64 workers (`ARCHCI_ANY_ARCH`)
-   and are pooled for both arches.
-2. **A native aarch64 worker.** Digital Ocean has no ARM droplets; Hetzner
-   CAX, Oracle Ampere and AWS Graviton do. Install Arch for aarch64 from the
-   Ports project (bootstrap tarballs and the pacman.conf `Server` line are on
-   its [aarch64 page](https://ports.archlinux.page/aarch64/), ARMv8.2 and up
-   only) or [Arch Linux ARM](https://archlinuxarm.org/). Point the host's
-   `/etc/pacman.d/mirrorlist` at that repo and trust its signing key with
-   `pacman-key`: devtools' pacman.conf includes the host mirrorlist and
-   `arch-nspawn` copies the host's pacman trust into the chroot, so the
-   chroot needs no pacman config of its own. Then install the worker
-   package as on any worker: `ARCHCI_ARCH` defaults to `uname -m`, so
-   `archci-worker@N` builds aarch64 there. The chroot's
-   `makepkg.conf` is `arch/aarch64/makepkg.conf` from this tree (devtools'
-   x86_64 flags with `-march=armv8-a` and `-mbranch-protection=standard`);
-   copy it to `/etc/archci/aarch64/makepkg.conf` to change it, and put a
-   `/etc/archci/aarch64/extra.conf` there if the chroot should use a
-   different pacman config than the host, for example this repo's own
-   aarch64 output.
-3. Watch `archci-status`: `built` is reported per `<repo>-<arch>`, and
-   `archci-job enqueue REPO PKGBASE 0 aarch64` queues one package by hand.
-
-**An emulated worker instead.** An x86_64 machine can build aarch64 through
-QEMU user-mode emulation. It is 5 to 20 times slower per core and some test
-suites break under it, so it suits a big desktop or a smoke test rather than
-a fleet, but it needs no ARM hardware:
-
-```
-pacman -U archci-worker-qemu-aarch64-git-*.pkg.tar.zst
-systemctl enable --now archci-worker-aarch64@1
-```
-
-The package pulls in `qemu-user-static-binfmt` and ships what devtools lacks:
-`/etc/binfmt.d/qemu-aarch64-static.conf`, the stock registration with the C
-flag added (F lets binaries inside the chroot find the emulator, C lets
-setuid ones such as makepkg's `sudo pacman` keep root; the stock registration
-lacks C); a devtools `setarch` alias (arch-nspawn runs `setarch aarch64`,
-which the host rejects without one); `/etc/archci/aarch64/extra.conf`,
-devtools' pacman.conf with `Architecture = aarch64`, the Ports repo as
-`Server` (the host's mirrorlist is x86_64) and pacman's download sandbox
-off (qemu has no Landlock or seccomp); and the Ports repo key
-`9B2C213B21883BB65CE2FB900CF25682E6BA0751` as the pacman keyring
-`archci-ports-aarch64`, which the package's install script populates into
-the host keyring because the chroot inherits the host's trust. The
-`archci-worker-aarch64@N` instance runs next to the machine's own
-`archci-worker@N` and is known to the master as `<host>-aarch64-N`. A
-machine outside the VPC only needs the master's public address as `master`
-in `/etc/hosts`: jobs and journal both travel over ssh. Expect the first
-build to spend a while creating `/var/lib/archbuild/extra-aarch64`.
-
 ### Signer
 
 On a dedicated droplet (it needs only R2 access, not the VPC):
@@ -551,158 +486,12 @@ Validated By    : SHA-256 Sum
 way the package's authenticity comes from the release signature, which pacman
 verifies against the imported key on download, not from that field.)
 
-## Monitoring workers from the master
+## Documentation
 
-Workers stream the `archci` journal namespace, and nothing else of their
-journal, to the master with `systemd-journal-upload --namespace=archci`,
-through an ssh tunnel over the worker key: `archci-logging-remote.service`
-holds `ssh -N -L 127.0.0.1:19532:127.0.0.1:19532 archci@master` open, and
-the upload goes to `http://127.0.0.1:19532`, the default `ARCHCI_JOURNAL_URL`
-(`""` streams nothing; `archci-worker-setup` configures both on every worker
-start). The master's `systemd-journal-remote` listens on loopback only (the
-master package's socket drop-in), so the plain-HTTP journal port is never
-exposed, inside the VPC or out, and a worker needs nothing but ssh to the
-master, from anywhere. The master allows a worker key to forward to this one
-port and nothing else (`archci-authorize` writes `port-forwarding,permitopen=...`
-after `restrict`, and the sshd drop-in adds `PermitOpen`), and with `-N` no
-session is opened, so the forced command never runs. Same direction as the
-job protocol, and the last lines of a worker that died are already on the
-master. journal-remote keeps the received journals under
-`/var/log/journal/remote/`, capped by `journal-remote.conf` (2 GB, 200
-files); since every worker arrives from 127.0.0.1 they share one
-`remote-127.0.0.1.journal` file, so select a worker with `_HOSTNAME=`.
-
-```
-journalctl -D /var/log/journal/remote -f                     all workers, live
-journalctl -D /var/log/journal/remote -u 'archci-worker@*'   the worker loops only
-journalctl -D /var/log/journal/remote -u 'archci-build@*'    every build's output
-journalctl -D /var/log/journal/remote -u archci-build@core-linux-7.2.3.arch1-2-a1
-journalctl -D /var/log/journal/remote _HOSTNAME=worker1      one worker
-journalctl --merge -f                                        master and workers together
-```
-
-Because full build output goes through journald and journal-upload, size the
-master's `journal-remote.conf` limits and the workers' `journald@archci.conf`
-`SystemMaxUse` for it; large builds such as browsers produce hundreds of
-megabytes of log.
-
-## Operating it
-
-`archci-status` is the at-a-glance view of the farm. A live example from the
-prototype, part way through building `core`:
-
-```
-archci master status  (2026-09-06T08:34:59Z)
-
-  queue: pending=0  running=2  done=94  failed=11
-  outstanding: 0 update(s), 8158 unbuilt
-  built: core 51/177  extra 0/8045
-
-  running:
-    core/guile 3.0.11-1                      worker1-1            attempt 1  heartbeat 2m ago
-    core/kmod 34.2-1                         worker2-1            attempt 1  heartbeat 2m ago
-
-  failed (11, newest first):
-    core/grub 2:2.14-1                       worker2-1            attempt 1
-    core/gnutls 3.8.13-2                     worker1-1            attempt 1
-    core/gpm 1.20.7.r38.ge82d1a6-6           worker2-1            attempt 1
-    core/gcc 16.2.1+r23+gd564253eb6c8-1      worker2-1            attempt 3  GAVE UP
-    core/glibc 2.44+r24+g16be1518495f-1      worker1-1            attempt 1
-    core/gettext 1.0-2                       worker2-1            attempt 1
-    core/elfutils 0.196-1                    worker1-1            attempt 3  GAVE UP
-    core/dmraid 1.0.0.rc16.3-15              worker1-1            attempt 3  GAVE UP
-    core/curl 8.22.0-1                       worker1-1            attempt 3  GAVE UP
-    core/coreutils 9.11-2                    worker1-1            attempt 3  GAVE UP
-    core/bison 3.8.2-8                       worker1-1            attempt 3  GAVE UP
-
-  recently built:
-    core/keyutils 1.6.3-4                    worker2-1            2026-09-06T08:33:00Z
-    core/kbd 2.10.0-1                        worker2-1            2026-09-06T08:32:31Z
-    core/json-c 0.19-1                       worker2-1            2026-09-06T08:30:18Z
-    core/jfsutils 1.1.15-9                   worker2-1            2026-09-06T08:28:59Z
-    core/jansson 2.15.1-1                    worker2-1            2026-09-06T08:28:01Z
-    core/iw 6.17-1                           worker2-1            2026-09-06T08:27:14Z
-    core/iputils 20250605-1                  worker2-1            2026-09-06T08:26:38Z
-    core/iptables 1:1.8.13-1                 worker2-1            2026-09-06T08:25:58Z
-    core/iproute2 7.2.0-1                    worker2-1            2026-09-06T08:22:47Z
-    core/inetutils 2.8-1                     worker2-1            2026-09-06T08:18:52Z
-```
-
-The other operator commands:
-
-```
-archci-status                       queue counts, running builds, recent failures
-archci-status --json                queue/outstanding as JSON
-archci-next                         what the next claim would build
-journalctl -t archci-job -f         every claim/report on the master
-journalctl -u archci-scan           scan results
-journalctl -u archci-stage          staging to R2
-archci-job enqueue extra firefox    build the current release now (priority 0)
-archci-job retry <jobid>            reset attempts of a failed job and requeue
-archci-job requeue <jobid>          put a running/failed job back, keep attempts
-archci-stage --force                move pooled packages to R2 staging now
-archci-build job.file /tmp/out      reproduce a build by hand on a worker (root)
-
-# on the signer
-archci-sign --unlock                cache the release passphrase for the session
-archci-sign                         sign and publish staged packages now
-journalctl -u archci-sign -f        release-signing activity
-journalctl -u archci-sign-health    stall alerts (locked key, staging backlog)
-archci-authorize-builder key.pub    trust a worker's builder key
-```
-
-All knobs are in `archci.conf.example`. Environment variables override the
-file, which is how the tests run without network or root. Run them with
-`test/run.sh` (add a name substring to filter, e.g. `test/run.sh lint`):
-
-- `test/lint-test.sh` — `bash -n` and `ruby -c` on every script, plus
-  `shellcheck` when installed.
-- `test/integration-test.sh` — the whole master side (scan, claim, heartbeat,
-  report, reap, forced ssh command, rrsync upload), the two-stage signing gate
-  with real gpg keys, and the R2 hand-off (master stage, signer verify, reject,
-  release-sign, publish, drain) against a local rclone stand-in, in a temp dir.
-
-## Test instance
-
-A live prototype runs on Digital Ocean and publishes what it builds to R2:
-
-- **Repository URL:** `https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev`
-  (the `[omarchy]` repo lives under `omarchy/os/x86_64/`).
-- **Fleet:** one master, two build workers, and one signer, all small droplets
-  (1 vCPU, 1 GB). It builds the `source: arch` packages of
-  [hegjon/omarchy-pkgs](https://github.com/hegjon/omarchy-pkgs)
-  (`ARCHCI_PKG_SOURCES=arch`).
-- **Release key:** the throwaway demo key, fingerprint
-  `1E29618FAE38DE36160903CD60A80B4278269BB3` (uid `archci release TEST`), with
-  no passphrase, so the signer runs unattended.
-
-This is a prototype demo, treat it accordingly:
-
-- The release key is a **throwaway** without a passphrase, so the
-  signatures prove the pipeline works, not that the packages are trustworthy.
-- The workers are undersized, so large packages (gcc, glibc, …) fail; expect
-  gaps.
-- It may change, be rebuilt, or disappear without notice.
-
-So try it only on a throwaway machine, a VM or container, never a system you
-care about. Fetch and trust the demo key (published in the bucket), then add the
-repo:
-
-```
-curl -O https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/release.pub
-pacman-key --add release.pub
-pacman-key --lsign-key 1E29618FAE38DE36160903CD60A80B4278269BB3
-```
-
-`/etc/pacman.conf`:
-
-```
-[omarchy]
-SigLevel = Required
-Server = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch
-```
-
-Then `pacman -Sy` and install as shown above.
+- [docs/operating.md](docs/operating.md): the day-to-day commands, tests
+- [docs/monitoring.md](docs/monitoring.md): worker journals on the master
+- [docs/arm64.md](docs/arm64.md): building for aarch64, native or emulated
+- [docs/test-instance.md](docs/test-instance.md): the live test instance
 
 ## Notes and limits
 
