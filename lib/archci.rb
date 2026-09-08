@@ -162,11 +162,4 @@ module Archci
 
     system('logger', '-t', File.basename($PROGRAM_NAME), '--', msg, exception: false)
   end
-
-  # Atomic write: the queue is only ever observed through complete files.
-  def self.write_atomic(path, content)
-    tmp = "#{path}.tmp"
-    File.write(tmp, content)
-    File.rename(tmp, path)
-  end
 end

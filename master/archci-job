@@ -1,8 +1,8 @@
 #!/bin/bash
 # archci-job -- master-side queue operations (runs as the archci user).
 #
-#   claim WORKER [ARCH]       hand the next job to WORKER (of ARCH, default
-#                             ARCHCI_ARCH) and print it: the first pending file
+#   claim WORKER ARCH         hand the next job to WORKER (building ARCH) and
+#                             print it: the first pending file
 #                             the worker can build, else the next outstanding
 #                             package (archci-next ARCH), chosen just in time
 #   heartbeat ID              mark a running job as still alive
@@ -84,7 +84,7 @@ find_job() {  # find_job ID DIR... -> path
 
 # ---------------------------------------------------------------------------
 cmd_claim() {
-	local worker=$1 warch=${2:-$ARCHCI_ARCH}
+	local worker=$1 warch=$2
 	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
 	archci_valid_arch "$warch" || archci_die "invalid arch: $warch"
 	archci_enabled_arch "$warch" || archci_die "arch $warch is not enabled on this master (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
@@ -298,7 +298,7 @@ cmd_reap() {
 cmd=${1:-}
 shift || true
 case $cmd in
-	claim)     (( $# == 1 || $# == 2 )) || archci_die "usage: archci-job claim WORKER [ARCH]"; cmd_claim "$@" ;;
+	claim)     (( $# == 2 )) || archci_die "usage: archci-job claim WORKER ARCH"; cmd_claim "$@" ;;
 	heartbeat) (( $# == 1 )) || archci_die "usage: archci-job heartbeat ID";        cmd_heartbeat "$1" ;;
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;

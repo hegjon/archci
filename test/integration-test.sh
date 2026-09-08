@@ -57,10 +57,11 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 "$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding" unless j["outstanding"] == {"updates"=>0, "backlog"=>3}'
 
 echo "--- claim picks the next outstanding package just in time"
-out=$("$job" claim worker-1)
+out=$("$job" claim worker-1 x86_64)
 id=$(sed -n 's/^id=//p' <<<"$out")
 [[ $id == 5-*-omarchy,acl,1:2.3.2-1,x86_64 ]] || fail "expected acl first (sorted), got $id"
-grep -q '^arch=x86_64$' <<<"$out" || fail "claim without an arch defaults to ARCHCI_ARCH"
+grep -q "^arch=x86_64$" <<<"$out" || fail "job arch should be the claiming worker's"
+! "$job" claim worker-1 2>/dev/null || fail "a claim must name its arch"
 grep -q '^profile=extra$' <<<"$out" || fail "job carries the build profile"
 grep -q "^commit=$(pkgcommit acl)$" <<<"$out" || fail "job pins the package directory's commit"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "a running package must not be offered again"
@@ -86,7 +87,7 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"
 
 echo "--- report failure, retry, give up"
-id=$(sed -n 's/^id=//p' < <("$job" claim worker-2))
+id=$(sed -n 's/^id=//p' < <("$job" claim worker-2 x86_64))
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
 "$job" report "$id" failure
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
@@ -94,7 +95,7 @@ grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be fin
 "$job" reap
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "reaper should have requeued"
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "attempt kept across requeue"
-id2=$(sed -n 's/^id=//p' < <("$job" claim worker-2))
+id2=$(sed -n 's/^id=//p' < <("$job" claim worker-2 x86_64))
 [[ $id2 == "$id" ]] || fail "retry should be claimed first (prio 5 vs linux prio 5, older ts)"
 "$job" report "$id" failure
 grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final after max attempts"
@@ -103,18 +104,18 @@ grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final
 [[ $("$next") == "5 omarchy x86_64 linux "* ]] || fail "a final failure at the same commit must be skipped"
 
 echo "--- success reported with empty upload counts as failure"
-id=$(sed -n 's/^id=//p' < <("$job" claim worker-3))
+id=$(sed -n 's/^id=//p' < <("$job" claim worker-3 x86_64))
 [[ $id == *linux* ]] || fail "expected linux, got $id"
 "$job" report "$id" success
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "empty success must fail"
 
 echo "--- stale running job is reaped; abandoned does not count"
 "$job" retry "$id"
-id=$(sed -n 's/^id=//p' < <("$job" claim worker-4))
+id=$(sed -n 's/^id=//p' < <("$job" claim worker-4 x86_64))
 touch -d '1 hour ago' "$ARCHCI_HOME/queue/running/$id.job"
 "$job" reap
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "stale job not requeued"
-id=$(sed -n 's/^id=//p' < <("$job" claim worker-4))
+id=$(sed -n 's/^id=//p' < <("$job" claim worker-4 x86_64))
 "$job" report "$id" abandoned
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "abandoned must not count an attempt"
 
@@ -166,7 +167,7 @@ SSH_ORIGINAL_COMMAND="$*" exec "$ARCHCI_SHELL"
 SH
 chmod +x "$tmp/fakessh"
 export ARCHCI_SHELL=$here/../master/archci-shell
-id=$(sed -n 's/^id=//p' < <("$tmp/fakessh" master claim worker-5))
+id=$(sed -n 's/^id=//p' < <("$tmp/fakessh" master claim worker-5 x86_64))
 [[ -n $id ]] || fail "claim through archci-shell"
 mkdir -p "$tmp/out"; echo hi >"$tmp/out/build.log"; mkpkg "$tmp/out" acl 1:2.3.2-1
 rsync -a -e "$tmp/fakessh" "$tmp/out/" "master:$id/" || fail "rsync via rrsync"

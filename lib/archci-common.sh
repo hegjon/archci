@@ -8,7 +8,6 @@ ARCHCI_CONF=${ARCHCI_CONF:-/etc/archci/archci.conf}
 #   worker/  archci-worker loop and archci-build
 ARCHCI_ROOT=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
 ARCHCI_MASTER_DIR=$ARCHCI_ROOT/master
-ARCHCI_WORKER_DIR=$ARCHCI_ROOT/worker
 
 # Load KEY=value lines from the config file. Values already present in the
 # environment win, so tests and one-off runs can override the file.
@@ -72,7 +71,6 @@ archci_load_conf
 : "${ARCHCI_SIGNER_HOME:=/var/lib/archci-signer}"
 # archci-sign-health warns when at least this many packages sit unsigned in staging.
 : "${ARCHCI_STAGING_WARN:=20}"
-: "${ARCHCI_SNAPSHOTS:=5}"
 : "${ARCHCI_MASTER:=archci@master}"
 # Empty (set to "" in the config) disables journal streaming; hence = not :=.
 # Journal streaming target: the master's journal-remote port through the ssh
@@ -114,8 +112,8 @@ archci_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Job ids look like "<prio>-<epoch>-<repo>,<pkgbase>,<version>,<arch>"; they
 # double as file names, rsync targets and log paths, so they are validated
-# strictly. (The arch suffix is optional so jobs from before it are still valid.)
-archci_valid_id()     { [[ $1 =~ ^[0-9]-[0-9]+-[a-z0-9-]+,[a-zA-Z0-9@._+-]+,[a-zA-Z0-9@._+:~-]+(,[a-z0-9_]+)?$ ]]; }
+# strictly.
+archci_valid_id()     { [[ $1 =~ ^[0-9]-[0-9]+-[a-z0-9-]+,[a-zA-Z0-9@._+-]+,[a-zA-Z0-9@._+:~-]+,[a-z0-9_]+$ ]]; }
 archci_valid_worker() { [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; }
 archci_valid_arch()   { [[ $1 =~ ^[a-z0-9_]{1,32}$ ]]; }
 # Is ARCH one of ARCHCI_ARCHES?

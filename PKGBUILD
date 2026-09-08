@@ -100,7 +100,9 @@ package_archci-worker-git() {
   install -Dm644 systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
   install -Dm644 systemd/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
-  (cd arch && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/arch/{}" \;)
+  # chroot configs for arches devtools ships none for; the qemu/ subtree is
+  # archci-worker-qemu-aarch64-git's, taken from the source tree at build time
+  (cd arch && find . -type f -not -path '*/qemu/*' -exec install -Dm644 '{}' "$pkgdir$_libdir/arch/{}" \;)
 }
 
 # Add-on for an x86_64 worker: aarch64 worker instances under qemu user-mode
