@@ -12,8 +12,9 @@
 #            size from its cgroup, the makepkg phase and the last output line
 #            (from the worker's journal streamed to ARCHCI_REMOTE_JOURNAL)
 #   failed   the newest failures
-# Ctrl-C quits.
+# q, Escape or Ctrl-C quits.
 require_relative '../lib/archci'
+require 'io/console'
 require 'open3'
 
 interval = 5
@@ -74,7 +75,7 @@ def frame(cfg, home, repo, journal)
   failed = Archci.jobs('failed').sort_by { |j| -j['mtime'].to_i }.first(5)
 
   out = []
-  out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s', now.strftime('%H:%M:%S'), repo, arches.join(' '))
+  out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s   (q or Esc quits)', now.strftime('%H:%M:%S'), repo, arches.join(' '))
   out << format('queue: pending %d  running %d  failed %d  done %d (%d in the last hour)    outstanding: %d update(s), %d unbuilt',
                 counts['pending'], counts['running'], counts['failed'], counts['done'], done_hour, updates, outstanding.size - updates)
   out << format('built: %s', built.join('  '))
@@ -122,11 +123,27 @@ if once
   exit
 end
 
-trap('INT') { print "\e[?25h\n"; exit }
+# Redraw every interval; between frames wait for a key. The terminal is put in
+# raw mode so a single q ends the program, which also turns Ctrl-C into a
+# plain character we treat the same way.
+tty = $stdin.tty?
+restore = lambda do
+  $stdin.cooked! if tty
+  print "\e[?25h\n"
+end
+trap('INT') { restore.call; exit }
+trap('TERM') { restore.call; exit }
+$stdin.raw! if tty
 print "\e[?25l"
 loop do
   lines = frame(cfg, home, repo, journal)
   print "\e[H\e[2J"
-  puts lines
-  sleep interval
+  puts lines.map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
+  if tty && IO.select([$stdin], nil, nil, interval)
+    key = $stdin.read_nonblock(1, exception: false)
+    break if key.is_a?(String) && (key.downcase == 'q' || key == "\e" || key == "\u0003")
+  elsif !tty
+    sleep interval
+  end
 end
+restore.call
