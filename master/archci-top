@@ -99,10 +99,11 @@ def frame(cfg, home, repo, journal)
   out << format('%-8s %-22s %-8s %-3s %4s %5s %6s %6s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'RSS', 'PEAK', 'BUILD', 'PHASE', 'PACKAGE  | last output')
   running.each do |j|
     claimed = j['claimed'] ? Time.iso8601(j['claimed']) : j['mtime']
-    hb = ((now - j['mtime']) / 60).round
+    hb_s = (now - j['mtime']).to_i
+    hb = hb_s <= 60 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds up to a minute, then minutes
     phase, last = journal_tail(journal, unit_name(j))
     mib = ->(v) { v ? "#{v}M" : '-' }
-    line = format('%-8s %-22s %-8s %-3d %3dm %5s %6s %6s %6s  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
+    line = format('%-8s %-22s %-8s %-3d %4s %5s %6s %6s %6s  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
                   j['cpu'] || '-', mib[j['rss']], mib[j['peak']], mib[j['build']],
                   phase[0, 9], "#{j['pkgbase']} #{j['version']}", last.empty? ? '' : "| #{last}")
     out << line[0, width]
