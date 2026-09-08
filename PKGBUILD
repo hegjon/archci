@@ -9,7 +9,7 @@
 # packaged.
 
 pkgbase=archci-git
-pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git archci-worker-aarch64-git)
+pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git archci-worker-qemu-aarch64-git)
 pkgver=r0.g0000000
 pkgrel=1
 pkgdesc='Headless build farm for Arch Linux packages: builds a PKGBUILD repository into a signed pacman repository'
@@ -103,19 +103,20 @@ package_archci-worker-git() {
 }
 
 # Add-on for an x86_64 worker: aarch64 worker instances under qemu user-mode
-# emulation, archci-worker-aarch64@N, next to the machine's own
-# archci-worker@N. Ships what devtools lacks for that: the binfmt registration
+# emulation, archci-worker-aarch64@N (the unit is named for what it builds),
+# next to the machine's own archci-worker@N. Ships what devtools lacks for that: the binfmt registration
 # with the C flag, the devtools setarch alias, the chroot pacman.conf pointed
 # at the Arch Linux Ports aarch64 repo, and that repo's key as a pacman keyring
 # the .install script populates (see README "Building for arm64"). A native
 # aarch64 machine needs none of this: archci-worker@N builds aarch64 there.
-package_archci-worker-aarch64-git() {
+package_archci-worker-qemu-aarch64-git() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: aarch64 instances on x86_64 under qemu user-mode emulation)'
   depends=(archci-worker-git qemu-user-static qemu-user-static-binfmt)
-  install=archci-worker-aarch64.install
+  install=archci-worker-qemu-aarch64.install
   backup=(etc/binfmt.d/qemu-aarch64-static.conf etc/archci/aarch64/extra.conf)
-  provides=(archci-worker-aarch64)
-  conflicts=(archci-worker-aarch64 archci-worker-qemu-aarch64)
+  provides=(archci-worker-qemu-aarch64)
+  conflicts=(archci-worker-qemu-aarch64 archci-worker-aarch64)
+  replaces=(archci-worker-aarch64-git)
 
   cd "$srcdir/$pkgbase"
   install -d "$pkgdir/usr/lib/systemd/system"

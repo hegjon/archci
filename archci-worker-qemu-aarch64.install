@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# archci-worker-aarch64: build aarch64 on an x86_64 worker under qemu
+# archci-worker-qemu-aarch64: build aarch64 on an x86_64 worker under qemu
 # user-mode emulation. The package ships the pieces devtools lacks for that
 # (README "Building for arm64"); this script activates the two that need it.
 

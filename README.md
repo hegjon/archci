@@ -279,7 +279,7 @@ of a shared one:
 - `archci-master-git`, `archci-worker-git`, `archci-signer-git`: the role's
   scripts as `/usr/bin` commands, its units in `/usr/lib/systemd/system`,
   its directories (tmpfiles), and its dependencies
-- `archci-worker-aarch64-git`: add-on for an x86_64 worker: aarch64 worker
+- `archci-worker-qemu-aarch64-git`: add-on for an x86_64 worker: aarch64 worker
   instances under qemu user-mode emulation (see "Building for arm64")
 
 What a package cannot ship as a file happens on first start: a worker's
@@ -438,7 +438,7 @@ suites break under it, so it suits a big desktop or a smoke test rather than
 a fleet, but it needs no ARM hardware:
 
 ```
-pacman -U archci-worker-aarch64-git-*.pkg.tar.zst
+pacman -U archci-worker-qemu-aarch64-git-*.pkg.tar.zst
 systemctl enable --now archci-worker-aarch64@1
 ```
 
