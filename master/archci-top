@@ -90,7 +90,7 @@ def frame(journal)
   end
   out << ''
 
-  out << format('%-8s %-22s %-8s %-3s %4s %5s %6s %6s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'RSS', 'PEAK', 'BUILD', 'PHASE', 'PACKAGE  | last output')
+  out << format('%-8s %-22s %-8s %-3s %4s %5s %6s %6s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'RSS', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output')
   mib = ->(v) { v ? "#{v}M" : '-' }
   running.each do |j|
     since = j['claimed'] ? now - Time.iso8601(j['claimed']) : j['heartbeat_age_s']
