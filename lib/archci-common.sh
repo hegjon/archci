@@ -2,7 +2,7 @@
 # archci-common.sh -- shared helpers, sourced by every archci bash script.
 
 ARCHCI_CONF=${ARCHCI_CONF:-/etc/archci/archci.conf}
-# Layout, identical in the source tree and under /usr/local/lib/archci:
+# Layout, identical in the source tree and under /usr/lib/archci:
 #   lib/     this file and archci.rb, shared
 #   master/  scan, queue (archci-job), ssh shell, publish, status
 #   worker/  archci-worker loop and archci-build

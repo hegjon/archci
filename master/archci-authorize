@@ -3,8 +3,8 @@
 #
 # Appends the key, restricted to the job protocol by a forced command, to
 # /etc/archci/authorized_keys (root-owned; sshd reads it for the archci user
-# through /etc/ssh/sshd_config.d/archci.conf, which install.sh master and the
-# master package install). The key may also forward to the journal-remote
+# through /etc/ssh/sshd_config.d/archci.conf, which the master package
+# installs). The key may also forward to the journal-remote
 # port, for archci-logging-remote.service on a worker outside the private
 # network. A key already present gets its line rewritten, so re-running this
 # after an upgrade refreshes the options. Run as root. ARCHCI_AUTHORIZED_KEYS

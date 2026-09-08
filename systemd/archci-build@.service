@@ -8,7 +8,7 @@ Description=archci build %i
 Type=oneshot
 Environment=ARCHCI_WORKER_HOME=/var/lib/archci-worker
 EnvironmentFile=-/etc/archci/archci.conf
-ExecStart=/usr/local/bin/archci-build ${ARCHCI_WORKER_HOME}/jobs/%i/job ${ARCHCI_WORKER_HOME}/jobs/%i/out
+ExecStart=/usr/bin/archci-build ${ARCHCI_WORKER_HOME}/jobs/%i/job ${ARCHCI_WORKER_HOME}/jobs/%i/out
 # makechrootpkg's systemd-nspawn (--register=no, no --keep-unit) puts the
 # container in a scope of its own under devtools-root.slice; delegation keeps
 # that cgroup tree ours. Without --keep-unit nspawn's pipe console mode drops

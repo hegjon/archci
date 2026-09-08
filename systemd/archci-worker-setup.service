@@ -8,4 +8,4 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/archci-worker-setup
+ExecStart=/usr/bin/archci-worker-setup

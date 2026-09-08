@@ -7,7 +7,7 @@ Wants=archci-logging-remote.service systemd-journal-upload.service
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/archci-worker %i
+ExecStart=/usr/bin/archci-worker %i
 # Log to the archci journal namespace (journalctl --namespace=archci), which
 # is what systemd-journal-upload streams to the master.
 LogNamespace=archci

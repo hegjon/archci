@@ -5,8 +5,7 @@
 # the archci user); archci-master-git, archci-worker-git and archci-signer-git
 # hold one role each (its scripts as /usr/bin commands, its units, its state
 # directories). Keys, R2 config and enabling the role's units stay manual
-# (README "Install"); install.sh is the source-tree installer and is not
-# packaged.
+# (README "Install").
 
 pkgbase=archci-git
 pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git archci-worker-qemu-aarch64-git)
@@ -33,8 +32,7 @@ pkgver() {
 
 # _install_role ROLE UNIT... -> the role's scripts (same layout as the source
 # tree, so they find lib/ relative to themselves) as /usr/bin commands, its
-# units with the /usr/local paths of the tree's units rewritten, and its
-# tmpfiles entry.
+# units, and its tmpfiles entry.
 _install_role() {
   local role=$1 f
   shift
@@ -46,7 +44,7 @@ _install_role() {
     ln -s "$_libdir/$f" "$pkgdir/usr/bin/${f##*/}"
   done
   for f in "$@"; do
-    sed 's#/usr/local/bin/#/usr/bin/#g' "systemd/$f" >"$pkgdir/usr/lib/systemd/system/$f"
+    install -m644 "systemd/$f" "$pkgdir/usr/lib/systemd/system/$f"
   done
   install -Dm644 "systemd/archci-$role.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/archci-$role.conf"
 }
@@ -121,9 +119,7 @@ package_archci-worker-qemu-aarch64-git() {
   replaces=(archci-worker-aarch64-git)
 
   cd "$srcdir/$pkgbase"
-  install -d "$pkgdir/usr/lib/systemd/system"
-  sed 's#/usr/local/bin/#/usr/bin/#g' systemd/archci-worker-aarch64@.service \
-    >"$pkgdir/usr/lib/systemd/system/archci-worker-aarch64@.service"
+  install -Dm644 systemd/archci-worker-aarch64@.service "$pkgdir/usr/lib/systemd/system/archci-worker-aarch64@.service"
   cd arch/aarch64/qemu
   install -Dm644 binfmt.d/qemu-aarch64-static.conf "$pkgdir/etc/binfmt.d/qemu-aarch64-static.conf"
   install -Dm644 setarch-aliases.d/aarch64 "$pkgdir/usr/share/devtools/setarch-aliases.d/aarch64"

@@ -225,12 +225,9 @@ systemd/  scan, reaper and stage timers (master); archci-worker@.service and
           timers (signer); journal-remote drop-ins for the master
 ```
 
-`install.sh` copies `lib/` plus the role's directory (and `arch/` on a worker)
-to `/usr/local/lib/archci` with the same layout and symlinks the role's
-scripts into `/usr/local/bin`. `systemd/` also holds
-`archci-logging-remote.service`, a worker's journal tunnel (see "Monitoring
-workers"). `PKGBUILD` packages the tree the same way
-under `/usr/lib/archci`, one package per role, without `install.sh` (see
+`systemd/` also holds `archci-logging-remote.service`, a worker's journal
+tunnel (see "Monitoring workers"). `PKGBUILD` packages the tree with the same
+layout under `/usr/lib/archci`, one package per role (see
 Install).
 
 ## Layout on the master (`/var/lib/archci`)
@@ -289,8 +286,11 @@ keyrings are directories the package creates. What remains is per-site:
 keys to authorize, R2 credentials, and enabling units, listed per role
 below. The signer needs only R2 access; workers need only ssh to the master.
 
-`install.sh master|worker|signer` installs the same files straight from a
-source checkout into `/usr/local` for development; it is not packaged.
+To try a change, build the packages from the checkout and install them:
+
+```
+makepkg -s && pacman -U archci-git-*.pkg.tar.zst archci-<role>-git-*.pkg.tar.zst
+```
 
 ### Master
 
@@ -306,7 +306,7 @@ systemctl enable --now systemd-journal-remote.socket   # worker journals
 
 The package creates the `archci` user and the state directories under
 `/var/lib/archci`. Make `repo` and `incoming` there btrfs subvolumes if the
-filesystem allows (`install.sh master` does). Then:
+filesystem allows. Then:
 
 1. Create an R2 bucket and an API token that may write the `staging/` prefix,
    and write `/etc/archci/rclone.conf` (mode 600):
@@ -330,11 +330,11 @@ filesystem allows (`install.sh master` does). Then:
    publishes the release area.
 
 3. Authorize worker keys: `archci-authorize worker_key.pub`. This appends
-   `command="/usr/local/lib/archci/master/archci-shell",restrict <key>` to
+   `command="/usr/lib/archci/master/archci-shell",restrict <key>` to
    `/etc/archci/authorized_keys`, so a worker key can do nothing but the
    protocol. sshd reads that file for the archci user through
-   `/etc/ssh/sshd_config.d/archci.conf` (installed by `install.sh master` and
-   the master package; reload sshd after a package install). It is root's on
+   `/etc/ssh/sshd_config.d/archci.conf` (installed by the master package,
+   whose pacman hook reloads sshd). It is root's on
    purpose: the archci user, which the forced command and queue scripts run
    as, cannot authorize keys for itself. The signer needs no key on the master.
 
@@ -459,8 +459,6 @@ the host keyring because the chroot inherits the host's trust. The
 machine outside the VPC only needs the master's public address as `master`
 in `/etc/hosts`: jobs and journal both travel over ssh. Expect the first
 build to spend a while creating `/var/lib/archbuild/extra-aarch64`.
-From a source checkout, `install.sh worker --arch aarch64` does the same by
-hand and makes `archci-worker@N` itself build aarch64.
 
 ### Signer
 

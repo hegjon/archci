@@ -170,7 +170,7 @@ fi
 # missing builder key is a hard error.
 if (( rc == 0 && ${#pkgs[@]} )); then
 	if [[ ! -d $ARCHCI_BUILDER_GNUPGHOME ]]; then
-		echo "==> no builder key at $ARCHCI_BUILDER_GNUPGHOME (run install.sh worker)"
+		echo "==> no builder key at $ARCHCI_BUILDER_GNUPGHOME (archci-worker-setup makes one)"
 		rc=1
 	else
 		for pkg in "${pkgs[@]}"; do

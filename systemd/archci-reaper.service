@@ -5,4 +5,4 @@ RequiresMountsFor=/var/lib/archci
 [Service]
 Type=oneshot
 User=archci
-ExecStart=/usr/local/bin/archci-job reap
+ExecStart=/usr/bin/archci-job reap

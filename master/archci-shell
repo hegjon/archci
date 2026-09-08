@@ -2,7 +2,7 @@
 # archci-shell -- forced command for worker keys the master authorizes.
 #
 # authorized_keys (written by archci-authorize):
-#   command="/usr/local/lib/archci/master/archci-shell",restrict  ssh-ed25519 AAAA... worker
+#   command="/usr/lib/archci/master/archci-shell",restrict  ssh-ed25519 AAAA... worker
 #
 # A worker may only run the job protocol and rsync into incoming/. The signer
 # does not use ssh at all: it exchanges packages with the master through R2.

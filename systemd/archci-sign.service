@@ -5,4 +5,4 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/archci-sign
+ExecStart=/usr/bin/archci-sign
