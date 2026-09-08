@@ -80,7 +80,7 @@ archci_load_conf
 : "${ARCHCI_WORKER_HOME:=/var/lib/archci-worker}"
 : "${ARCHCI_BUILD_USER:=archci}"
 : "${ARCHCI_CHROOTS:=/var/lib/archbuild}"
-: "${ARCHCI_MAKEPKG_ARGS:=--skippgpcheck}"
+: "${ARCHCI_MAKEPKG_ARGS=}"
 # Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.

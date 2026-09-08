@@ -507,11 +507,12 @@ verifies against the imported key on download, not from that field.)
   a clean environment) to read its version, the same thing `makepkg
   --printsrcinfo` does. The PKGBUILD repository is trusted input; do not
   point `ARCHCI_PKGBUILDS_URL` at one you would not run.
-- Upstream source PGP signatures are not verified (`ARCHCI_MAKEPKG_ARGS`
-  defaults to `--skippgpcheck`): there is no central keyring of packagers'
-  upstream keys, so a rebuild farm cannot check them. The build is still
-  pinned to the PKGBUILD repository's exact commit and the PKGBUILD sha256sums.
-  Clear the setting and seed the build user's keyring to enforce them.
+- Upstream source PGP signatures are verified with the keys each PKGBUILD
+  ships in `keys/pgp/<fingerprint>.asc`, as Arch's packaging repositories
+  do; `archci-build` imports them for the build user before makechrootpkg
+  verifies the sources. A package whose keys are missing fails, which is the
+  point: the PKGBUILD repository decides which keys are trusted.
+  `ARCHCI_MAKEPKG_ARGS=--skippgpcheck` turns the check off.
 - Packages are signed by the `signer` role, never on the master; the database
   is left unsigned (`DatabaseOptional`). See Signing above. A built package
   whose builder signature the signer rejects is not re-attempted automatically,

@@ -132,13 +132,22 @@ export PACKAGER=$ARCHCI_PACKAGER
 
 say "Building %s %s in %s" "$job_pkgbase" "$job_version" "$copy"
 cd "$srcdir"
+# Upstream source signatures. makechrootpkg verifies the sources on the host,
+# as $ARCHCI_BUILD_USER with its GNUPGHOME (makepkg --verifysource), before
+# the chroot build, which then skips integrity checks. The keys a PKGBUILD's
+# validpgpkeys names come with it in keys/pgp/<fingerprint>.asc, as in Arch's
+# packaging repositories; import them into a keyring of ours for that user.
+# A package whose keys are missing fails its signature check, unless
+# ARCHCI_MAKEPKG_ARGS says --skippgpcheck.
+export GNUPGHOME=$ARCHCI_WORKER_HOME/gnupg
+install -d -m 700 -o "$ARCHCI_BUILD_USER" -g "$(id -gn "$ARCHCI_BUILD_USER")" "$GNUPGHOME"
+if compgen -G "$srcdir/keys/pgp/*.asc" >/dev/null; then
+	runuser -u "$ARCHCI_BUILD_USER" -- env GNUPGHOME="$GNUPGHOME" gpg --batch --quiet --import "$srcdir"/keys/pgp/*.asc 2>/dev/null ||
+		echo "==> WARNING: importing keys/pgp/*.asc failed; the signature check will say"
+	say "Imported %s upstream signing key(s) from keys/pgp" "$(find "$srcdir/keys/pgp" -name '*.asc' | wc -l)"
+fi
 mcp_args=(-c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
-# ARCHCI_MAKEPKG_ARGS is passed to makepkg after --. It defaults to
-# --skippgpcheck: this is a rebuild farm, so upstream source authenticity is
-# not re-verified here (there is no central bundle of packagers' upstream
-# keys). The source is still pinned by the PKGBUILD sha256sums and by the exact
-# git commit taken from the trusted PKGBUILD repository. Set it empty to require
-# signatures (then seed the build user's keyring yourself).
+# ARCHCI_MAKEPKG_ARGS is passed to makepkg after -- (default: none).
 extra_makepkg_args=()
 [[ -n $ARCHCI_MAKEPKG_ARGS ]] && read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
 # PKGBUILDs carried from Arch declare arch=(x86_64) unless a patch in the
