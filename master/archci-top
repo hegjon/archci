@@ -100,7 +100,7 @@ def frame(cfg, home, repo, journal)
   running.each do |j|
     claimed = j['claimed'] ? Time.iso8601(j['claimed']) : j['mtime']
     hb_s = (now - j['mtime']).to_i
-    hb = hb_s <= 60 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds up to a minute, then minutes
+    hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = journal_tail(journal, unit_name(j))
     mib = ->(v) { v ? "#{v}M" : '-' }
     line = format('%-8s %-22s %-8s %-3d %4s %5s %6s %6s %6s  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
