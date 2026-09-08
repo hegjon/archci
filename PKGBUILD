@@ -58,7 +58,7 @@ package_archci-git() {
 
   cd "$pkgbase"
   (cd lib && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/lib/{}" \;)
-  install -Dm644 archci.conf.example "$pkgdir/etc/archci/archci.conf"
+  install -Dm644 config/archci.conf "$pkgdir/etc/archci/archci.conf"
   install -Dm644 config/systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgbase/README.md"
   install -Dm644 docs/*.md -t "$pkgdir/usr/share/doc/$pkgbase/docs"

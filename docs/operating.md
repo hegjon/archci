@@ -63,7 +63,7 @@ journalctl -u archci-sign-health    stall alerts (locked key, staging backlog)
 archci-authorize-builder key.pub    trust a worker's builder key
 ```
 
-All knobs are in `archci.conf.example`. Environment variables override the
+All knobs are in `config/archci.conf`, installed as `/etc/archci/archci.conf`. Environment variables override the
 file, which is how the tests run without network or root. Run them with
 `test/run.sh` (add a name substring to filter, e.g. `test/run.sh lint`):
 
