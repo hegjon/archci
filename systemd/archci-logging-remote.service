@@ -21,6 +21,9 @@ ExecStart=/usr/bin/ssh -N -i ${ARCHCI_WORKER_KEY} \
     -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
     -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts \
     -L 127.0.0.1:19532:127.0.0.1:19532 ${ARCHCI_MASTER}
+# The unit counts as started once the forward listens, so units ordered
+# After= it (systemd-journal-upload) find the port open.
+ExecStartPost=/bin/sh -c 'for i in $(seq 100); do ss -ltn | grep -q "127.0.0.1:19532 " && exit 0; sleep 0.2; done; exit 1'
 Restart=always
 RestartSec=15
 LogNamespace=archci

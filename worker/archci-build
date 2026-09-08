@@ -18,6 +18,9 @@ jobfile=${1:-} outdir=${2:-}
 archci_read_job "$jobfile" || archci_die "$jobfile is not a valid job file"
 instance=${3:-${job_worker##*-}}
 instance=${instance:-manual}
+# The worker instance that claimed the job says which arch it builds (an
+# archci-worker-<arch>@ instance differs from the machine's ARCHCI_ARCH).
+[[ -f ${jobfile%/*}/arch ]] && ARCHCI_ARCH=$(<"${jobfile%/*}/arch")
 (( EUID == 0 )) || archci_die "must run as root (makechrootpkg needs it)"
 for tool in mkarchroot makechrootpkg arch-nspawn; do
 	command -v "$tool" >/dev/null || archci_die "devtools is not installed"

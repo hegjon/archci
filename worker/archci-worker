@@ -1,8 +1,14 @@
 #!/bin/bash
-# archci-worker [INSTANCE] -- pull jobs from the master, build them, upload results.
+# archci-worker [INSTANCE] [ARCH] -- pull jobs from the master, build them,
+# upload results.
 #
-# One process per chroot copy; run several via archci-worker@N.service. Needs
-# only an ssh key that the master has authorized with archci-authorize.
+# One process per chroot copy; run several via archci-worker@N.service, which
+# builds this machine's own arch, or archci-worker-<arch>@N.service, which
+# builds ARCH (natively on such a machine, under qemu user-mode emulation on
+# another; see README "Building for arm64"). Instances of different arches
+# can run side by side: the worker is known to the master as
+# <host>-N or <host>-<arch>-N. Needs only an ssh key that the master has
+# authorized with archci-authorize.
 #
 # Each build runs as archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service,
 # a oneshot template unit started with a blocking "systemctl start", so its
@@ -13,8 +19,13 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 instance=${1:-1}
+if [[ -n ${2:-} ]]; then
+	archci_valid_arch "$2" || archci_die "invalid arch: $2"
+	ARCHCI_ARCH=$2
+	instance=$2-$instance
+fi
 [[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
-[[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY (run install.sh worker)"
+[[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY (archci-worker-setup makes one)"
 worker="${HOSTNAME%%.*}-$instance"
 archci_valid_worker "$worker" || archci_die "hostname makes an invalid worker id: $worker"
 
@@ -69,6 +80,7 @@ while true; do
 	rm -rf "$jobdir"
 	mkdir -p "$outdir"
 	mv "$claim" "$jobdir/job"
+	printf '%s\n' "$ARCHCI_ARCH" >"$jobdir/arch"   # the arch this instance builds, for archci-build
 	archci_log "building $job_id as archci-build@$name"
 
 	# Keep the master's stale-job reaper away while the build runs.
