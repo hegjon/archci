@@ -88,6 +88,9 @@ archci_load_conf
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
 : "${ARCHCI_PACKAGER:=archci build farm <archci@localhost>}"
 : "${ARCHCI_CHROOT_UPDATE_MINUTES:=60}"
+# A build whose output stops for this long is killed (a stuck test suite);
+# 0 leaves only the unit's TimeoutStartSec.
+: "${ARCHCI_BUILD_IDLE_MINUTES:=30}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=300}"
 export "${!ARCHCI_@}"
@@ -146,6 +149,42 @@ archci_read_job() {
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 	done <"$1"
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]
+}
+
+# archci_watchdog SECONDS -- COMMAND... : run COMMAND with its output through a
+# pipe (systemd-nspawn drops a stdout that is the journal socket, so the lines
+# makepkg prints inside the chroot only reach the journal this way) and kill
+# it, with its whole process group, when it prints nothing for SECONDS: a test
+# suite that hangs otherwise holds the worker until the unit's TimeoutStartSec.
+# Returns COMMAND's status, 124 when killed. SECONDS 0 means no idle limit.
+archci_watchdog() {
+	local idle=$1; shift
+	[[ ${1:-} == -- ]] && shift
+	local fifo pid fd line r killed=0 rc=0
+	local -a topt=()
+	(( idle > 0 )) && topt=(-t "$idle")
+	fifo=$(mktemp -u); mkfifo -m 600 "$fifo"
+	setsid "$@" >"$fifo" 2>&1 &
+	pid=$!
+	exec {fd}<"$fifo"
+	rm -f "$fifo"
+	while :; do
+		if IFS= read -r "${topt[@]}" line <&"$fd"; then printf '%s\n' "$line"; continue; else r=$?; fi
+		if (( r > 128 )); then
+			echo "==> no output for $idle s, killing the build"
+			kill -TERM -- "-$pid" 2>/dev/null || true
+			sleep 15
+			kill -KILL -- "-$pid" 2>/dev/null || true
+			killed=1
+			continue      # drain what is left until the pipe closes
+		fi
+		[[ -n $line ]] && printf '%s\n' "$line"
+		break
+	done
+	exec {fd}<&-
+	wait "$pid" || rc=$?
+	(( killed )) && rc=124
+	return "$rc"
 }
 
 # archci_pool DIR REPO JOBARCH VERSION -- pool the packages a worker uploaded

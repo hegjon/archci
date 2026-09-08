@@ -106,7 +106,9 @@ and is printed. The worker then:
 2. starts `archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service`, a
    oneshot template unit, with a blocking `systemctl start`. The build has its
    own unit, cgroup and journal, and the unit's `TimeoutStartSec` (12 h, change
-   with `systemctl edit archci-build@.service`) is the timeout,
+   with `systemctl edit archci-build@.service`) is the timeout. A build whose
+   output stops for `ARCHCI_BUILD_IDLE_MINUTES` (30) is killed earlier: a hung
+   test suite otherwise holds the worker for the whole 12 h,
 3. inside that unit, builds with `makechrootpkg -c -l archci-N` in
    `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
    btrfs subvolume and each build gets a fresh snapshot of it, refreshed with
