@@ -1,5 +1,11 @@
 #!/bin/bash
 # archci-authorize PUBKEY -- let a worker key talk to this master.
+#
+# Appends the key, restricted to the job protocol by a forced command, to
+# /etc/archci/authorized_keys (root-owned; sshd reads it for the archci user
+# through /etc/ssh/sshd_config.d/archci.conf, which install.sh master and the
+# master package install). Run as root. ARCHCI_AUTHORIZED_KEYS overrides the
+# file, for the tests.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -8,14 +14,24 @@ key=${1:-}
 [[ -f $key ]] && key=$(<"$key")
 [[ $key =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9-]+@openssh.com)\ [A-Za-z0-9+/=]+ ]] || archci_die "that does not look like a public key"
 
-akf=$ARCHCI_HOME/.ssh/authorized_keys
-install -d -m 700 -o archci -g archci "$ARCHCI_HOME/.ssh"
-touch "$akf"
+akf=${ARCHCI_AUTHORIZED_KEYS:-/etc/archci/authorized_keys}
+install -d -m 755 "${akf%/*}"
+# Keys authorized before this file existed live in the archci user's own
+# ~/.ssh/authorized_keys (not root's to guard); carry them over once.
+old=$ARCHCI_HOME/.ssh/authorized_keys
+if [[ ! -e $akf && -f $old ]]; then
+	install -m 644 "$old" "$akf"
+	mv "$old" "$old.migrated"
+	archci_log "moved the keys from $old to $akf"
+fi
+[[ -e $akf ]] || : >"$akf"
 if grep -qF "${BASH_REMATCH[0]}" "$akf"; then
 	archci_log "key already authorized"
 else
 	printf 'command="%s",restrict %s\n' "$ARCHCI_MASTER_DIR/archci-shell" "$key" >>"$akf"
 	archci_log "authorized: ${key##* }"
 fi
-chown archci:archci "$akf"
-chmod 600 "$akf"
+chmod 644 "$akf"
+if [[ -z ${ARCHCI_AUTHORIZED_KEYS:-} && ! -f /etc/ssh/sshd_config.d/archci.conf ]]; then
+	archci_log "WARNING: sshd does not read $akf yet: install ssh/sshd_config.d/archci.conf to /etc/ssh/sshd_config.d/ and reload sshd"
+fi

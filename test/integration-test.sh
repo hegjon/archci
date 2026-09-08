@@ -140,6 +140,20 @@ commit_pkgs acl-metadata
 "$scan"
 [[ $("$next") != *" acl "* ]] || fail "acl was built at this version; a metadata commit must not rebuild it"
 
+echo "--- archci-authorize: forced-command lines in a root-owned file, deduplicated"
+akf=$tmp/authorized_keys
+ssh-keygen -q -t ed25519 -N '' -C worker-x -f "$tmp/wkey"
+ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" "$tmp/wkey.pub"
+ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" "$tmp/wkey.pub" 2>&1 | grep -q "already authorized" || fail "re-authorizing must be a no-op"
+(( $(wc -l <"$akf") == 1 )) || fail "duplicate key line"
+grep -q '^command="[^"]*/master/archci-shell",restrict ssh-ed25519 ' "$akf" || fail "authorized line lacks the forced command: $(<"$akf")"
+[[ $(stat -c %a "$akf") == 644 ]] || fail "authorized_keys should be world-readable, root-writable"
+! ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" 'not a key' 2>/dev/null || fail "garbage must be rejected"
+# keys from the old per-user file are carried over once
+mkdir -p "$ARCHCI_HOME/.ssh"; echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOldKeyOldKeyOldKeyOldKeyOldKeyOldKeyOldKeyOldKe old" >"$ARCHCI_HOME/.ssh/authorized_keys"
+ARCHCI_AUTHORIZED_KEYS=$tmp/ak2 "$here/../master/archci-authorize" "$tmp/wkey.pub"
+grep -q ' old$' "$tmp/ak2" && [[ -f $ARCHCI_HOME/.ssh/authorized_keys.migrated ]] || fail "old per-user keys not migrated"
+
 echo "--- ssh forced command + restricted rsync upload"
 cat >"$tmp/fakessh" <<'SH'
 #!/bin/bash

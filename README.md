@@ -216,6 +216,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ```
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
+ssh/      sshd_config.d/archci.conf: sshd reads worker keys from /etc/archci/authorized_keys
 worker/   archci-worker, archci-build
 arch/     chroot configs for arches devtools ships none for (aarch64/makepkg.conf)
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
@@ -282,7 +283,8 @@ shared one:
 
 `install.sh` is not part of them; with a role package installed, do the rest
 of that role's setup by hand, following the role sections below: for a
-master authorize worker keys and enable the scan, reaper and stage timers;
+master authorize worker keys, reload sshd (the package installs its drop-in)
+and enable the scan, reaper and stage timers;
 for a worker generate `/etc/archci/worker_key` and the builder key, write the
 journal-upload drop-in, and enable `archci-worker@1`; for a signer create the
 release keyring and enable the sign timers.
@@ -324,9 +326,13 @@ timers. Then:
    publishes the release area.
 
 3. Authorize worker keys: `archci-authorize worker_key.pub`. This appends
-   `command="/usr/local/lib/archci/master/archci-shell",restrict <key>` to the archci
-   user's `authorized_keys`, so a worker key can do nothing but the protocol.
-   The signer needs no key on the master.
+   `command="/usr/local/lib/archci/master/archci-shell",restrict <key>` to
+   `/etc/archci/authorized_keys`, so a worker key can do nothing but the
+   protocol. sshd reads that file for the archci user through
+   `/etc/ssh/sshd_config.d/archci.conf` (installed by `install.sh master` and
+   the master package; reload sshd after a package install). It is root's on
+   purpose: the archci user, which the forced command and queue scripts run
+   as, cannot authorize keys for itself. The signer needs no key on the master.
 
 Clients read the release area (see Signer):
 
@@ -684,7 +690,7 @@ Then `pacman -Sy` and install as shown above.
   give workers enough RAM (1 GB is too little for large packages); and decide on
   release-key longevity (see the signing section).
 - Worker ssh keys are shared secrets; rotate by running `archci-authorize` with
-  a new key and deleting the old line from `~archci/.ssh/authorized_keys`.
+  a new key and deleting the old line from `/etc/archci/authorized_keys`.
 
 ## License
 

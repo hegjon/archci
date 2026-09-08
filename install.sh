@@ -74,6 +74,14 @@ if [[ $role == master ]]; then
 	       endpoint = https://<account-id>.r2.cloudflarestorage.com
 	     and set ARCHCI_R2_STAGING="r2:<bucket>/staging" in /etc/archci/archci.conf.
 	     Ideally use a token that can only write the staging prefix.
+	echo "==> master: sshd reads worker keys from /etc/archci/authorized_keys"
+	install -D -m 644 ssh/sshd_config.d/archci.conf /etc/ssh/sshd_config.d/archci.conf
+	if [[ ! -e /etc/archci/authorized_keys && -f /var/lib/archci/.ssh/authorized_keys ]]; then
+		install -m 644 /var/lib/archci/.ssh/authorized_keys /etc/archci/authorized_keys
+		mv /var/lib/archci/.ssh/authorized_keys /var/lib/archci/.ssh/authorized_keys.migrated
+		echo "    moved the existing keys from /var/lib/archci/.ssh/authorized_keys"
+	fi
+	systemctl reload sshd 2>/dev/null || true
 	     ARCHCI_PKGBUILDS_URL there is the repository of PKGBUILDs to build
 	     (default $ARCHCI_PKGBUILDS_URL).
 	  2. The master holds NO signing key and builds no database. It moves built
