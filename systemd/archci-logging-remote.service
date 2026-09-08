@@ -6,9 +6,11 @@
 # session is opened, so the key's forced command never runs.
 [Unit]
 Description=archci remote logging: ssh tunnel to the master's journal-remote port
-After=network-online.target
+After=network-online.target archci-worker-setup.service
 Wants=network-online.target
 Before=systemd-journal-upload.service
+# archci-worker-setup creates this when ARCHCI_JOURNAL_URL is the tunnel's loopback URL.
+ConditionPathExists=/run/archci/logging-tunnel
 StartLimitIntervalSec=0
 
 [Service]

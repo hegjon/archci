@@ -2,3 +2,6 @@
 d /var/lib/archci-signer 0755 root root -
 d /var/lib/archci-signer/work 0755 root root -
 d /var/lib/archci-signer/repo 0755 root root -
+# keyrings: the release secret key, and the trusted builder public keys
+d /etc/archci/release-gnupg 0700 root root -
+d /etc/archci/builder-keyring 0700 root root -

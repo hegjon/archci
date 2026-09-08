@@ -1,0 +1,56 @@
+#!/bin/bash
+# archci-worker-setup -- first-start preparation of a worker, run by
+# archci-worker-setup.service before any archci-worker@ instance.
+#
+# Everything a package cannot ship as a file: the worker's ssh key and builder
+# signing key (generated once; their public halves are printed so they can be
+# authorized on the master and the signer), the devtools chroot directory as a
+# btrfs subvolume when possible, and the journal streaming configuration from
+# ARCHCI_JOURNAL_URL: the systemd-journal-upload drop-in in /run, and the flag
+# that lets archci-logging-remote.service start when the URL is the tunnel's.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+(( EUID == 0 )) || archci_die "must run as root"
+host=${HOSTNAME%%.*}
+
+# ssh key: the worker's identity towards the master (archci-authorize on the master)
+if [[ ! -f $ARCHCI_WORKER_KEY ]]; then
+	ssh-keygen -q -t ed25519 -N '' -C "archci-worker@$host" -f "$ARCHCI_WORKER_KEY"
+	archci_log "generated $ARCHCI_WORKER_KEY"
+fi
+chmod 600 "$ARCHCI_WORKER_KEY"
+
+# builder key: signs every package this worker builds (archci-authorize-builder on the signer)
+install -d -m 700 "$ARCHCI_BUILDER_GNUPGHOME"
+if ! gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --list-secret-keys "archci-builder@$host" >/dev/null 2>&1; then
+	gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --pinentry-mode loopback --passphrase "" \
+		--quick-generate-key "archci builder $host <archci-builder@$host>" ed25519 sign never
+	archci_log "generated the builder key in $ARCHCI_BUILDER_GNUPGHOME"
+fi
+gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --armor \
+	--export "archci-builder@$host" >/etc/archci/builder_key.pub
+
+# chroots: a btrfs subvolume gives devtools snapshot-based clean chroots
+if [[ ! -e $ARCHCI_CHROOTS ]]; then
+	if [[ $(stat -f -c %T "$(dirname "$ARCHCI_CHROOTS")") == btrfs ]]; then
+		btrfs subvolume create "$ARCHCI_CHROOTS" >/dev/null
+	else
+		mkdir -p "$ARCHCI_CHROOTS"
+	fi
+fi
+
+# journal streaming: URL for systemd-journal-upload, tunnel flag for archci-logging-remote
+install -d -m 755 /run/archci /run/systemd/journal-upload.conf.d
+rm -f /run/archci/logging-tunnel /run/systemd/journal-upload.conf.d/archci.conf
+if [[ -n $ARCHCI_JOURNAL_URL ]]; then
+	printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/run/systemd/journal-upload.conf.d/archci.conf
+	case $ARCHCI_JOURNAL_URL in
+		http://127.0.0.1:*|http://localhost:*) : >/run/archci/logging-tunnel ;;
+	esac
+fi
+
+cat <<MSG
+worker $host ready (arch $ARCHCI_ARCH; journal -> ${ARCHCI_JOURNAL_URL:-not streamed}). Authorize it:
+  on the master:  archci-authorize '$(<"$ARCHCI_WORKER_KEY.pub")'
+  on the signer:  archci-authorize-builder builder_key.pub   (this host's /etc/archci/builder_key.pub)
+MSG

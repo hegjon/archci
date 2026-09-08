@@ -166,59 +166,35 @@ elif [[ $role == worker ]]; then
 	getent passwd archci >/dev/null || useradd --system --home-dir /var/lib/archci-worker --shell /usr/bin/nologin archci
 	install -d -m 755 /var/lib/archci-worker /var/lib/archci-worker/jobs /var/lib/archci-worker/build
 	install -d -o archci -m 755 /var/lib/archci-worker/srcdest
-	mksubvol /var/lib/archbuild
-	if [[ ! -f /etc/archci/worker_key ]]; then
-		ssh-keygen -q -t ed25519 -N '' -C "archci-worker@${HOSTNAME%%.*}" -f /etc/archci/worker_key
-	fi
-	chmod 600 /etc/archci/worker_key
-	echo "==> worker: builder signing key"
-	source lib/archci-common.sh
-	install -d -m 700 "$ARCHCI_BUILDER_GNUPGHOME"
-	if ! gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --list-secret-keys "archci-builder@${HOSTNAME%%.*}" >/dev/null 2>&1; then
-		gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --pinentry-mode loopback --passphrase "" --quick-generate-key \
-			"archci builder ${HOSTNAME%%.*} <archci-builder@${HOSTNAME%%.*}>" ed25519 sign never
-	fi
-	gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --armor \
-		--export "archci-builder@${HOSTNAME%%.*}" >/etc/archci/builder_key.pub
 	echo "==> worker: systemd units (logging to the archci journal namespace)"
-	install -m 644 systemd/archci-worker@.service systemd/archci-build@.service \
+	install -m 644 systemd/archci-worker@.service systemd/archci-worker-aarch64@.service \
+		systemd/archci-build@.service systemd/archci-worker-setup.service \
 		systemd/archci-logging-remote.service "$unitdir/"
 	install -D -m 644 systemd/journald@archci.conf /etc/systemd/journald@archci.conf.d/archci.conf
 	install -D -m 644 systemd/systemd-journal-upload.service.d/archci.conf \
 		"$unitdir/systemd-journal-upload.service.d/archci.conf"
 	systemctl daemon-reload
+	echo "==> worker: keys, chroot directory, journal streaming (archci-worker-setup)"
+	"$libdir/worker/archci-worker-setup"
 	systemctl enable archci-worker@1.service
-	if [[ -n $ARCHCI_JOURNAL_URL ]]; then
-		echo "==> worker: stream the journal to the master (systemd-journal-upload to $ARCHCI_JOURNAL_URL)"
-		install -d -m 755 /etc/systemd/journal-upload.conf.d
-		printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/etc/systemd/journal-upload.conf.d/archci.conf
-		case $ARCHCI_JOURNAL_URL in
-			http://127.0.0.1:*|http://localhost:*)
-				# Outside the private network: reach the port through an ssh tunnel over the worker key.
-				echo "    through the ssh tunnel of archci-logging-remote.service"
-				systemctl enable --now archci-logging-remote.service ;;
-			*) systemctl disable --now archci-logging-remote.service 2>/dev/null || true ;;
-		esac
-		systemctl enable --now systemd-journal-upload.service
-	else
-		# ARCHCI_JOURNAL_URL="" : a worker outside the master's network (the
-		# journal port is plain HTTP and not public) keeps its journal local.
-		echo "==> worker: ARCHCI_JOURNAL_URL is empty, not streaming the journal"
-		systemctl disable --now systemd-journal-upload.service archci-logging-remote.service 2>/dev/null || true
-		rm -f /etc/systemd/journal-upload.conf.d/archci.conf
-	fi
+	# Journal streaming is configured by archci-worker-setup from ARCHCI_JOURNAL_URL
+	# (a drop-in under /run) and started with the worker; drop the old static drop-in.
+	rm -f /etc/systemd/journal-upload.conf.d/archci.conf
 	cat <<-MSG
 
 	Worker installed (arch $ARCHCI_ARCH; the master must list it in ARCHCI_ARCHES). Next:
 	  1. Make sure "master" resolves to the master's address (/etc/hosts), or
 	     change ARCHCI_MASTER in /etc/archci/archci.conf and rerun this script.
-	     Outside the master's private network set ARCHCI_JOURNAL_URL="" too.
+	     ARCHCI_JOURNAL_URL: the journal streams to the master (through the ssh
+	     tunnel of archci-logging-remote when it is http://127.0.0.1:19532);
+	     "" keeps it local.
 	  2. Authorize this worker's SSH key on the master (archci-authorize):
 	       $(cat /etc/archci/worker_key.pub)
 	  3. Trust this worker's BUILDER key on the signer: copy
 	       /etc/archci/builder_key.pub
 	     to the signer and run  archci-authorize-builder builder_key.pub
-	  4. systemctl start archci-worker@1   (add @2, @3 ... for parallel builds)
+	  4. systemctl start archci-worker@1   (add @2, @3 ... for parallel builds;
+	     archci-worker-aarch64@1 for an emulated aarch64 instance)
 	     journalctl --namespace=archci -u archci-worker@1 -f
 	MSG
 elif [[ $role == signer ]]; then

@@ -4,11 +4,11 @@
 ## Common ---------------------------------------------------------------------
 # Master state: queue, built records, repo, logs (should be a btrfs subvolume).
 ARCHCI_HOME=/var/lib/archci
-# Worker: the architecture this machine builds, normally uname -m; another
-# value means qemu user-mode emulation, which "install.sh worker --arch X" sets
-# up. Master: the default arch for "archci-job enqueue" and for workers too
-# old to send theirs.
-ARCHCI_ARCH=x86_64
+# The machine's own architecture (default: uname -m). Worker: what
+# archci-worker@N builds (archci-worker-<arch>@N instances build another arch,
+# see README "Building for arm64"). Master: the default arch for
+# "archci-job enqueue" and for workers too old to send theirs.
+#ARCHCI_ARCH=x86_64
 # The PKGBUILD repository: one git repository with a directory per package,
 # <ARCHCI_PKGBUILDS_DIR>/<name>/PKGBUILD plus .omarchy/package.json (the
 # omarchy-pkgs layout). The branch is the release list: a package is built

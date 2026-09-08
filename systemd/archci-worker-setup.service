@@ -1,0 +1,11 @@
+# First-start preparation of a worker (keys, chroot directory, journal
+# streaming configuration); pulled in by every archci-worker@ instance.
+[Unit]
+Description=archci worker setup: keys and journal streaming configuration
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/archci-worker-setup

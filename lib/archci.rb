@@ -2,6 +2,7 @@
 
 # archci.rb -- shared helpers for the ruby parts of archci (scan, status).
 # Mirrors archci-common.sh: same config file, same job file format.
+require 'etc'
 require 'json'
 require 'open3'
 require 'time'
@@ -11,7 +12,7 @@ module Archci
 
   DEFAULTS = {
     'ARCHCI_HOME' => '/var/lib/archci',
-    'ARCHCI_ARCH' => 'x86_64',
+    'ARCHCI_ARCH' => Etc.uname[:machine],
     'ARCHCI_PKGBUILDS_URL' => 'https://github.com/hegjon/omarchy-pkgs.git',
     'ARCHCI_PKGBUILDS_BRANCH' => 'master',
     'ARCHCI_PKGBUILDS_DIR' => 'pkgbuilds',

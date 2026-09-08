@@ -1,5 +1,9 @@
+# A worker instance building aarch64: natively on an aarch64 machine, under qemu
+# user-mode emulation on another (archci-worker-qemu-aarch64). Runs alongside
+# archci-worker@ instances of the machine's own arch; known to the master as
+# <host>-aarch64-N.
 [Unit]
-Description=archci build worker %i
+Description=archci build worker %i (aarch64)
 After=network-online.target archci-worker-setup.service
 Wants=network-online.target archci-worker-setup.service
 # Journal streaming to the master, when configured (archci-worker-setup decides).
@@ -7,7 +11,7 @@ Wants=archci-logging-remote.service systemd-journal-upload.service
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/archci-worker %i
+ExecStart=/usr/local/bin/archci-worker %i aarch64
 # Log to the archci journal namespace (journalctl --namespace=archci), which
 # is what systemd-journal-upload streams to the master.
 LogNamespace=archci

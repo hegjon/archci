@@ -25,7 +25,7 @@ archci_load_conf() {
 archci_load_conf
 
 : "${ARCHCI_HOME:=/var/lib/archci}"
-: "${ARCHCI_ARCH:=x86_64}"
+: "${ARCHCI_ARCH:=$(uname -m)}"
 # Master: architectures workers may claim jobs for (worker claims carry their
 # arch). Upstream releases only x86_64 (plus "any"), so every arch here builds
 # the x86_64 release list; a port arch needs its own workers and an

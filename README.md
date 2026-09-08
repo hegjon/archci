@@ -173,7 +173,7 @@ flowchart TD
 ```
 
 - **Builder signature (internal).** Each worker has its own OpenPGP key,
-  generated locally by `install.sh worker`. Right after a build the worker
+  generated locally on first start (`archci-worker-setup`). Right after a build the worker
   signs every package into `<pkg>.buildsig`. This proves which builder made
   the package and that its bytes were not altered afterwards. It is never
   shown to clients and is excluded from what is published.
@@ -269,29 +269,28 @@ claimed=2026-09-05T07:41:12Z
 
 ## Install
 
-All three roles (master, worker, signer) run on Arch or Omarchy machines. Copy
-or clone this directory to each, then run `install.sh` with the role. The signer
-needs only R2 access; the master and workers share a VPC.
-
-There are also packages: `PKGBUILD` is a split package built from the git
-repository (`makepkg -s` in a checkout), one package per role on top of a
-shared one:
+All three roles (master, worker, signer) run on Arch or Omarchy machines and
+are installed as pacman packages. `PKGBUILD` is a split package built from
+the git repository (`makepkg -s` in a checkout), one package per role on top
+of a shared one:
 
 - `archci-git`: `lib/` under `/usr/lib/archci`, the config as
   `/etc/archci/archci.conf`, and the `archci` user (sysusers)
 - `archci-master-git`, `archci-worker-git`, `archci-signer-git`: the role's
   scripts as `/usr/bin` commands, its units in `/usr/lib/systemd/system`,
-  its `/var/lib/archci*` directories (tmpfiles), and its dependencies
-- `archci-worker-qemu-aarch64-git`: add-on for an x86_64 worker that builds
-  aarch64 under qemu user-mode emulation (see "Building for arm64")
+  its directories (tmpfiles), and its dependencies
+- `archci-worker-aarch64-git`: add-on for an x86_64 worker: aarch64 worker
+  instances under qemu user-mode emulation (see "Building for arm64")
 
-`install.sh` is not part of them; with a role package installed, do the rest
-of that role's setup by hand, following the role sections below: for a
-master authorize worker keys, reload sshd (the package installs its drop-in)
-and enable the scan, reaper and stage timers;
-for a worker generate `/etc/archci/worker_key` and the builder key, write the
-journal-upload drop-in, and enable `archci-worker@1`; for a signer create the
-release keyring and enable the sign timers.
+What a package cannot ship as a file happens on first start: a worker's
+`archci-worker-setup.service` generates its keys and configures journal
+streaming, the master's sshd is reloaded by a pacman hook, the signer's
+keyrings are directories the package creates. What remains is per-site:
+keys to authorize, R2 credentials, and enabling units, listed per role
+below. The signer needs only R2 access; the master and workers share a VPC.
+
+`install.sh master|worker|signer` installs the same files straight from a
+source checkout into `/usr/local` for development; it is not packaged.
 
 ### Master
 
@@ -300,13 +299,14 @@ The master droplet is named `master`, and workers reach it as `archci@master`
 template does this).
 
 ```
-./install.sh master
+pacman -U archci-git-*.pkg.tar.zst archci-master-git-*.pkg.tar.zst
+systemctl enable --now archci-scan.timer archci-reaper.timer archci-stage.timer
+systemctl enable --now systemd-journal-remote.socket   # worker journals
 ```
 
-This installs `lib/` and `master/` to `/usr/local/lib/archci` (symlinked into
-`/usr/local/bin`), creates the `archci` user and directories (as btrfs
-subvolumes when the filesystem allows), and enables the scan, reaper and stage
-timers. Then:
+The package creates the `archci` user and the state directories under
+`/var/lib/archci`. Make `repo` and `incoming` there btrfs subvolumes if the
+filesystem allows (`install.sh master` does). Then:
 
 1. Create an R2 bucket and an API token that may write the `staging/` prefix,
    and write `/etc/archci/rclone.conf` (mode 600):
@@ -348,22 +348,35 @@ Server = https://<r2 release domain>/$repo/os/$arch
 ### Worker
 
 ```
-./install.sh worker
+pacman -U archci-git-*.pkg.tar.zst archci-worker-git-*.pkg.tar.zst
+systemctl enable --now archci-worker@1
 ```
 
-Installs devtools, creates the unprivileged `archci` build user, makes
-`/var/lib/archbuild` a btrfs subvolume, generates `/etc/archci/worker_key` and
-prints the public key to authorize on the master. `ARCHCI_MASTER` defaults
-to `archci@master`; make sure `master` resolves to the master's private VPC
-address, then:
+`ARCHCI_MASTER` defaults to `archci@master`, so make sure `master` resolves
+to the master's address first. The first start runs
+`archci-worker-setup.service`: it generates `/etc/archci/worker_key` and the
+builder signing key, makes `/var/lib/archbuild` a btrfs subvolume when the
+filesystem allows, configures journal streaming from `ARCHCI_JOURNAL_URL`,
+and logs the two public keys to authorize:
 
 ```
-systemctl start archci-worker@1        # one chroot copy per instance
-systemctl enable --now archci-worker@2 # more instances = parallel builds
+journalctl -u archci-worker-setup            # the keys and the commands to run
+archci-authorize '<the ssh key line>'        # on the master
+archci-authorize-builder builder_key.pub     # on the signer
+```
+
+Then:
+
+```
+systemctl enable --now archci-worker@2                 # more instances = parallel builds
 journalctl --namespace=archci -u archci-worker@1 -f    # the loop: claims, results, uploads
 systemctl list-units 'archci-build@*'                  # builds running right now
 journalctl --namespace=archci -u 'archci-build@*' -f   # their output
 ```
+
+`archci-worker@N` builds this machine's own arch (`ARCHCI_ARCH`, default
+`uname -m`). `archci-worker-<arch>@N` instances build another arch and run
+alongside; the master knows them as `<host>-<arch>-N`.
 
 The worker and build units log to the `archci` journal namespace
 (`LogNamespace=archci`), a journald instance of its own with files under
@@ -407,8 +420,9 @@ farm builds it once merged. Until then the package stays in `queue/failed`.
    `/etc/pacman.d/mirrorlist` at that repo and trust its signing key with
    `pacman-key`: devtools' pacman.conf includes the host mirrorlist and
    `arch-nspawn` copies the host's pacman trust into the chroot, so the
-   chroot needs no pacman config of its own. Then `./install.sh worker` with
-   `ARCHCI_ARCH=aarch64` in `/etc/archci/archci.conf`. The chroot's
+   chroot needs no pacman config of its own. Then install the worker
+   package as on any worker: `ARCHCI_ARCH` defaults to `uname -m`, so
+   `archci-worker@N` builds aarch64 there. The chroot's
    `makepkg.conf` is `arch/aarch64/makepkg.conf` from this tree (devtools'
    x86_64 flags with `-march=armv8-a` and `-mbranch-protection=standard`);
    copy it to `/etc/archci/aarch64/makepkg.conf` to change it, and put a
@@ -421,46 +435,45 @@ farm builds it once merged. Until then the package stays in `queue/failed`.
 **An emulated worker instead.** An x86_64 machine can build aarch64 through
 QEMU user-mode emulation. It is 5 to 20 times slower per core and some test
 suites break under it, so it suits a big desktop or a smoke test rather than
-a fleet, but it needs no ARM hardware. With the packages, install
-`archci-worker-qemu-aarch64-git` on top of the worker package: it ships the
-binfmt registration, the setarch alias, the chroot pacman config and the
-Ports repo key as a pacman keyring (its install script runs `pacman-key
---populate archci-ports-aarch64` and restarts `systemd-binfmt`); then set
-`ARCHCI_ARCH=aarch64` in `/etc/archci/archci.conf` and restart the workers.
-From the source tree:
+a fleet, but it needs no ARM hardware:
 
 ```
-./install.sh worker --arch aarch64
+pacman -U archci-worker-aarch64-git-*.pkg.tar.zst
+systemctl enable --now archci-worker-aarch64@1
 ```
 
-sets `ARCHCI_ARCH=aarch64`, installs `qemu-user-static-binfmt` and
-re-registers its handler with the C flag added (F lets binaries inside the
-chroot find the emulator, C lets setuid ones such as makepkg's `sudo pacman`
-keep root; the stock registration lacks C),
-writes a devtools `setarch` alias (arch-nspawn runs `setarch aarch64`, which
-the host rejects without one), installs `arch/aarch64/qemu/extra.conf` as
-`/etc/archci/aarch64/extra.conf` (devtools' pacman.conf with
-`Architecture = aarch64` and the Ports repo as `Server`, since the host's
-mirrorlist is x86_64), and trusts the Ports repo key
-`9B2C213B21883BB65CE2FB900CF25682E6BA0751` (shipped in
-`arch/aarch64/qemu/keys/`) in the host's pacman keyring, because the chroot
-inherits the host's trust. Outside the master's private network add the
-master's public address as `master` to `/etc/hosts` and set
-`ARCHCI_JOURNAL_URL` to `http://127.0.0.1:19532` for the ssh tunnel (see
-"Monitoring workers") or `""` for no streaming. Expect the first
-build to spend a while creating `/var/lib/archbuild/extra-aarch64`.
+The package pulls in `qemu-user-static-binfmt` and ships what devtools lacks:
+`/etc/binfmt.d/qemu-aarch64-static.conf`, the stock registration with the C
+flag added (F lets binaries inside the chroot find the emulator, C lets
+setuid ones such as makepkg's `sudo pacman` keep root; the stock registration
+lacks C); a devtools `setarch` alias (arch-nspawn runs `setarch aarch64`,
+which the host rejects without one); `/etc/archci/aarch64/extra.conf`,
+devtools' pacman.conf with `Architecture = aarch64`, the Ports repo as
+`Server` (the host's mirrorlist is x86_64) and pacman's download sandbox
+off (qemu has no Landlock or seccomp); and the Ports repo key
+`9B2C213B21883BB65CE2FB900CF25682E6BA0751` as the pacman keyring
+`archci-ports-aarch64`, which the package's install script populates into
+the host keyring because the chroot inherits the host's trust. The
+`archci-worker-aarch64@N` instance runs next to the machine's own
+`archci-worker@N` and is known to the master as `<host>-aarch64-N`. Outside
+the master's private network add the master's public address as `master` to
+`/etc/hosts` and set `ARCHCI_JOURNAL_URL` to `http://127.0.0.1:19532` for
+the ssh tunnel (see "Monitoring workers") or `""` for no streaming. Expect
+the first build to spend a while creating `/var/lib/archbuild/extra-aarch64`.
+From a source checkout, `install.sh worker --arch aarch64` does the same by
+hand and makes `archci-worker@N` itself build aarch64.
 
 ### Signer
 
 On a dedicated droplet (it needs only R2 access, not the VPC):
 
 ```
-./install.sh signer
+pacman -U archci-git-*.pkg.tar.zst archci-signer-git-*.pkg.tar.zst
 ```
 
-This installs `rclone` and `gnupg`, and creates the release and builder
-keyrings under `/etc/archci` with a one-day `gpg-agent` cache. Then, following
-the printed steps: write `/etc/archci/rclone.conf` and set
+The package creates the release and builder keyrings under `/etc/archci`,
+the release one with a one-day `gpg-agent` cache. Then: write
+`/etc/archci/rclone.conf` and set
 `ARCHCI_R2_STAGING` (read) and `ARCHCI_R2_RELEASE` (write) in
 `/etc/archci/archci.conf`, create the passphrase-protected release key,
 register each worker's builder key with `archci-authorize-builder`, export the
@@ -545,8 +558,9 @@ verifies against the imported key on download, not from that field.)
 
 Workers stream the `archci` journal namespace, and nothing else of their
 journal, to the master with `systemd-journal-upload --namespace=archci`
-(configured by `install.sh worker` from `ARCHCI_JOURNAL_URL`, default
-`http://master:19532`). The master receives it with `systemd-journal-remote`
+(configured on each worker start by `archci-worker-setup` from
+`ARCHCI_JOURNAL_URL`, default `http://master:19532`; `""` streams nothing).
+The master receives it with `systemd-journal-remote`
 over plain HTTP on the VPC and keeps one file per worker under
 `/var/log/journal/remote/`, capped by `journal-remote.conf` (2 GB, 200 files).
 Same direction as the job protocol: workers only need the master's name, and
@@ -554,7 +568,7 @@ the last lines of a worker that died are already on the master.
 
 A worker outside the private network cannot reach the port, so it streams
 through an ssh tunnel instead: `ARCHCI_JOURNAL_URL=http://127.0.0.1:19532`
-makes `install.sh worker` enable `archci-logging-remote.service`, which holds
+makes `archci-worker-setup` let `archci-logging-remote.service` start, which holds
 `ssh -N -L 127.0.0.1:19532:127.0.0.1:19532 archci@master` open with the
 worker key. The master allows that key to forward to this one port and
 nothing else (`archci-authorize` writes `port-forwarding,permitopen=...`

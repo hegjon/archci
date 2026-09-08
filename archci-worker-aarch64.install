@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# archci-worker-qemu-aarch64: build aarch64 on an x86_64 worker under qemu
+# archci-worker-aarch64: build aarch64 on an x86_64 worker under qemu
 # user-mode emulation. The package ships the pieces devtools lacks for that
 # (README "Building for arm64"); this script activates the two that need it.
 
@@ -13,11 +13,13 @@ post_install() {
   fi
   # Re-register qemu-aarch64 with the C flag from /etc/binfmt.d.
   systemctl restart systemd-binfmt.service 2>/dev/null || true
+  if [[ $(uname -m) == aarch64 ]]; then
+    echo "==> WARNING: this is an aarch64 machine; it builds aarch64 natively with archci-worker@N," >&2
+    echo "    and this package's qemu-aarch64 binfmt registration is not wanted here. Remove it." >&2
+  fi
   cat <<'MSG'
-==> To build aarch64 on this worker set, in /etc/archci/archci.conf,
-      ARCHCI_ARCH=aarch64
-    (the master must list aarch64 in ARCHCI_ARCHES), then restart the workers:
-      systemctl restart 'archci-worker@*'
+==> Start an aarch64 worker instance (the master must list aarch64 in ARCHCI_ARCHES):
+      systemctl enable --now archci-worker-aarch64@1
 MSG
 }
 
@@ -30,6 +32,5 @@ post_remove() {
   cat <<'MSG'
 ==> The Arch Linux Ports aarch64 key stays in the pacman keyring; to drop it:
       pacman-key --delete 9B2C213B21883BB65CE2FB900CF25682E6BA0751
-    Set ARCHCI_ARCH back to x86_64 in /etc/archci/archci.conf.
 MSG
 }

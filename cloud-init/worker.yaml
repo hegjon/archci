@@ -1,11 +1,12 @@
 #cloud-config
 # Digital Ocean user-data for a build worker. Assumes an Arch Linux image with
 # cloud-init (e.g. the official Arch cloud image uploaded as a custom image).
-# Fill in the git url, the master's private IP in /etc/hosts and the shared worker key,
-# then create droplets with:  doctl compute droplet create ... --user-data-file worker.yaml
+# Builds the archci packages from git and installs the worker one. Fill in the
+# master's private IP in /etc/hosts and the shared worker key, then create
+# droplets with:  doctl compute droplet create ... --user-data-file worker.yaml
 # Workers are interchangeable: destroy one and its job is requeued by the master.
 package_update: true
-packages: [git, devtools, rsync, openssh, btrfs-progs]
+packages: [git, base-devel, btrfs-progs]
 
 write_files:
   - path: /etc/archci/archci.conf
@@ -13,8 +14,6 @@ write_files:
     content: |
       ARCHCI_MASTER="archci@master"
       ARCHCI_PKGBUILDS_URL=https://github.com/hegjon/omarchy-pkgs.git
-      # the arch this worker builds; the master must list it in ARCHCI_ARCHES
-      ARCHCI_ARCH=x86_64
   - path: /etc/archci/worker_key
     permissions: '0600'
     content: |
@@ -38,11 +37,13 @@ write_files:
       Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
 
 runcmd:
-  - git clone https://github.com/hegjon/archci.git /opt/archci
-  - /opt/archci/install.sh worker
-  # replace the builder key install.sh generated with the shared fleet key,
-  # so every ephemeral worker signs with one key the signer already trusts
-  - rm -rf /etc/archci/builder-gnupg
+  # build the packages (makepkg refuses to run as root) and install the worker
+  - useradd -m builder
+  - sudo -u builder git clone https://github.com/hegjon/archci.git /home/builder/archci
+  - sudo -u builder bash -c 'cd /home/builder/archci && makepkg -s --noconfirm'
+  - pacman -U --noconfirm /home/builder/archci/archci-git-*.pkg.tar.zst /home/builder/archci/archci-worker-git-*.pkg.tar.zst
+  # the shared fleet builder key, so every ephemeral worker signs with one key
+  # the signer already trusts (archci-worker-setup would otherwise generate one)
   - install -d -m 700 /etc/archci/builder-gnupg
   - gpg --homedir /etc/archci/builder-gnupg --batch --import /etc/archci/builder-secret.asc
   # one worker per ~4 GB RAM and 2 vCPU is a reasonable start

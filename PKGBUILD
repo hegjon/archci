@@ -9,7 +9,7 @@
 # packaged.
 
 pkgbase=archci-git
-pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git archci-worker-qemu-aarch64-git)
+pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git archci-worker-aarch64-git)
 pkgver=r0.g0000000
 pkgrel=1
 pkgdesc='Headless build farm for Arch Linux packages: builds a PKGBUILD repository into a signed pacman repository'
@@ -91,7 +91,8 @@ package_archci-worker-git() {
   provides=(archci-worker)
   conflicts=(archci-worker)
 
-  _install_role worker archci-worker@.service archci-build@.service archci-logging-remote.service
+  _install_role worker archci-worker@.service archci-build@.service \
+    archci-worker-setup.service archci-logging-remote.service
   cd "$srcdir/$pkgbase"
   # the archci journal namespace the units log to, and its upload to the master
   install -Dm644 systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
@@ -100,21 +101,26 @@ package_archci-worker-git() {
   (cd arch && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/arch/{}" \;)
 }
 
-# Add-on for an x86_64 worker: build aarch64 under qemu user-mode emulation.
-# What "install.sh worker --arch aarch64" sets up by hand, as files: the binfmt
-# registration with the C flag, the devtools setarch alias, the chroot
-# pacman.conf pointed at the Arch Linux Ports aarch64 repo, and that repo's key
-# as a pacman keyring the .install script populates. ARCHCI_ARCH=aarch64 in
-# archci.conf switches the worker over (see README "Building for arm64").
-package_archci-worker-qemu-aarch64-git() {
-  pkgdesc='Headless build farm for Arch Linux packages (worker add-on: build aarch64 on x86_64 under qemu user-mode emulation)'
+# Add-on for an x86_64 worker: aarch64 worker instances under qemu user-mode
+# emulation, archci-worker-aarch64@N, next to the machine's own
+# archci-worker@N. Ships what devtools lacks for that: the binfmt registration
+# with the C flag, the devtools setarch alias, the chroot pacman.conf pointed
+# at the Arch Linux Ports aarch64 repo, and that repo's key as a pacman keyring
+# the .install script populates (see README "Building for arm64"). A native
+# aarch64 machine needs none of this: archci-worker@N builds aarch64 there.
+package_archci-worker-aarch64-git() {
+  pkgdesc='Headless build farm for Arch Linux packages (worker add-on: aarch64 instances on x86_64 under qemu user-mode emulation)'
   depends=(archci-worker-git qemu-user-static qemu-user-static-binfmt)
-  install=archci-worker-qemu-aarch64.install
+  install=archci-worker-aarch64.install
   backup=(etc/binfmt.d/qemu-aarch64-static.conf etc/archci/aarch64/extra.conf)
-  provides=(archci-worker-qemu-aarch64)
-  conflicts=(archci-worker-qemu-aarch64)
+  provides=(archci-worker-aarch64)
+  conflicts=(archci-worker-aarch64 archci-worker-qemu-aarch64)
 
-  cd "$srcdir/$pkgbase/arch/aarch64/qemu"
+  cd "$srcdir/$pkgbase"
+  install -d "$pkgdir/usr/lib/systemd/system"
+  sed 's#/usr/local/bin/#/usr/bin/#g' systemd/archci-worker-aarch64@.service \
+    >"$pkgdir/usr/lib/systemd/system/archci-worker-aarch64@.service"
+  cd arch/aarch64/qemu
   install -Dm644 binfmt.d/qemu-aarch64-static.conf "$pkgdir/etc/binfmt.d/qemu-aarch64-static.conf"
   install -Dm644 setarch-aliases.d/aarch64 "$pkgdir/usr/share/devtools/setarch-aliases.d/aarch64"
   install -Dm644 extra.conf "$pkgdir/etc/archci/aarch64/extra.conf"
@@ -127,9 +133,13 @@ package_archci-worker-qemu-aarch64-git() {
 package_archci-signer-git() {
   pkgdesc='Headless build farm for Arch Linux packages (signer: verify builder signatures, release-sign, publish)'
   depends=(archci-git rclone gnupg)
+  backup=(etc/archci/release-gnupg/gpg-agent.conf)
   provides=(archci-signer)
   conflicts=(archci-signer)
 
   _install_role signer archci-sign.service archci-sign.timer \
     archci-sign-health.service archci-sign-health.timer
+  cd "$srcdir/$pkgbase"
+  install -Dm600 gnupg/release-gpg-agent.conf "$pkgdir/etc/archci/release-gnupg/gpg-agent.conf"
+  chmod 700 "$pkgdir/etc/archci/release-gnupg"
 }
