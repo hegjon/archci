@@ -127,8 +127,12 @@ cmd_heartbeat() {
 ingest() {
 	local id=$1 inc=$2 n
 	n=$(archci_pool "$inc" "$job_repo" "$job_arch" "$job_version") || { archci_log "$id: upload rejected"; return 1; }
+	# The built record: "version commit", plus, for an any package, the arches it
+	# was pooled for, so enabling an arch later makes it outstanding again.
 	mkdir -p "$ARCHCI_HOME/built/$job_repo-$job_arch"
-	printf '%s %s\n' "$job_version" "$job_commit" >"$ARCHCI_HOME/built/$job_repo-$job_arch/$job_pkgbase"
+	local pooled=''
+	[[ $job_arch == any ]] && pooled=" ${ARCHCI_ARCHES// /,}"
+	printf '%s %s%s\n' "$job_version" "$job_commit" "$pooled" >"$ARCHCI_HOME/built/$job_repo-$job_arch/$job_pkgbase"
 	touch "$ARCHCI_HOME/stage.needed"
 	archci_log "$id: pooled $n package(s) for [$job_repo]"
 }

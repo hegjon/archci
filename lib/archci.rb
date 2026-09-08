@@ -143,9 +143,11 @@ module Archci
         job_arch = any ? 'any' : a
         next if !any && !ignorearch && !p['arches'].include?(a)
 
+        # built record: "version commit" and, for an any package, the arches it
+        # was pooled for; an arch enabled since makes the package outstanding again
         built_file = File.join(home, 'built', "#{repo}-#{job_arch}", p['pkgbase'])
-        built = File.exist?(built_file) ? File.read(built_file).split.first : nil
-        next if built == p['version']
+        built, _commit, pooled = File.exist?(built_file) ? File.read(built_file).split : []
+        next if built == p['version'] && (!any || (arches - pooled.to_s.split(',')).empty?)
         next if running[[repo, p['pkgbase'], job_arch]]                 # one build per package and arch at a time
         next if queued[[repo, p['pkgbase'], job_arch]].include?(p['commit']) # queued, in retry backoff, or given up
 

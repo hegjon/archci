@@ -142,7 +142,7 @@ _package_qemu_arch() {
   install -Dm644 extra.conf "$pkgdir/etc/archci/$a/extra.conf"
   if [[ -d keys ]]; then
     install -d "$pkgdir/usr/share/pacman/keyrings"
-    GNUPGHOME=$srcdir/gnupg gpg --dearmor <keys/*.asc >"$pkgdir/usr/share/pacman/keyrings/archci-ports-$a.gpg"
+    cat keys/*.asc | GNUPGHOME=$srcdir/gnupg gpg --dearmor >"$pkgdir/usr/share/pacman/keyrings/archci-ports-$a.gpg"
     install -Dm644 keys/*-trusted "$pkgdir/usr/share/pacman/keyrings/archci-ports-$a-trusted"
   fi
 }

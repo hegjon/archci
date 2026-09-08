@@ -72,7 +72,9 @@ or a `lib32-` name, else `extra`), the package's `source`, and whether
 `skip_build` is set. The index is cached per clone HEAD, so a claim reads one
 file. The backlog is never written down: when a worker asks for work,
 `archci-next <arch>` walks the index and compares each package's version with
-`built/<repo>-<arch>/<name>` (`version commit` of the last successful build),
+`built/<repo>-<arch>/<name>` (`version commit` of the last successful build;
+for an `any` package also the arches it was pooled for, so enabling an arch
+later makes those packages outstanding again),
 skipping packages that are running, queued, waiting for a retry or given up
 on. Updates to packages already in our repo come first, then the never-built
 rest, alphabetically. A commit that changes a package directory without
@@ -238,7 +240,8 @@ one package per role (see Install).
 pkgbuilds/                  clone of the PKGBUILD repository (ARCHCI_PKGBUILDS_BRANCH)
 pkgbuilds.index             package index over it, keyed by the clone's HEAD (archci-pkgs)
 queue/{pending,running,done,failed}/<jobid>.job
-built/<repo>-<arch>/<name>  "version commit" of the last good build
+built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
+                            package also the arches it was pooled for
                             (one directory per arch, plus <repo>-any)
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
 repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume)

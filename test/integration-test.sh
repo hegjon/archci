@@ -337,13 +337,15 @@ echo log >"$inc/build.log"; mkpkg "$inc" archlinux-keyring 20260901-1 any
 : >"$inc/archlinux-keyring-20260901-1-any.pkg.tar.zst.buildsig"
 "$job" report "$id" success
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "any job not done"
-[[ $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring") == "20260901-1 $(pkgcommit archlinux-keyring)" ]] || fail "any built record"
+[[ $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring") == "20260901-1 $(pkgcommit archlinux-keyring) x86_64,aarch64" ]] || fail "any built record: $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring")"
 for a in x86_64 aarch64; do
 	[[ -f $ARCHCI_HOME/repo/omarchy/os/$a/archlinux-keyring-20260901-1-any.pkg.tar.zst ]] || fail "any package not pooled for $a"
 	[[ -f $ARCHCI_HOME/repo/omarchy/os/$a/archlinux-keyring-20260901-1-any.pkg.tar.zst.buildsig ]] || fail "any buildsig not pooled for $a"
 done
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next" x86_64) != *archlinux-keyring* ]] || fail "built any package must not be outstanding"
+# enabling another arch makes every any package outstanding again, so the new arch gets them
+[[ $(ARCHCI_ARCHES="x86_64 aarch64 riscv64" "$next" x86_64) == *" any archlinux-keyring "* ]] || fail "an any package must be rebuilt for an arch enabled later: $(ARCHCI_ARCHES="x86_64 aarch64 riscv64" "$next" x86_64)"
 "$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "built #{j["built"]}" unless j["built"]["omarchy-any"] == 1 && j["built"]["omarchy-aarch64"] == 1 && j["built"]["omarchy-x86_64"] == 1'
 
 echo "--- the PKGBUILD repository URL is config: a scan follows a changed one"
