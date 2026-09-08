@@ -55,12 +55,18 @@ mkconf=$(archci_arch_conf "$arch" makepkg.conf /usr/share/devtools/makepkg.conf.
 [[ -f $mkconf ]] || archci_die "no makepkg.conf for $arch (devtools has none; add /etc/archci/$arch/makepkg.conf)"
 base_packages=(base-devel)
 [[ $profile == multilib* ]] && base_packages+=(multilib-devel)
+# The chroot's pacman cache: a port's pacman.conf names one of its own (its
+# "any" packages share names with the host's but not bytes); the host's
+# otherwise. arch-nspawn reads it from the pacman.conf, mkarchroot needs -c.
+cachedir=$(pacman-conf --config "$pacconf" CacheDir | head -1)
+: "${cachedir:=/var/cache/pacman/pkg/}"
+mkdir -p "$cachedir"
 copy=archci-$instance
 srcdir=$ARCHCI_WORKER_HOME/build/$instance/$job_pkgbase
 
 echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
 echo "    repo=$job_repo arch=$job_arch profile=$profile chroot=$chroot copy=$copy commit=$job_commit"
-echo "    pacman.conf=$pacconf makepkg.conf=$mkconf"
+echo "    pacman.conf=$pacconf makepkg.conf=$mkconf cache=$cachedir"
 
 # --- clean chroot: create once, refresh periodically, recreate on devtools bumps
 prepare_root() {
@@ -76,11 +82,11 @@ prepare_root() {
 		done
 		rm -rf --one-file-system "$chroot"
 		(umask 0022; mkdir -p "$chroot")
-		mkarchroot -C "$pacconf" -M "$mkconf" "$chroot/root" "${base_packages[@]}"
+		mkarchroot -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" "${base_packages[@]}"
 		touch "$chroot/root.updated"
 	elif [[ -z $(find "$chroot/root.updated" -mmin -"$ARCHCI_CHROOT_UPDATE_MINUTES" 2>/dev/null) ]]; then
 		say "Updating chroot %s" "$chroot/root"
-		arch-nspawn -C "$pacconf" -M "$mkconf" "$chroot/root" pacman -Syuu --noconfirm
+		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm
 		touch "$chroot/root.updated"
 	fi
 }

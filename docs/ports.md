@@ -17,8 +17,9 @@ What a port needs in archci is one directory, `arch/<arch>/`: a
 `makepkg.conf.sed` that derives the port's makepkg.conf from devtools' x86_64
 one at package build time, and under `qemu/` what an x86_64 machine needs to
 emulate it (binfmt registration, setarch alias, chroot pacman.conf on the
-port's repository, and its signing key if `archlinux-keyring` does not
-already trust it). The PKGBUILD turns that into an `archci-worker-qemu-<arch>`
+port's repository with a package cache of its own, since ports rebuild the
+`any` packages under the same file names, and its signing key if
+`archlinux-keyring` does not already trust it). The PKGBUILD turns that into an `archci-worker-qemu-<arch>`
 package with an `archci-worker-<arch>@.service`. aarch64 and riscv64 exist
 today; the sections below say where each takes its base system from.
 
