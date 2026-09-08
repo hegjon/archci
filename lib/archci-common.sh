@@ -146,6 +146,47 @@ archci_read_job() {
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]
 }
 
+# archci_pool DIR REPO JOBARCH VERSION -- pool the packages a worker uploaded
+# to DIR into the master's repo/<repo>/os/<arch>/ directories (the pool that
+# archci-stage moves to R2 staging), each with its builder signature
+# (<pkg>.buildsig) alongside for the signer to verify. The master holds no key
+# and builds no database. A package goes under the arch in its file name; a
+# debug package under <repo>-debug; an arch-independent (-any) package into
+# every enabled arch, since pacman fetches every package from the client's own
+# $repo/os/$arch. Every file is checked before any is copied, so a package of
+# an arch the job could not have built (or none) refuses the whole upload
+# and nothing reaches the pool. Prints the number of packages pooled.
+archci_pool() {
+	local dir=$1 repo=$2 jobarch=$3 version=$4 p base parch a
+	local -a pkgs
+	shopt -s nullglob; pkgs=("$dir"/*.pkg.tar.zst); shopt -u nullglob
+	(( ${#pkgs[@]} )) || { archci_log "no packages in $dir"; return 1; }
+	local -A dest=()   # package -> arches to pool it for
+	for p in "${pkgs[@]}"; do
+		base=${p##*/}; parch=${base%.pkg.tar.zst}; parch=${parch##*-}
+		if [[ $parch == any ]]; then dest[$p]=$ARCHCI_ARCHES
+		elif archci_enabled_arch "$parch" && archci_can_build "$parch" "$jobarch"; then dest[$p]=$parch
+		else archci_log "refusing $base: arch $parch is not $jobarch or enabled"; return 1
+		fi
+	done
+	(
+		exec 8>"$ARCHCI_HOME/lock/repo.lock"
+		flock 8
+		for p in "${pkgs[@]}"; do
+			base=${p##*/}
+			local r=$repo
+			[[ $base == *-debug-"$version"-*.pkg.tar.zst ]] && r=$repo-debug
+			for a in ${dest[$p]}; do
+				mkdir -p "$ARCHCI_HOME/repo/$r/os/$a"
+				cp --reflink=auto "$p" "$ARCHCI_HOME/repo/$r/os/$a/$base" || exit 1
+				[[ -f $p.buildsig ]] && cp "$p.buildsig" "$ARCHCI_HOME/repo/$r/os/$a/$base.buildsig"
+			done
+			rm -f "$p" "$p.buildsig"
+		done
+	) || return 1
+	printf '%s\n' "${#pkgs[@]}"
+}
+
 # devtools build profile (name of pacman.conf.d/<profile>.conf) for a package:
 # multilib packages need the multilib one, everything else builds with extra
 # (Arch builds core with it too). archci-pkgs decides per package from

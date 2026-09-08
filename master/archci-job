@@ -123,47 +123,14 @@ cmd_heartbeat() {
 	touch "$Q_RUNNING/$id.job"
 }
 
-# Pool built packages and record what was built. The master holds no key and
-# does not build the database; the signer does, from released (signed)
-# packages (see README "Signing"). Each package keeps its builder signature
-# (.buildsig) alongside for the signer to verify, then archci-stage moves both
-# to the R2 staging area. A package is pooled under the arch in its file name;
-# an arch-independent (-any) package is pooled once per enabled arch, since
-# pacman fetches every package from the client's own $repo/os/$arch.
+# Pool the uploaded packages (archci_pool) and record what was built.
 ingest() {
-	local id=$1 inc=$2 p
-	shopt -s nullglob
-	local pkgs=("$inc"/*.pkg.tar.zst)
-	shopt -u nullglob
-	if (( ${#pkgs[@]} == 0 )); then
-		archci_log "$id: reported success but uploaded no packages"
-		return 1
-	fi
-	(
-		exec 8>"$ARCHCI_HOME/lock/repo.lock"
-		flock 8
-		for p in "${pkgs[@]}"; do
-			local base=${p##*/} repo=$job_repo parch arches a dir
-			[[ $base == *-debug-"$job_version"-*.pkg.tar.zst ]] && repo=$job_repo-debug
-			parch=${base%.pkg.tar.zst}; parch=${parch##*-}
-			if [[ $parch == any ]]; then arches=$ARCHCI_ARCHES
-			elif archci_enabled_arch "$parch" && archci_can_build "$parch" "$job_arch"; then arches=$parch
-			else archci_log "$id: refusing $base: arch $parch is not $job_arch or enabled"; exit 1
-			fi
-			for a in $arches; do
-				dir=$ARCHCI_HOME/repo/$repo/os/$a
-				mkdir -p "$dir"
-				cp --reflink=auto "$p" "$dir/$base" || exit 1
-				# builder signature travels with the package; the signer verifies it
-				if [[ -f $p.buildsig ]]; then cp "$p.buildsig" "$dir/$base.buildsig"; fi
-			done
-			rm -f "$p" "$p.buildsig"
-		done
-	) || return 1
+	local id=$1 inc=$2 n
+	n=$(archci_pool "$inc" "$job_repo" "$job_arch" "$job_version") || { archci_log "$id: upload rejected"; return 1; }
 	mkdir -p "$ARCHCI_HOME/built/$job_repo-$job_arch"
 	printf '%s %s\n' "$job_version" "$job_commit" >"$ARCHCI_HOME/built/$job_repo-$job_arch/$job_pkgbase"
 	touch "$ARCHCI_HOME/stage.needed"
-	archci_log "$id: pooled ${#pkgs[@]} package(s) for [$job_repo]"
+	archci_log "$id: pooled $n package(s) for [$job_repo]"
 }
 
 cmd_report() {
