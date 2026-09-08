@@ -5,7 +5,7 @@
 # One process per chroot copy; run several via archci-worker@N.service, which
 # builds this machine's own arch, or archci-worker-<arch>@N.service, which
 # builds ARCH (natively on such a machine, under qemu user-mode emulation on
-# another; see README "Building for arm64"). Instances of different arches
+# another; see docs/ports.md). Instances of different arches
 # can run side by side: the worker is known to the master as
 # <host>-N or <host>-<arch>-N. Needs only an ssh key that the master has
 # authorized with archci-authorize.

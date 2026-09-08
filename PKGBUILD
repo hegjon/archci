@@ -8,7 +8,8 @@
 # (README "Install").
 
 pkgbase=archci-git
-pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git archci-worker-qemu-aarch64-git)
+pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git
+         archci-worker-qemu-aarch64-git archci-worker-qemu-riscv64-git)
 pkgver=r0.g0000000
 pkgrel=1
 pkgdesc='Headless build farm for Arch Linux packages: builds a PKGBUILD repository into a signed pacman repository'
@@ -100,48 +101,77 @@ package_archci-worker-git() {
   install -Dm644 config/systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
   install -Dm644 config/systemd/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
-  # Chroot makepkg.conf for aarch64, which devtools ships none for: derived
-  # from devtools' x86_64 one (and its conf.d) with arch/aarch64/makepkg.conf.sed,
-  # so it follows devtools' flags. The build fails if a substitution no longer
-  # matches. (arch/aarch64/qemu/ is archci-worker-qemu-aarch64-git's.)
-  local dt=/usr/share/devtools/makepkg.conf.d out=$pkgdir$_libdir/arch/aarch64 f
-  install -d "$out/makepkg.conf.d"
-  sed -f arch/aarch64/makepkg.conf.sed "$dt/x86_64.conf" >"$out/makepkg.conf"
-  for f in "$dt"/x86_64.conf.d/*.conf; do
-    sed -f arch/aarch64/makepkg.conf.sed "$f" >"$out/makepkg.conf.d/${f##*/}"
+  # Chroot makepkg.conf for every arch devtools ships none for: derived from
+  # devtools' x86_64 one (and its conf.d) with arch/<arch>/makepkg.conf.sed, so
+  # the ports follow devtools' flags. The build fails if a substitution no
+  # longer matches. (arch/<arch>/qemu/ belongs to archci-worker-qemu-<arch>.)
+  local dt=/usr/share/devtools/makepkg.conf.d sedf a out f
+  for sedf in arch/*/makepkg.conf.sed; do
+    a=${sedf#arch/}; a=${a%%/*}; out=$pkgdir$_libdir/arch/$a
+    install -d "$out/makepkg.conf.d"
+    sed -f "$sedf" "$dt/x86_64.conf" >"$out/makepkg.conf"
+    for f in "$dt"/x86_64.conf.d/*.conf; do
+      sed -f "$sedf" "$f" >"$out/makepkg.conf.d/${f##*/}"
+    done
+    grep -q "^CARCH=\"$a\"$" "$out/makepkg.conf" || { echo "$sedf did not set CARCH=$a" >&2; return 1; }
+    if grep -rE 'x86|cf-protection|leaf-frame-pointer|lib32' "$out" | grep -v '^[^:]*:#'; then
+      echo "x86-only flags survived $sedf; update it for this devtools" >&2; return 1
+    fi
   done
-  grep -q '^CARCH="aarch64"$' "$out/makepkg.conf" || { echo "makepkg.conf.sed did not set CARCH" >&2; return 1; }
-  if grep -rE 'x86|cf-protection|leaf-frame-pointer|lib32' "$out" | grep -v '^[^:]*:#'; then
-    echo "x86-only flags survived makepkg.conf.sed; update it for this devtools" >&2; return 1
+}
+
+# _package_qemu_arch ARCH -> the files of an archci-worker-qemu-<arch> package:
+# archci-worker-<arch>@.service (the worker template with the arch argument),
+# the qemu-<arch> binfmt registration with the C flag, the devtools setarch
+# alias, the chroot pacman.conf for that port's repository, and the port's key
+# as a pacman keyring archci-ports-<arch> when arch/<arch>/qemu/keys/ has one
+# (the shared archci-worker-qemu.install populates it).
+_package_qemu_arch() {
+  local a=$1
+  cd "$srcdir/$pkgbase"
+  install -d "$pkgdir/usr/lib/systemd/system"
+  sed -e "s/^Description=archci build worker %i\$/Description=archci build worker %i ($a)/" \
+      -e "s#^ExecStart=/usr/bin/archci-worker %i\$#ExecStart=/usr/bin/archci-worker %i $a#" \
+      -e "1i # A worker instance building $a: natively on a $a machine, under qemu\n# user-mode emulation on another (archci-worker-qemu-$a). Runs alongside\n# archci-worker@ instances of the machine's own arch; known to the master as\n# <host>-$a-N." \
+      config/systemd/archci-worker@.service >"$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service"
+  grep -q "^ExecStart=/usr/bin/archci-worker %i $a\$" "$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service" ||
+    { echo "could not derive archci-worker-$a@.service from the worker template" >&2; return 1; }
+  cd "arch/$a/qemu"
+  install -Dm644 "binfmt.d/qemu-$a-static.conf" "$pkgdir/etc/binfmt.d/qemu-$a-static.conf"
+  install -Dm644 "setarch-aliases.d/$a" "$pkgdir/usr/share/devtools/setarch-aliases.d/$a"
+  install -Dm644 extra.conf "$pkgdir/etc/archci/$a/extra.conf"
+  if [[ -d keys ]]; then
+    install -d "$pkgdir/usr/share/pacman/keyrings"
+    GNUPGHOME=$srcdir/gnupg gpg --dearmor <keys/*.asc >"$pkgdir/usr/share/pacman/keyrings/archci-ports-$a.gpg"
+    install -Dm644 keys/*-trusted "$pkgdir/usr/share/pacman/keyrings/archci-ports-$a-trusted"
   fi
 }
 
-# Add-on for an x86_64 worker: aarch64 worker instances under qemu user-mode
-# emulation, archci-worker-aarch64@N (the unit is named for what it builds),
-# next to the machine's own archci-worker@N. Ships what devtools lacks for that: the binfmt registration
-# with the C flag, the devtools setarch alias, the chroot pacman.conf pointed
-# at the Arch Linux Ports aarch64 repo, and that repo's key as a pacman keyring
-# the .install script populates (see docs/arm64.md). A native
-# aarch64 machine needs none of this: archci-worker@N builds aarch64 there.
+# Add-ons for an x86_64 worker: worker instances of another arch under qemu
+# user-mode emulation, archci-worker-<arch>@N (the unit is named for what it
+# builds), next to the machine's own archci-worker@N (see docs/ports.md). A
+# native machine of that arch needs none of this: archci-worker@N builds it
+# there. Package metadata has to be literal in each function (makepkg reads
+# it from the text); the files come from _package_qemu_arch.
 package_archci-worker-qemu-aarch64-git() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: aarch64 instances on x86_64 under qemu user-mode emulation)'
   depends=(archci-worker-git qemu-user-static qemu-user-static-binfmt)
-  install=archci-worker-qemu-aarch64.install
+  install=archci-worker-qemu.install
   backup=(etc/binfmt.d/qemu-aarch64-static.conf etc/archci/aarch64/extra.conf)
   provides=(archci-worker-qemu-aarch64)
   conflicts=(archci-worker-qemu-aarch64 archci-worker-aarch64)
   replaces=(archci-worker-aarch64-git)
+  _package_qemu_arch aarch64
+}
 
-  cd "$srcdir/$pkgbase"
-  install -Dm644 config/systemd/archci-worker-aarch64@.service "$pkgdir/usr/lib/systemd/system/archci-worker-aarch64@.service"
-  cd arch/aarch64/qemu
-  install -Dm644 binfmt.d/qemu-aarch64-static.conf "$pkgdir/etc/binfmt.d/qemu-aarch64-static.conf"
-  install -Dm644 setarch-aliases.d/aarch64 "$pkgdir/usr/share/devtools/setarch-aliases.d/aarch64"
-  install -Dm644 extra.conf "$pkgdir/etc/archci/aarch64/extra.conf"
-  install -d "$pkgdir/usr/share/pacman/keyrings"
-  GNUPGHOME=$srcdir/gnupg gpg --dearmor <keys/arch-linux-ports-aarch64.asc \
-    >"$pkgdir/usr/share/pacman/keyrings/archci-ports-aarch64.gpg"
-  install -Dm644 keys/arch-linux-ports-aarch64-trusted "$pkgdir/usr/share/pacman/keyrings/archci-ports-aarch64-trusted"
+package_archci-worker-qemu-riscv64-git() {
+  pkgdesc='Headless build farm for Arch Linux packages (worker add-on: riscv64 instances on x86_64 under qemu user-mode emulation)'
+  depends=(archci-worker-git qemu-user-static qemu-user-static-binfmt)
+  install=archci-worker-qemu.install
+  backup=(etc/binfmt.d/qemu-riscv64-static.conf etc/archci/riscv64/extra.conf)
+  provides=(archci-worker-qemu-riscv64)
+  conflicts=(archci-worker-qemu-riscv64)
+  _package_qemu_arch riscv64
 }
 
 package_archci-signer-git() {

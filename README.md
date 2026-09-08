@@ -89,7 +89,7 @@ job, given to workers of `ARCHCI_ANY_ARCH` (default: the first arch listed),
 and the resulting package is pooled into every arch's directory, because
 pacman fetches all packages from the client's own `$repo/os/$arch`. Every
 other package is offered to every enabled arch: a port arch builds PKGBUILDs
-that only list x86_64 with `--ignorearch` (see [docs/arm64.md](docs/arm64.md)),
+that only list x86_64 with `--ignorearch` (see [docs/ports.md](docs/ports.md)),
 unless `ARCHCI_IGNOREARCH=0` limits it to packages that list the arch.
 
 **Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>`. The
@@ -278,8 +278,9 @@ of a shared one:
 - `archci-master-git`, `archci-worker-git`, `archci-signer-git`: the role's
   scripts as `/usr/bin` commands, its units in `/usr/lib/systemd/system`,
   its directories (tmpfiles), and its dependencies
-- `archci-worker-qemu-aarch64-git`: add-on for an x86_64 worker: aarch64 worker
-  instances under qemu user-mode emulation (see [docs/arm64.md](docs/arm64.md))
+- `archci-worker-qemu-aarch64-git`, `archci-worker-qemu-riscv64-git`: add-ons
+  for an x86_64 worker: aarch64 or riscv64 worker
+  instances under qemu user-mode emulation (see [docs/ports.md](docs/ports.md))
 
 What a package cannot ship as a file happens on first start: a worker's
 `archci-worker-setup.service` generates its keys and configures journal
@@ -492,7 +493,7 @@ verifies against the imported key on download, not from that field.)
 
 - [docs/operating.md](docs/operating.md): the day-to-day commands, tests
 - [docs/monitoring.md](docs/monitoring.md): worker journals on the master
-- [docs/arm64.md](docs/arm64.md): building for aarch64, native or emulated
+- [docs/ports.md](docs/ports.md): building for aarch64 and riscv64, native or emulated
 - [docs/test-instance.md](docs/test-instance.md): the live test instance
 
 ## Notes and limits
