@@ -26,7 +26,8 @@ running = Archci.jobs('running').map do |j|
   { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
     'worker' => j['worker'], 'attempt' => j['attempt'], 'claimed' => j['claimed'],
     'heartbeat_age_min' => ((now - j['mtime']) / 60).round,
-    'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'] }
+    'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'],
+    'cpu' => j['cpu'], 'rss_mib' => j['rss'], 'peak_mib' => j['peak'], 'build_mib' => j['build'] }
 end
 failed = Archci.jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
   { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],

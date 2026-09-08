@@ -63,6 +63,7 @@ cachedir=$(pacman-conf --config "$pacconf" CacheDir | head -1)
 mkdir -p "$cachedir"
 copy=archci-$instance
 srcdir=$ARCHCI_WORKER_HOME/build/$instance/$job_pkgbase
+printf '%s\n' "$chroot/$copy" >"${jobfile%/*}/copydir"   # for the worker's per-job heartbeat stats
 
 echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
 echo "    repo=$job_repo arch=$job_arch profile=$profile chroot=$chroot copy=$copy commit=$job_commit"

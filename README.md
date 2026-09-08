@@ -128,7 +128,11 @@ and is printed. The worker then:
    `TimeoutStartSec` timeout does fail the unit, but the result file also covers
    the stop/kill case, so the worker relies on it uniformly.
 
-While building, a background loop sends a heartbeat every 5 minutes. A job
+While building, a background loop sends a heartbeat every minute
+(`ARCHCI_HEARTBEAT_SECONDS`), carrying the machine's load, memory, chroot
+disk use and core count, and the job's own CPU, memory and build-tree size
+read from its cgroup; the master keeps them with the job for `archci-top`
+and `archci-status`. A job
 without a heartbeat for 30 minutes is put back in `pending/` by the reaper, so
 a worker can be destroyed at any time. On `systemctl stop` the worker reports
 `abandoned`, which requeues without counting an attempt.

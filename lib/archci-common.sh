@@ -94,7 +94,7 @@ archci_load_conf
 # 0 leaves only the unit's TimeoutStartSec.
 : "${ARCHCI_BUILD_IDLE_MINUTES:=30}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
-: "${ARCHCI_HEARTBEAT_SECONDS:=300}"
+: "${ARCHCI_HEARTBEAT_SECONDS:=60}"
 export "${!ARCHCI_@}"
 
 # Master: the PKGBUILD repository clone and the package index over it.
@@ -164,6 +164,45 @@ archci_worker_stats() {
 	(( total > 0 )) && used=$(( (total - avail) * 100 / total ))
 	disk=$(df --output=pcent "$ARCHCI_CHROOTS" 2>/dev/null | tail -1 | tr -dc 0-9)
 	printf 'load=%s mem=%s disk=%s cpus=%s\n' "$load" "$used" "${disk:-0}" "$(nproc)"
+}
+
+# archci_job_stats JOBDIR UNIT -> "cpu=<cores> rss=<MiB> peak=<MiB> build=<MiB>"
+# for the build UNIT (archci-build@...) running from JOBDIR, or nothing while
+# there is none. The container's processes live in a scope of nspawn's own,
+# devtools.slice/*/makechrootpkg-<pkg>.build.<pid>.scope, named after the
+# makechrootpkg process, which itself sits in the build unit's cgroup; the
+# scope's cgroup accounts CPU and memory for the whole build. cpu is the cores
+# used on average since the previous call (JOBDIR/cpu.prev); build is the
+# chroot copy's /build directory (archci-build writes the copy to
+# JOBDIR/copydir), where makepkg extracts and compiles.
+archci_job_stats() {
+	local jobdir=$1 unit=$2 ucg pid cg='' copydir usage now prev_usage prev_now cpu mem peak build
+	ucg=$(systemctl show -p ControlGroup --value "$unit" 2>/dev/null)
+	[[ -n $ucg && -f /sys/fs/cgroup$ucg/cgroup.procs ]] || return 0
+	while read -r pid; do
+		for cg in /sys/fs/cgroup/devtools.slice/*/makechrootpkg-*."$pid".scope; do
+			[[ -d $cg ]] && break 2
+		done
+		cg=''
+	done <"/sys/fs/cgroup$ucg/cgroup.procs"
+	[[ -n $cg ]] || return 0
+	{
+		usage=$(awk '/^usage_usec/ { print $2 }' "$cg/cpu.stat" 2>/dev/null) || return 0
+		now=$(date +%s%6N)
+		# cores used since the previous sample; none on the first, since the
+		# scope's start is not known precisely
+		cpu=''
+		if [[ -f $jobdir/cpu.prev ]]; then
+			read -r prev_usage prev_now <"$jobdir/cpu.prev"
+			(( now > prev_now )) && cpu=$(awk -v u="$((usage - prev_usage))" -v t="$((now - prev_now))" 'BEGIN { printf "%.1f", u / t }')
+		fi
+		printf '%s %s\n' "$usage" "$now" >"$jobdir/cpu.prev"
+		mem=$(( $(<"$cg/memory.current") / 1048576 ))
+		peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
+		build=0
+		[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$(du -sm "$copydir/build" 2>/dev/null | cut -f1)
+		printf '%srss=%s peak=%s build=%s\n' "${cpu:+cpu=$cpu }" "$mem" "$peak" "${build:-0}"
+	}
 }
 
 # archci_watchdog SECONDS -- COMMAND... : run COMMAND with its output through a

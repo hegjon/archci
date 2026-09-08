@@ -8,8 +8,9 @@
 #   workers  one row per worker seen recently: load, memory, chroot disk, cores,
 #            what it is building (from the heartbeat stats kept in the job file)
 #   jobs     one row per running job: elapsed, worker, attempt, heartbeat age,
-#            makepkg phase and the last output line (from the worker's journal
-#            streamed to ARCHCI_REMOTE_JOURNAL)
+#            the job's CPU (cores), memory (current and peak) and build-tree
+#            size from its cgroup, the makepkg phase and the last output line
+#            (from the worker's journal streamed to ARCHCI_REMOTE_JOURNAL)
 #   failed   the newest failures
 # Ctrl-C quits.
 require_relative '../lib/archci'
@@ -94,12 +95,13 @@ def frame(cfg, home, repo, journal)
   end
   out << ''
 
-  out << format('%-8s %-22s %-8s %-3s %4s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'PHASE', 'PACKAGE  | last output')
+  out << format('%-8s %-22s %-8s %-3s %4s %5s %6s %6s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'RSS', 'PEAK', 'BUILD', 'PHASE', 'PACKAGE  | last output')
   running.each do |j|
     claimed = j['claimed'] ? Time.iso8601(j['claimed']) : j['mtime']
     hb = ((now - j['mtime']) / 60).round
     phase, last = journal_tail(journal, unit_name(j))
-    line = format('%-8s %-22s %-8s %-3d %3dm  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
+    line = format('%-8s %-22s %-8s %-3d %3dm %5s %5sM %5sM %5sM  %-9s %s %s', elapsed(now - claimed), j['worker'], j['arch'], j['attempt'], hb,
+                  j['cpu'] || '-', j['rss'] || '-', j['peak'] || '-', j['build'] || '-',
                   phase[0, 9], "#{j['pkgbase']} #{j['version']}", last.empty? ? '' : "| #{last}")
     out << line[0, width]
   end
