@@ -26,9 +26,11 @@ farm builds it once merged. Until then the package stays in `queue/failed`.
    chroot needs no pacman config of its own. Then install the worker
    package as on any worker: `ARCHCI_ARCH` defaults to `uname -m`, so
    `archci-worker@N` builds aarch64 there. The chroot's
-   `makepkg.conf` is `arch/aarch64/makepkg.conf` from this tree (devtools'
-   x86_64 flags with `-march=armv8-a` and `-mbranch-protection=standard`);
-   copy it to `/etc/archci/aarch64/makepkg.conf` to change it, and put a
+   `makepkg.conf` is derived from devtools' x86_64 one when the worker
+   package is built (`arch/aarch64/makepkg.conf.sed`: `-march=armv8-a` and
+   `-mbranch-protection=standard` in place of the x86-only flags), so it
+   follows devtools' flags; copy `/usr/lib/archci/arch/aarch64/makepkg.conf`
+   to `/etc/archci/aarch64/makepkg.conf` to change it, and put a
    `/etc/archci/aarch64/extra.conf` there if the chroot should use a
    different pacman config than the host, for example this repo's own
    aarch64 output.

@@ -15,7 +15,7 @@ pkgdesc='Headless build farm for Arch Linux packages: builds a PKGBUILD reposito
 arch=(any)
 url='https://github.com/hegjon/archci'
 license=(MIT)
-makedepends=(git gnupg)
+makedepends=(git gnupg devtools)
 source=("$pkgbase::git+https://github.com/hegjon/archci.git")
 sha256sums=(SKIP)
 
@@ -100,9 +100,20 @@ package_archci-worker-git() {
   install -Dm644 systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
   install -Dm644 systemd/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
-  # chroot configs for arches devtools ships none for; the qemu/ subtree is
-  # archci-worker-qemu-aarch64-git's, taken from the source tree at build time
-  (cd arch && find . -type f -not -path '*/qemu/*' -exec install -Dm644 '{}' "$pkgdir$_libdir/arch/{}" \;)
+  # Chroot makepkg.conf for aarch64, which devtools ships none for: derived
+  # from devtools' x86_64 one (and its conf.d) with arch/aarch64/makepkg.conf.sed,
+  # so it follows devtools' flags. The build fails if a substitution no longer
+  # matches. (arch/aarch64/qemu/ is archci-worker-qemu-aarch64-git's.)
+  local dt=/usr/share/devtools/makepkg.conf.d out=$pkgdir$_libdir/arch/aarch64 f
+  install -d "$out/makepkg.conf.d"
+  sed -f arch/aarch64/makepkg.conf.sed "$dt/x86_64.conf" >"$out/makepkg.conf"
+  for f in "$dt"/x86_64.conf.d/*.conf; do
+    sed -f arch/aarch64/makepkg.conf.sed "$f" >"$out/makepkg.conf.d/${f##*/}"
+  done
+  grep -q '^CARCH="aarch64"$' "$out/makepkg.conf" || { echo "makepkg.conf.sed did not set CARCH" >&2; return 1; }
+  if grep -rE 'x86|cf-protection|leaf-frame-pointer|lib32' "$out" | grep -v '^[^:]*:#'; then
+    echo "x86-only flags survived makepkg.conf.sed; update it for this devtools" >&2; return 1
+  fi
 }
 
 # Add-on for an x86_64 worker: aarch64 worker instances under qemu user-mode
