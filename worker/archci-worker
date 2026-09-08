@@ -83,6 +83,7 @@ while true; do
 	printf '%s\n' "$ARCHCI_ARCH" >"$jobdir/arch"   # the arch this instance builds, for archci-build
 	archci_log "building $job_id as archci-build@$name"
 
+	unit=archci-build@$name
 	# Keep the master's stale-job reaper away while the build runs. Each beat
 	# carries this machine's load, memory, chroot disk use and core count, and
 	# the job's own CPU, memory and build-tree size from its cgroup, which the
@@ -96,7 +97,6 @@ while true; do
 	) &
 	heartbeat=$!
 
-	unit=archci-build@$name
 	start=$(date +%s)
 	systemctl reset-failed "$unit.service" 2>/dev/null || true
 	systemctl start "$unit.service" || true   # blocks until the oneshot has finished
