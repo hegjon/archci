@@ -188,7 +188,6 @@ elif [[ $role == worker ]]; then
 		echo "==> worker: stream the journal to the master (systemd-journal-upload to $ARCHCI_JOURNAL_URL)"
 		install -d -m 755 /etc/systemd/journal-upload.conf.d
 		printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/etc/systemd/journal-upload.conf.d/archci.conf
-		systemctl enable --now systemd-journal-upload.service
 		case $ARCHCI_JOURNAL_URL in
 			http://127.0.0.1:*|http://localhost:*)
 				# Outside the private network: reach the port through an ssh tunnel over the worker key.
@@ -196,6 +195,7 @@ elif [[ $role == worker ]]; then
 				systemctl enable --now archci-logging-remote.service ;;
 			*) systemctl disable --now archci-logging-remote.service 2>/dev/null || true ;;
 		esac
+		systemctl enable --now systemd-journal-upload.service
 	else
 		# ARCHCI_JOURNAL_URL="" : a worker outside the master's network (the
 		# journal port is plain HTTP and not public) keeps its journal local.
