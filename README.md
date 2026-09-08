@@ -105,7 +105,9 @@ and is printed. The worker then:
    job's commit (`git archive` out of a bare mirror the worker keeps),
 2. starts `archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service`, a
    oneshot template unit, with a blocking `systemctl start`. The build has its
-   own unit, cgroup and journal, and the unit's `TimeoutStartSec` (12 h, change
+   own unit, cgroup and journal, runs at low CPU and I/O priority (`Nice=15`,
+   inherited by everything inside the chroot, so sshd and the worker loop
+   stay responsive on a busy build machine), and the unit's `TimeoutStartSec` (12 h, change
    with `systemctl edit archci-build@.service`) is the timeout. A build whose
    output stops for `ARCHCI_BUILD_IDLE_MINUTES` (30) is killed earlier: a hung
    test suite otherwise holds the worker for the whole 12 h,

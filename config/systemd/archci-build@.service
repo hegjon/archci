@@ -20,6 +20,13 @@ Delegate=yes
 LogNamespace=archci
 # Compiler output must not be dropped by journald's rate limit.
 LogRateLimitIntervalSec=0
+# Builds yield to everything else on the machine: sshd, the worker loop, a
+# desktop's own work. The container's processes inherit these from
+# makechrootpkg, which matters because nspawn puts them in a scope of its own
+# that this unit's cgroup settings (CPUWeight=) would not reach.
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 # Build timeout (a oneshot is "starting" until it exits; RuntimeMaxSec= would be ignored).
 # Change with: systemctl edit archci-build@.service
 TimeoutStartSec=12h
