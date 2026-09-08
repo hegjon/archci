@@ -85,13 +85,13 @@ def frame(cfg, home, repo, journal)
   workers = {}
   running.each { |j| workers[j['worker']] = j }
   recent.each { |j| workers[j['worker']] ||= nil }
-  out << format('%-22s %6s %5s %5s %5s  %s', 'WORKER', 'LOAD', 'MEM%', 'DISK%', 'CPUS', 'BUILDING')
+  out << format('%-22s %6s %5s %5s %5s  %-8s %s', 'WORKER', 'LOAD', 'MEM%', 'DISK%', 'CPUS', 'ARCH', 'BUILDING')
   workers.sort.each do |w, j|
     if j
       out << format('%-22s %6s %5s %5s %5s  %-8s %s', w, j['load'] || '-', j['mem'] || '-', j['disk'] || '-', j['cpus'] || '-',
                     j['arch'], j['pkgbase'])
     else
-      out << format('%-22s %6s %5s %5s %5s  %s', w, '-', '-', '-', '-', 'idle')
+      out << format('%-22s %6s %5s %5s %5s  %-8s %s', w, '-', '-', '-', '-', '-', 'idle')
     end
   end
   out << ''
