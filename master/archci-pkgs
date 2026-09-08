@@ -4,7 +4,7 @@
 # One line per directory under <clone>/$ARCHCI_PKGBUILDS_DIR holding a PKGBUILD
 # and .omarchy/package.json (the omarchy-pkgs layout):
 #
-#   <name> <version> <commit> <arch> <profile> <source> <build|skip>
+#   <name> <version> <commit> <arch> <profile> <source> <build|skip> <arch_repo>
 #
 #   name     the directory name; it is the job's pkgbase (the PKGBUILD's own
 #            pkgbase may differ for a split package)
@@ -14,6 +14,8 @@
 #   profile  devtools build profile: multilib for multilib packages, else extra
 #   source   .omarchy/package.json "source" (aur, arch, local)
 #   build    "skip" when package.json sets skip_build, else "build"
+#   arch_repo .omarchy/package.json "arch_repo" (core, extra, multilib) for a
+#            package carried from Arch Linux, else "-"; archci-next orders by it
 #
 # The list is cached in $ARCHCI_HOME/pkgbuilds.index keyed by the clone's HEAD,
 # so archci-next (once per claim) just reads a file; archci-scan refreshes it
@@ -36,11 +38,11 @@ fi
 command -v jq >/dev/null || archci_die "jq is not installed"
 head=$(git -C "$clone" rev-parse HEAD)
 
-index_current() { [[ -f $index && $(head -1 "$index") == "# $head" ]]; }
+index_current() { [[ -f $index && $(head -1 "$index") == "# $head v2" ]]; }
 
 generate() {
 	local dir name version arches commit source build profile
-	printf '# %s\n' "$head"
+	printf '# %s v2\n' "$head"
 	for dir in "$clone/$ARCHCI_PKGBUILDS_DIR"/*/; do
 		dir=${dir%/}
 		name=${dir##*/}
@@ -55,11 +57,11 @@ generate() {
 			continue
 		fi
 		commit=$(git -C "$clone" log -1 --format=%H -- "$ARCHCI_PKGBUILDS_DIR/$name")
-		read -r source build profile < <(jq -r '
+		read -r source build repo < <(jq -r '
 			[(.source // "local"), (if .skip_build == true then "skip" else "build" end), (.arch_repo // "-")]
 			| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; continue; }
-		if [[ $profile == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
-		printf '%s %s %s %s %s %s %s\n' "$name" "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build"
+		if [[ $repo == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
+		printf '%s %s %s %s %s %s %s %s\n' "$name" "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build" "$repo"
 	done
 }
 

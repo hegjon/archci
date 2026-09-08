@@ -95,11 +95,11 @@ module Archci
       out, status = Open3.capture2(File.join(ROOT, 'master', 'archci-pkgs'))
       if status.success?
         out.lines.filter_map do |line|
-          name, version, commit, arch, profile, source, build = line.split
+          name, version, commit, arch, profile, source, build, arch_repo = line.split
           next unless build
 
           { 'pkgbase' => name, 'version' => version, 'commit' => commit, 'arches' => arch.split(','),
-            'profile' => profile, 'source' => source, 'skip' => build == 'skip' }
+            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'arch_repo' => arch_repo.to_s }
         end
       else
         []
@@ -108,12 +108,16 @@ module Archci
   end
 
   # Packages whose PKGBUILD version is not the one we last built, in claim
-  # order: updates of packages we already publish first, then the backlog.
+  # order: the farm's own packages (ARCHCI_PKG_ALSO, i.e. archci) first, then
+  # updates of packages we already publish before the never-built backlog, and
+  # within those by origin: Arch's core, then extra, then multilib, then the
+  # repository's local packages, then those from the AUR; an arch's own
+  # packages before the any packages; alphabetically last.
   # Nothing is stored; this is computed from the package index, built/ and the
   # queue on every call.
   #   arch:  only jobs a worker of this arch may build (its own, plus "any" if
   #          it is ARCHCI_ANY_ARCH); nil for every enabled arch
-  #   limit: stop as soon as this many candidates are known
+  #   limit: return only this many candidates
   def self.outstanding(arch: nil, limit: nil)
     cfg = config
     repo = cfg['ARCHCI_REPO']
@@ -153,12 +157,27 @@ module Archci
         next if queued[[repo, p['pkgbase'], job_arch]].include?(p['commit']) # queued, in retry backoff, or given up
 
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
-                  'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5 }
+                  'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5,
+                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, built ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
         (built ? updates : backlog) << entry
-        return updates if limit && updates.size >= limit
       end
     end
-    limit ? (updates + backlog).first(limit) : updates + backlog
+    ordered = (updates + backlog).sort_by { |e| e['rank'] }
+    limit ? ordered.first(limit) : ordered
+  end
+
+  # Claim order among packages of one class: Arch's core before extra before
+  # multilib, then this repository's own (local) packages, then AUR ones.
+  ORIGIN_RANK = { %w[arch core] => 0, %w[arch extra] => 1, %w[arch multilib] => 2 }.freeze
+  def self.origin_rank(pkg)
+    ORIGIN_RANK.fetch([pkg['source'], pkg['arch_repo']]) do
+      case pkg['source']
+      when 'arch' then 3
+      when 'local' then 4
+      when 'aur' then 5
+      else 6
+      end
+    end
   end
 
   def self.log(msg)
