@@ -6,7 +6,8 @@
 #
 # Each build runs as archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service,
 # a oneshot template unit started with a blocking "systemctl start", so its
-# output is in the journal (journalctl -u 'archci-build@*'), it has its own
+# output is in the archci journal namespace (journalctl --namespace=archci
+# -u 'archci-build@*'; the namespace is what streams to the master), it has its own
 # cgroup, and the unit's TimeoutStartSec is the timeout.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
@@ -86,11 +87,11 @@ while true; do
 	kill "$heartbeat" 2>/dev/null || true
 	wait "$heartbeat" 2>/dev/null || true
 	# The journal is the build log; keep a copy with the packages for the master.
-	journalctl -u "$unit" --since="@$start" -o cat --no-pager >"$outdir/build.log" 2>/dev/null || true
+	journalctl --namespace=archci -u "$unit" --since="@$start" -o cat --no-pager >"$outdir/build.log" 2>/dev/null || true
 	systemctl reset-failed "$unit.service" 2>/dev/null || true
 	status=failure
 	[[ -f $outdir/result && $(<"$outdir/result") == success ]] && status=success
-	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min (journalctl -u $unit)"
+	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min (journalctl --namespace=archci -u $unit)"
 	unit=
 
 	for try in 1 2 3; do

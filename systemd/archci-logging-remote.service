@@ -1,0 +1,27 @@
+# Remote logging for a worker outside the master's private network: hold an
+# ssh tunnel to the master's journal-remote port so systemd-journal-upload can
+# stream this worker's journal to http://127.0.0.1:19532 (ARCHCI_JOURNAL_URL).
+# Uses the worker key; the master allows that key to forward to this one port
+# and nothing else (archci-authorize, sshd_config.d/archci.conf). With -N no
+# session is opened, so the key's forced command never runs.
+[Unit]
+Description=archci remote logging: ssh tunnel to the master's journal-remote port
+After=network-online.target
+Wants=network-online.target
+Before=systemd-journal-upload.service
+StartLimitIntervalSec=0
+
+[Service]
+Environment=ARCHCI_MASTER=archci@master ARCHCI_WORKER_KEY=/etc/archci/worker_key
+EnvironmentFile=-/etc/archci/archci.conf
+ExecStart=/usr/bin/ssh -N -i ${ARCHCI_WORKER_KEY} \
+    -o BatchMode=yes -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+    -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts \
+    -L 127.0.0.1:19532:127.0.0.1:19532 ${ARCHCI_MASTER}
+Restart=always
+RestartSec=15
+LogNamespace=archci
+
+[Install]
+WantedBy=multi-user.target

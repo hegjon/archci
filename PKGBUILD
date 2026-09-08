@@ -90,10 +90,14 @@ package_archci-worker-git() {
   provides=(archci-worker)
   conflicts=(archci-worker)
 
-  _install_role worker archci-worker@.service archci-build@.service
+  _install_role worker archci-worker@.service archci-build@.service archci-logging-remote.service
   cd "$srcdir/$pkgbase"
   (cd arch && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/arch/{}" \;)
 }
+  # the archci journal namespace the units log to, and its upload to the master
+  install -Dm644 systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
+  install -Dm644 systemd/systemd-journal-upload.service.d/archci.conf \
+    "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
 
 package_archci-signer-git() {
   pkgdesc='Headless build farm for Arch Linux packages (signer: verify builder signatures, release-sign, publish)'

@@ -146,7 +146,11 @@ ssh-keygen -q -t ed25519 -N '' -C worker-x -f "$tmp/wkey"
 ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" "$tmp/wkey.pub"
 ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" "$tmp/wkey.pub" 2>&1 | grep -q "already authorized" || fail "re-authorizing must be a no-op"
 (( $(wc -l <"$akf") == 1 )) || fail "duplicate key line"
-grep -q '^command="[^"]*/master/archci-shell",restrict ssh-ed25519 ' "$akf" || fail "authorized line lacks the forced command: $(<"$akf")"
+grep -q '^command="[^"]*/master/archci-shell",restrict,port-forwarding,permitopen="127.0.0.1:19532" ssh-ed25519 ' "$akf" || fail "authorized line lacks the forced command or tunnel options: $(<"$akf")"
+# a line with stale options for a known key is rewritten, not duplicated
+sed -i 's/,port-forwarding,permitopen="127.0.0.1:19532"//' "$akf"
+ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" "$tmp/wkey.pub" 2>&1 | grep -q "updated" || fail "stale options must be rewritten"
+{ (( $(wc -l <"$akf") == 1 )) && grep -q 'permitopen' "$akf"; } || fail "rewrite left the file wrong: $(<"$akf")"
 [[ $(stat -c %a "$akf") == 644 ]] || fail "authorized_keys should be world-readable, root-writable"
 ! ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" 'not a key' 2>/dev/null || fail "garbage must be rejected"
 # keys from the old per-user file are carried over once

@@ -176,8 +176,12 @@ elif [[ $role == worker ]]; then
 	fi
 	gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --armor \
 		--export "archci-builder@${HOSTNAME%%.*}" >/etc/archci/builder_key.pub
-	echo "==> worker: systemd unit"
-	install -m 644 systemd/archci-worker@.service systemd/archci-build@.service "$unitdir/"
+	echo "==> worker: systemd units (logging to the archci journal namespace)"
+	install -m 644 systemd/archci-worker@.service systemd/archci-build@.service \
+		systemd/archci-logging-remote.service "$unitdir/"
+	install -D -m 644 systemd/journald@archci.conf /etc/systemd/journald@archci.conf.d/archci.conf
+	install -D -m 644 systemd/systemd-journal-upload.service.d/archci.conf \
+		"$unitdir/systemd-journal-upload.service.d/archci.conf"
 	systemctl daemon-reload
 	systemctl enable archci-worker@1.service
 	if [[ -n $ARCHCI_JOURNAL_URL ]]; then
@@ -185,11 +189,18 @@ elif [[ $role == worker ]]; then
 		install -d -m 755 /etc/systemd/journal-upload.conf.d
 		printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/etc/systemd/journal-upload.conf.d/archci.conf
 		systemctl enable --now systemd-journal-upload.service
+		case $ARCHCI_JOURNAL_URL in
+			http://127.0.0.1:*|http://localhost:*)
+				# Outside the private network: reach the port through an ssh tunnel over the worker key.
+				echo "    through the ssh tunnel of archci-logging-remote.service"
+				systemctl enable --now archci-logging-remote.service ;;
+			*) systemctl disable --now archci-logging-remote.service 2>/dev/null || true ;;
+		esac
 	else
 		# ARCHCI_JOURNAL_URL="" : a worker outside the master's network (the
 		# journal port is plain HTTP and not public) keeps its journal local.
 		echo "==> worker: ARCHCI_JOURNAL_URL is empty, not streaming the journal"
-		systemctl disable --now systemd-journal-upload.service 2>/dev/null || true
+		systemctl disable --now systemd-journal-upload.service archci-logging-remote.service 2>/dev/null || true
 		rm -f /etc/systemd/journal-upload.conf.d/archci.conf
 	fi
 	cat <<-MSG
@@ -204,7 +215,7 @@ elif [[ $role == worker ]]; then
 	       /etc/archci/builder_key.pub
 	     to the signer and run  archci-authorize-builder builder_key.pub
 	  4. systemctl start archci-worker@1   (add @2, @3 ... for parallel builds)
-	     journalctl -u archci-worker@1 -f
+	     journalctl --namespace=archci -u archci-worker@1 -f
 	MSG
 elif [[ $role == signer ]]; then
 	echo "==> signer: packages"

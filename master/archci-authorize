@@ -4,8 +4,11 @@
 # Appends the key, restricted to the job protocol by a forced command, to
 # /etc/archci/authorized_keys (root-owned; sshd reads it for the archci user
 # through /etc/ssh/sshd_config.d/archci.conf, which install.sh master and the
-# master package install). Run as root. ARCHCI_AUTHORIZED_KEYS overrides the
-# file, for the tests.
+# master package install). The key may also forward to the journal-remote
+# port, for archci-logging-remote.service on a worker outside the private
+# network. A key already present gets its line rewritten, so re-running this
+# after an upgrade refreshes the options. Run as root. ARCHCI_AUTHORIZED_KEYS
+# overrides the file, for the tests.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -25,10 +28,16 @@ if [[ ! -e $akf && -f $old ]]; then
 	archci_log "moved the keys from $old to $akf"
 fi
 [[ -e $akf ]] || : >"$akf"
-if grep -qF "${BASH_REMATCH[0]}" "$akf"; then
+line=$(printf 'command="%s",restrict,port-forwarding,permitopen="127.0.0.1:19532" %s' "$ARCHCI_MASTER_DIR/archci-shell" "$key")
+if grep -qxF "$line" "$akf"; then
 	archci_log "key already authorized"
+elif grep -qF "${BASH_REMATCH[0]}" "$akf"; then
+	grep -vF "${BASH_REMATCH[0]}" "$akf" >"$akf.tmp" || true
+	printf '%s\n' "$line" >>"$akf.tmp"
+	mv "$akf.tmp" "$akf"
+	archci_log "updated: ${key##* }"
 else
-	printf 'command="%s",restrict %s\n' "$ARCHCI_MASTER_DIR/archci-shell" "$key" >>"$akf"
+	printf '%s\n' "$line" >>"$akf"
 	archci_log "authorized: ${key##* }"
 fi
 chmod 644 "$akf"

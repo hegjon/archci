@@ -6,6 +6,9 @@ StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/usr/local/bin/archci-worker %i
+# Log to the archci journal namespace (journalctl --namespace=archci), which
+# is what systemd-journal-upload streams to the master.
+LogNamespace=archci
 Restart=always
 RestartSec=30
 # Builds run as archci-build@<name>.service. On stop the loop stops the running

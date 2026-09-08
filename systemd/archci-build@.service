@@ -15,6 +15,9 @@ ExecStart=/usr/local/bin/archci-build ${ARCHCI_WORKER_HOME}/jobs/%i/job ${ARCHCI
 # the container's stdout when it is this unit's journal socket, which is why
 # archci-build runs makechrootpkg through a pipe.
 Delegate=yes
+# Log to the archci journal namespace (journalctl --namespace=archci), which
+# is what systemd-journal-upload streams to the master.
+LogNamespace=archci
 # Compiler output must not be dropped by journald's rate limit.
 LogRateLimitIntervalSec=0
 # Build timeout (a oneshot is "starting" until it exits; RuntimeMaxSec= would be ignored).
