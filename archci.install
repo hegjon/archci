@@ -1,0 +1,21 @@
+# shellcheck shell=bash
+# archci (shared package): warn when pacman has set a live configuration aside.
+# Replacing the -git packages with the release ones (or the other way round) is
+# a package removal plus an install to pacman, which saves the old
+# /etc/archci/archci.conf as .pacsave and installs the packaged default.
+# Every role runs with defaults until the saved one is put back.
+
+post_install() {
+  if [[ -f /etc/archci/archci.conf.pacsave ]]; then
+    cat <<'MSG' >&2
+==> WARNING: /etc/archci/archci.conf is the packaged default; your configuration
+    was saved as /etc/archci/archci.conf.pacsave when the previous archci
+    package was removed. Put it back before anything restarts:
+      mv /etc/archci/archci.conf.pacsave /etc/archci/archci.conf
+MSG
+  fi
+}
+
+post_upgrade() {
+  post_install "$1"
+}

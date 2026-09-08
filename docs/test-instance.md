@@ -45,3 +45,10 @@ Then `pacman -Sy` and install as shown in the README under "Using the repo".
 The archci packages themselves are there too: `pacman -S archci-worker`
 (or `archci-master`, `archci-signer`, `archci-worker-qemu-aarch64`) installs
 the tagged release, replacing the `-git` packages built from a checkout.
+Mind that pacman treats the replacement as a removal plus an install: the
+live `/etc/archci/archci.conf` is saved as `.pacsave` and the packaged
+default takes its place, so put it back right after (`mv
+/etc/archci/archci.conf.pacsave /etc/archci/archci.conf`). The package
+warns when it finds a `.pacsave`. A master running the default config
+publishes to `[omarchy]` for every package in the repository, so do this
+before the next scan.

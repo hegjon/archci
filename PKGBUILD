@@ -54,6 +54,7 @@ package_archci-git() {
   pkgdesc='Headless build farm for Arch Linux packages (shared library, config and user)'
   depends=(bash git)
   backup=(etc/archci/archci.conf)
+  install=archci.install
   provides=(archci)
   conflicts=(archci)
 
