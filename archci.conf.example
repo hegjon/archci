@@ -4,8 +4,10 @@
 ## Common ---------------------------------------------------------------------
 # Master state: queue, built records, repo, logs (should be a btrfs subvolume).
 ARCHCI_HOME=/var/lib/archci
-# Worker: the architecture this machine builds (uname -m). Master: the default
-# arch for "archci-job enqueue" and for workers too old to send theirs.
+# Worker: the architecture this machine builds, normally uname -m; another
+# value means qemu user-mode emulation, which "install.sh worker --arch X" sets
+# up. Master: the default arch for "archci-job enqueue" and for workers too
+# old to send theirs.
 ARCHCI_ARCH=x86_64
 # The PKGBUILD repository: one git repository with a directory per package,
 # <ARCHCI_PKGBUILDS_DIR>/<name>/PKGBUILD plus .omarchy/package.json (the
@@ -65,7 +67,8 @@ ARCHCI_STAGING_WARN=20
 # ssh destination of the master. The master droplet is named "master"; workers resolve
 # it via /etc/hosts (cloud-init writes it) or DO private DNS.
 ARCHCI_MASTER="archci@master"
-# Where systemd-journal-upload streams this worker's journal (journal-remote on the master).
+# Where systemd-journal-upload streams this worker's journal (journal-remote on
+# the master; plain HTTP, private network only). "" keeps the journal local.
 ARCHCI_JOURNAL_URL=http://master:19532
 ARCHCI_WORKER_KEY=/etc/archci/worker_key
 ARCHCI_WORKER_HOME=/var/lib/archci-worker

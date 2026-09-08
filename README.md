@@ -406,9 +406,30 @@ farm builds it once merged. Until then the package stays in `queue/failed`.
 3. Watch `archci-status`: `built` is reported per `<repo>-<arch>`, and
    `archci-job enqueue REPO PKGBASE 0 aarch64` queues one package by hand.
 
-QEMU user-mode emulation (`qemu-user-static-binfmt`) on an x86_64 worker
-does run `makechrootpkg` for aarch64, but it is 5 to 20 times slower and
-breaks test suites and JIT-heavy builds; use it for a smoke test, not a fleet.
+**An emulated worker instead.** An x86_64 machine can build aarch64 through
+QEMU user-mode emulation. It is 5 to 20 times slower per core and some test
+suites break under it, so it suits a big desktop or a smoke test rather than
+a fleet, but it needs no ARM hardware:
+
+```
+./install.sh worker --arch aarch64
+```
+
+sets `ARCHCI_ARCH=aarch64`, installs `qemu-user-static-binfmt` and
+re-registers its handler with the C flag added (F lets binaries inside the
+chroot find the emulator, C lets setuid ones such as makepkg's `sudo pacman`
+keep root; the stock registration lacks C),
+writes a devtools `setarch` alias (arch-nspawn runs `setarch aarch64`, which
+the host rejects without one), installs `arch/aarch64/qemu/extra.conf` as
+`/etc/archci/aarch64/extra.conf` (devtools' pacman.conf with
+`Architecture = aarch64` and the Ports repo as `Server`, since the host's
+mirrorlist is x86_64), and trusts the Ports repo key
+`9B2C213B21883BB65CE2FB900CF25682E6BA0751` (shipped in
+`arch/aarch64/qemu/keys/`) in the host's pacman keyring, because the chroot
+inherits the host's trust. Outside the master's private network add the
+master's public address as `master` to `/etc/hosts` and set
+`ARCHCI_JOURNAL_URL=""` (the journal port is not public). Expect the first
+build to spend a while creating `/var/lib/archbuild/extra-aarch64`.
 
 ### Signer
 

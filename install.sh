@@ -1,9 +1,21 @@
 #!/bin/bash
-# install.sh master|worker -- install archci on this Arch/Omarchy machine.
+# install.sh master|worker|signer [--arch ARCH] -- install archci on this
+# Arch/Omarchy machine. --arch sets ARCHCI_ARCH in /etc/archci/archci.conf; a
+# worker whose arch differs from the machine's builds under qemu user-mode
+# emulation, and this script sets that up (see README "Building for arm64").
 set -euo pipefail
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+usage() { echo "usage: $0 master|worker|signer [--arch ARCH]" >&2; exit 2; }
 role=${1:-}
-[[ $role == master || $role == worker || $role == signer ]] || { echo "usage: $0 master|worker|signer" >&2; exit 2; }
+[[ $role == master || $role == worker || $role == signer ]] || usage
+shift
+arch_opt=''
+while (( $# )); do
+	case $1 in
+		--arch) arch_opt=${2:-}; [[ $arch_opt =~ ^[a-z0-9_]{1,32}$ ]] || usage; shift 2 ;;
+		*) usage ;;
+	esac
+done
 (( EUID == 0 )) || { echo "run as root" >&2; exit 1; }
 
 libdir=/usr/local/lib/archci
@@ -39,6 +51,14 @@ if [[ ! -e /etc/archci/archci.conf ]]; then
 	install -m 644 archci.conf.example /etc/archci/archci.conf
 	echo "    wrote /etc/archci/archci.conf -- edit it"
 fi
+if [[ -n $arch_opt ]]; then
+	if grep -q '^ARCHCI_ARCH=' /etc/archci/archci.conf; then
+		sed -i "s/^ARCHCI_ARCH=.*/ARCHCI_ARCH=$arch_opt/" /etc/archci/archci.conf
+	else
+		printf 'ARCHCI_ARCH=%s\n' "$arch_opt" >>/etc/archci/archci.conf
+	fi
+	echo "    set ARCHCI_ARCH=$arch_opt in /etc/archci/archci.conf"
+fi
 
 if [[ $role == master ]]; then
 	source lib/archci-common.sh
@@ -54,6 +74,14 @@ if [[ $role == master ]]; then
 	mksubvol /var/lib/archci/repo
 	mksubvol /var/lib/archci/incoming
 	chown archci:archci /var/lib/archci/repo /var/lib/archci/incoming
+	echo "==> master: sshd reads worker keys from /etc/archci/authorized_keys"
+	install -D -m 644 ssh/sshd_config.d/archci.conf /etc/ssh/sshd_config.d/archci.conf
+	if [[ ! -e /etc/archci/authorized_keys && -f /var/lib/archci/.ssh/authorized_keys ]]; then
+		install -m 644 /var/lib/archci/.ssh/authorized_keys /etc/archci/authorized_keys
+		mv /var/lib/archci/.ssh/authorized_keys /var/lib/archci/.ssh/authorized_keys.migrated
+		echo "    moved the existing keys from /var/lib/archci/.ssh/authorized_keys"
+	fi
+	systemctl reload sshd 2>/dev/null || true
 	echo "==> master: systemd timers"
 	install -m 644 systemd/archci-scan.* systemd/archci-reaper.* systemd/archci-stage.* "$unitdir/"
 	echo "==> master: receive worker journals (systemd-journal-remote on port 19532)"
@@ -74,14 +102,6 @@ if [[ $role == master ]]; then
 	       endpoint = https://<account-id>.r2.cloudflarestorage.com
 	     and set ARCHCI_R2_STAGING="r2:<bucket>/staging" in /etc/archci/archci.conf.
 	     Ideally use a token that can only write the staging prefix.
-	echo "==> master: sshd reads worker keys from /etc/archci/authorized_keys"
-	install -D -m 644 ssh/sshd_config.d/archci.conf /etc/ssh/sshd_config.d/archci.conf
-	if [[ ! -e /etc/archci/authorized_keys && -f /var/lib/archci/.ssh/authorized_keys ]]; then
-		install -m 644 /var/lib/archci/.ssh/authorized_keys /etc/archci/authorized_keys
-		mv /var/lib/archci/.ssh/authorized_keys /var/lib/archci/.ssh/authorized_keys.migrated
-		echo "    moved the existing keys from /var/lib/archci/.ssh/authorized_keys"
-	fi
-	systemctl reload sshd 2>/dev/null || true
 	     ARCHCI_PKGBUILDS_URL there is the repository of PKGBUILDs to build
 	     (default $ARCHCI_PKGBUILDS_URL).
 	  2. The master holds NO signing key and builds no database. It moves built
@@ -93,8 +113,51 @@ if [[ $role == master ]]; then
 	  5. Keep ports 19532 (journal upload) and 22 reachable from the VPC only.
 	MSG
 elif [[ $role == worker ]]; then
+	source lib/archci-common.sh
 	echo "==> worker: packages"
 	pacman -S --needed --noconfirm devtools git rsync openssh btrfs-progs
+	if [[ $ARCHCI_ARCH != "$(uname -m)" ]]; then
+		# A foreign arch: makechrootpkg runs the aarch64 (etc.) chroot through
+		# qemu user-mode emulation. Needs the binfmt handler registered with the
+		# F flag (qemu-user-static-binfmt does that), a setarch alias because
+		# arch-nspawn runs "setarch $CARCH" and setarch rejects a foreign name,
+		# and a chroot pacman.conf that pins Architecture and points at a repo
+		# of that arch (devtools' includes the host's mirrorlist), whose key the
+		# host keyring must trust since mkarchroot copies host trust into the chroot.
+		echo "==> worker: $ARCHCI_ARCH on a $(uname -m) host: qemu user-mode emulation"
+		pacman -S --needed --noconfirm qemu-user-static qemu-user-static-binfmt
+		# The stock registration has flags F and P. Add C so setuid binaries in
+		# the chroot keep their privileges (makepkg runs "sudo pacman" to install
+		# build dependencies; without C, sudo sees a non-root effective uid).
+		bf=/usr/lib/binfmt.d/qemu-$ARCHCI_ARCH-static.conf
+		if [[ -f $bf ]] && ! grep -qE ':[A-Z]*C[A-Z]*$' "/etc/binfmt.d/qemu-$ARCHCI_ARCH-static.conf" 2>/dev/null; then
+			install -d -m 755 /etc/binfmt.d
+			sed -E 's/:([A-Z]*)$/:\1C/' "$bf" >"/etc/binfmt.d/qemu-$ARCHCI_ARCH-static.conf"
+			echo "    wrote /etc/binfmt.d/qemu-$ARCHCI_ARCH-static.conf (flags +C for setuid in the chroot)"
+		fi
+		systemctl restart systemd-binfmt
+		[[ -f /proc/sys/fs/binfmt_misc/qemu-$ARCHCI_ARCH ]] || { echo "no binfmt handler for $ARCHCI_ARCH" >&2; exit 1; }
+		grep -qE '^flags: .*C' "/proc/sys/fs/binfmt_misc/qemu-$ARCHCI_ARCH" || { echo "binfmt handler for $ARCHCI_ARCH lacks the C flag" >&2; exit 1; }
+		alias_file=/usr/share/devtools/setarch-aliases.d/$ARCHCI_ARCH
+		[[ -f $alias_file ]] || { echo linux64 >"$alias_file"; echo "    wrote $alias_file (linux64)"; }
+		if [[ -d arch/$ARCHCI_ARCH/qemu ]]; then
+			install -d -m 755 "/etc/archci/$ARCHCI_ARCH"
+			for f in arch/"$ARCHCI_ARCH"/qemu/*.conf; do
+				[[ -e /etc/archci/$ARCHCI_ARCH/${f##*/} ]] && continue
+				install -m 644 "$f" "/etc/archci/$ARCHCI_ARCH/"
+				echo "    wrote /etc/archci/$ARCHCI_ARCH/${f##*/} (chroot pacman.conf)"
+			done
+			for k in arch/"$ARCHCI_ARCH"/qemu/keys/*.asc; do
+				[[ -e $k ]] || continue
+				fpr=$(gpg --show-keys --with-colons "$k" 2>/dev/null | awk -F: '/^fpr/ { print $10; exit }')
+				pacman-key --list-keys "$fpr" >/dev/null 2>&1 && continue
+				echo "    trusting the $ARCHCI_ARCH repo key $fpr in the host pacman keyring ($k)"
+				pacman-key --add "$k" && pacman-key --lsign-key "$fpr"
+			done
+		else
+			echo "WARNING: no arch/$ARCHCI_ARCH/qemu/ configs; write /etc/archci/$ARCHCI_ARCH/extra.conf yourself" >&2
+		fi
+	fi
 	echo "==> worker: build user and directories"
 	getent passwd archci >/dev/null || useradd --system --home-dir /var/lib/archci-worker --shell /usr/bin/nologin archci
 	install -d -m 755 /var/lib/archci-worker /var/lib/archci-worker/jobs /var/lib/archci-worker/build
@@ -115,22 +178,26 @@ elif [[ $role == worker ]]; then
 		--export "archci-builder@${HOSTNAME%%.*}" >/etc/archci/builder_key.pub
 	echo "==> worker: systemd unit"
 	install -m 644 systemd/archci-worker@.service systemd/archci-build@.service "$unitdir/"
-	echo "==> worker: stream the journal to the master (systemd-journal-upload)"
-	source lib/archci-common.sh
-	install -d -m 755 /etc/systemd/journal-upload.conf.d
-	printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/etc/systemd/journal-upload.conf.d/archci.conf
 	systemctl daemon-reload
 	systemctl enable archci-worker@1.service
-	systemctl enable --now systemd-journal-upload.service
-	if [[ $ARCHCI_ARCH != "$(uname -m)" ]]; then
-		echo "WARNING: ARCHCI_ARCH=$ARCHCI_ARCH but this machine is $(uname -m); set ARCHCI_ARCH in /etc/archci/archci.conf" >&2
+	if [[ -n $ARCHCI_JOURNAL_URL ]]; then
+		echo "==> worker: stream the journal to the master (systemd-journal-upload to $ARCHCI_JOURNAL_URL)"
+		install -d -m 755 /etc/systemd/journal-upload.conf.d
+		printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/etc/systemd/journal-upload.conf.d/archci.conf
+		systemctl enable --now systemd-journal-upload.service
+	else
+		# ARCHCI_JOURNAL_URL="" : a worker outside the master's network (the
+		# journal port is plain HTTP and not public) keeps its journal local.
+		echo "==> worker: ARCHCI_JOURNAL_URL is empty, not streaming the journal"
+		systemctl disable --now systemd-journal-upload.service 2>/dev/null || true
+		rm -f /etc/systemd/journal-upload.conf.d/archci.conf
 	fi
 	cat <<-MSG
 
 	Worker installed (arch $ARCHCI_ARCH; the master must list it in ARCHCI_ARCHES). Next:
-	  1. Make sure "master" resolves to the master's private address (/etc/hosts),
-	     or change ARCHCI_MASTER and ARCHCI_JOURNAL_URL in /etc/archci/archci.conf
-	     and rerun this script.
+	  1. Make sure "master" resolves to the master's address (/etc/hosts), or
+	     change ARCHCI_MASTER in /etc/archci/archci.conf and rerun this script.
+	     Outside the master's private network set ARCHCI_JOURNAL_URL="" too.
 	  2. Authorize this worker's SSH key on the master (archci-authorize):
 	       $(cat /etc/archci/worker_key.pub)
 	  3. Trust this worker's BUILDER key on the signer: copy
