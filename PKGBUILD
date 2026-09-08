@@ -79,6 +79,8 @@ package_archci-master-git() {
   cd "$srcdir/$pkgbase"
   install -Dm644 systemd/systemd-journal-remote.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-remote.service.d/archci.conf"
+  install -Dm644 systemd/systemd-journal-remote.socket.d/archci.conf \
+    "$pkgdir/usr/lib/systemd/system/systemd-journal-remote.socket.d/archci.conf"
   install -Dm644 systemd/journal-remote.conf "$pkgdir/usr/lib/systemd/journal-remote.conf.d/archci.conf"
   # sshd reads worker keys from /etc/archci/authorized_keys; a hook reloads sshd
   install -Dm644 ssh/sshd_config.d/archci.conf "$pkgdir/etc/ssh/sshd_config.d/archci.conf"

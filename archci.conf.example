@@ -67,9 +67,12 @@ ARCHCI_STAGING_WARN=20
 # ssh destination of the master. The master droplet is named "master"; workers resolve
 # it via /etc/hosts (cloud-init writes it) or DO private DNS.
 ARCHCI_MASTER="archci@master"
-# Where systemd-journal-upload streams this worker's journal (journal-remote on
-# the master; plain HTTP, private network only). "" keeps the journal local.
-ARCHCI_JOURNAL_URL=http://master:19532
+# Where systemd-journal-upload streams this worker's journal. The default is
+# the master's journal-remote port reached through an ssh tunnel over the
+# worker key (archci-logging-remote.service, started with the worker); the
+# master listens for journals on loopback only, so this works from anywhere
+# the worker can ssh to the master. "" keeps the journal local.
+ARCHCI_JOURNAL_URL=http://127.0.0.1:19532
 ARCHCI_WORKER_KEY=/etc/archci/worker_key
 ARCHCI_WORKER_HOME=/var/lib/archci-worker
 # Unprivileged local user makepkg runs as inside the chroot.

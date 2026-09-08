@@ -84,8 +84,9 @@ if [[ $role == master ]]; then
 	systemctl reload sshd 2>/dev/null || true
 	echo "==> master: systemd timers"
 	install -m 644 systemd/archci-scan.* systemd/archci-reaper.* systemd/archci-stage.* "$unitdir/"
-	echo "==> master: receive worker journals (systemd-journal-remote on port 19532)"
+	echo "==> master: receive worker journals (systemd-journal-remote on loopback, through the workers' ssh tunnels)"
 	install -D -m 644 systemd/systemd-journal-remote.service.d/archci.conf "$unitdir/systemd-journal-remote.service.d/archci.conf"
+	install -D -m 644 systemd/systemd-journal-remote.socket.d/archci.conf "$unitdir/systemd-journal-remote.socket.d/archci.conf"
 	install -D -m 644 systemd/journal-remote.conf /etc/systemd/journal-remote.conf.d/archci.conf
 	systemctl daemon-reload
 	systemctl enable --now archci-scan.timer archci-reaper.timer archci-stage.timer
@@ -110,7 +111,7 @@ if [[ $role == master ]]; then
 	     (The signer needs no SSH access to the master; it uses R2.)
 	  4. Watch:  archci-status,  journalctl -u archci-stage,  journalctl -t archci-job -f
 	     Worker journals:  journalctl -D /var/log/journal/remote -f
-	  5. Keep ports 19532 (journal upload) and 22 reachable from the VPC only.
+	  5. Only port 22 needs to reach the master: jobs and journals travel over ssh.
 	MSG
 elif [[ $role == worker ]]; then
 	source lib/archci-common.sh
@@ -185,9 +186,8 @@ elif [[ $role == worker ]]; then
 	Worker installed (arch $ARCHCI_ARCH; the master must list it in ARCHCI_ARCHES). Next:
 	  1. Make sure "master" resolves to the master's address (/etc/hosts), or
 	     change ARCHCI_MASTER in /etc/archci/archci.conf and rerun this script.
-	     ARCHCI_JOURNAL_URL: the journal streams to the master (through the ssh
-	     tunnel of archci-logging-remote when it is http://127.0.0.1:19532);
-	     "" keeps it local.
+	     The journal streams to the master through an ssh tunnel by default;
+	     ARCHCI_JOURNAL_URL="" keeps it local.
 	  2. Authorize this worker's SSH key on the master (archci-authorize):
 	       $(cat /etc/archci/worker_key.pub)
 	  3. Trust this worker's BUILDER key on the signer: copy

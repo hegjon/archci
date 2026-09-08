@@ -287,7 +287,7 @@ What a package cannot ship as a file happens on first start: a worker's
 streaming, the master's sshd is reloaded by a pacman hook, the signer's
 keyrings are directories the package creates. What remains is per-site:
 keys to authorize, R2 credentials, and enabling units, listed per role
-below. The signer needs only R2 access; the master and workers share a VPC.
+below. The signer needs only R2 access; workers need only ssh to the master.
 
 `install.sh master|worker|signer` installs the same files straight from a
 source checkout into `/usr/local` for development; it is not packaged.
@@ -455,11 +455,10 @@ off (qemu has no Landlock or seccomp); and the Ports repo key
 `archci-ports-aarch64`, which the package's install script populates into
 the host keyring because the chroot inherits the host's trust. The
 `archci-worker-aarch64@N` instance runs next to the machine's own
-`archci-worker@N` and is known to the master as `<host>-aarch64-N`. Outside
-the master's private network add the master's public address as `master` to
-`/etc/hosts` and set `ARCHCI_JOURNAL_URL` to `http://127.0.0.1:19532` for
-the ssh tunnel (see "Monitoring workers") or `""` for no streaming. Expect
-the first build to spend a while creating `/var/lib/archbuild/extra-aarch64`.
+`archci-worker@N` and is known to the master as `<host>-aarch64-N`. A
+machine outside the VPC only needs the master's public address as `master`
+in `/etc/hosts`: jobs and journal both travel over ssh. Expect the first
+build to spend a while creating `/var/lib/archbuild/extra-aarch64`.
 From a source checkout, `install.sh worker --arch aarch64` does the same by
 hand and makes `archci-worker@N` itself build aarch64.
 
@@ -557,32 +556,30 @@ verifies against the imported key on download, not from that field.)
 ## Monitoring workers from the master
 
 Workers stream the `archci` journal namespace, and nothing else of their
-journal, to the master with `systemd-journal-upload --namespace=archci`
-(configured on each worker start by `archci-worker-setup` from
-`ARCHCI_JOURNAL_URL`, default `http://master:19532`; `""` streams nothing).
-The master receives it with `systemd-journal-remote`
-over plain HTTP on the VPC and keeps one file per worker under
-`/var/log/journal/remote/`, capped by `journal-remote.conf` (2 GB, 200 files).
-Same direction as the job protocol: workers only need the master's name, and
-the last lines of a worker that died are already on the master.
-
-A worker outside the private network cannot reach the port, so it streams
-through an ssh tunnel instead: `ARCHCI_JOURNAL_URL=http://127.0.0.1:19532`
-makes `archci-worker-setup` let `archci-logging-remote.service` start, which holds
-`ssh -N -L 127.0.0.1:19532:127.0.0.1:19532 archci@master` open with the
-worker key. The master allows that key to forward to this one port and
-nothing else (`archci-authorize` writes `port-forwarding,permitopen=...`
+journal, to the master with `systemd-journal-upload --namespace=archci`,
+through an ssh tunnel over the worker key: `archci-logging-remote.service`
+holds `ssh -N -L 127.0.0.1:19532:127.0.0.1:19532 archci@master` open, and
+the upload goes to `http://127.0.0.1:19532`, the default `ARCHCI_JOURNAL_URL`
+(`""` streams nothing; `archci-worker-setup` configures both on every worker
+start). The master's `systemd-journal-remote` listens on loopback only (the
+master package's socket drop-in), so the plain-HTTP journal port is never
+exposed, inside the VPC or out, and a worker needs nothing but ssh to the
+master, from anywhere. The master allows a worker key to forward to this one
+port and nothing else (`archci-authorize` writes `port-forwarding,permitopen=...`
 after `restrict`, and the sshd drop-in adds `PermitOpen`), and with `-N` no
-session is opened, so the forced command never runs. Tunneled workers all
-arrive from 127.0.0.1, so they share one `remote-127.0.0.1.journal` file
-instead of one each; filter them with `_HOSTNAME=`.
+session is opened, so the forced command never runs. Same direction as the
+job protocol, and the last lines of a worker that died are already on the
+master. journal-remote keeps the received journals under
+`/var/log/journal/remote/`, capped by `journal-remote.conf` (2 GB, 200
+files); since every worker arrives from 127.0.0.1 they share one
+`remote-127.0.0.1.journal` file, so select a worker with `_HOSTNAME=`.
 
 ```
 journalctl -D /var/log/journal/remote -f                     all workers, live
 journalctl -D /var/log/journal/remote -u 'archci-worker@*'   the worker loops only
 journalctl -D /var/log/journal/remote -u 'archci-build@*'    every build's output
 journalctl -D /var/log/journal/remote -u archci-build@core-linux-7.2.3.arch1-2-a1
-journalctl -D /var/log/journal/remote _HOSTNAME=build-a      one worker
+journalctl -D /var/log/journal/remote _HOSTNAME=worker1      one worker
 journalctl --merge -f                                        master and workers together
 ```
 
@@ -590,18 +587,6 @@ Because full build output goes through journald and journal-upload, size the
 master's `journal-remote.conf` limits and the workers' `journald@archci.conf`
 `SystemMaxUse` for it; large builds such as browsers produce hundreds of
 megabytes of log.
-
-There is no authentication on the plain-HTTP listener, so bind it to the
-master's VPC address only, with a drop-in for the socket:
-
-```
-# /etc/systemd/system/systemd-journal-remote.socket.d/vpc.conf
-[Socket]
-ListenStream=
-ListenStream=<private ip>:19532
-```
-
-and keep port 19532 closed in the Digital Ocean cloud firewall.
 
 ## Operating it
 
