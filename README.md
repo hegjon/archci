@@ -282,6 +282,8 @@ shared one:
 - `archci-master-git`, `archci-worker-git`, `archci-signer-git`: the role's
   scripts as `/usr/bin` commands, its units in `/usr/lib/systemd/system`,
   its `/var/lib/archci*` directories (tmpfiles), and its dependencies
+- `archci-worker-qemu-aarch64-git`: add-on for an x86_64 worker that builds
+  aarch64 under qemu user-mode emulation (see "Building for arm64")
 
 `install.sh` is not part of them; with a role package installed, do the rest
 of that role's setup by hand, following the role sections below: for a
@@ -419,7 +421,13 @@ farm builds it once merged. Until then the package stays in `queue/failed`.
 **An emulated worker instead.** An x86_64 machine can build aarch64 through
 QEMU user-mode emulation. It is 5 to 20 times slower per core and some test
 suites break under it, so it suits a big desktop or a smoke test rather than
-a fleet, but it needs no ARM hardware:
+a fleet, but it needs no ARM hardware. With the packages, install
+`archci-worker-qemu-aarch64-git` on top of the worker package: it ships the
+binfmt registration, the setarch alias, the chroot pacman config and the
+Ports repo key as a pacman keyring (its install script runs `pacman-key
+--populate archci-ports-aarch64` and restarts `systemd-binfmt`); then set
+`ARCHCI_ARCH=aarch64` in `/etc/archci/archci.conf` and restart the workers.
+From the source tree:
 
 ```
 ./install.sh worker --arch aarch64

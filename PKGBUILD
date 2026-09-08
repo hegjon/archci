@@ -1,3 +1,4 @@
+# shellcheck shell=bash disable=SC2164  # makepkg runs this with set -e
 # Maintainer: Jonny Heggheim <hegjon@gmail.com>
 #
 # Split package: archci-git holds what every role shares (lib/, the config,
@@ -8,14 +9,14 @@
 # packaged.
 
 pkgbase=archci-git
-pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git)
+pkgname=(archci-git archci-master-git archci-worker-git archci-signer-git archci-worker-qemu-aarch64-git)
 pkgver=r0.g0000000
 pkgrel=1
 pkgdesc='Headless build farm for Arch Linux packages: builds a PKGBUILD repository into a signed pacman repository'
 arch=(any)
 url='https://github.com/hegjon/archci'
 license=(MIT)
-makedepends=(git)
+makedepends=(git gnupg)
 source=("$pkgbase::git+https://github.com/hegjon/archci.git")
 sha256sums=(SKIP)
 
@@ -97,6 +98,30 @@ package_archci-worker-git() {
   install -Dm644 systemd/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
   (cd arch && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/arch/{}" \;)
+}
+
+# Add-on for an x86_64 worker: build aarch64 under qemu user-mode emulation.
+# What "install.sh worker --arch aarch64" sets up by hand, as files: the binfmt
+# registration with the C flag, the devtools setarch alias, the chroot
+# pacman.conf pointed at the Arch Linux Ports aarch64 repo, and that repo's key
+# as a pacman keyring the .install script populates. ARCHCI_ARCH=aarch64 in
+# archci.conf switches the worker over (see README "Building for arm64").
+package_archci-worker-qemu-aarch64-git() {
+  pkgdesc='Headless build farm for Arch Linux packages (worker add-on: build aarch64 on x86_64 under qemu user-mode emulation)'
+  depends=(archci-worker-git qemu-user-static qemu-user-static-binfmt)
+  install=archci-worker-qemu-aarch64.install
+  backup=(etc/binfmt.d/qemu-aarch64-static.conf etc/archci/aarch64/extra.conf)
+  provides=(archci-worker-qemu-aarch64)
+  conflicts=(archci-worker-qemu-aarch64)
+
+  cd "$srcdir/$pkgbase/arch/aarch64/qemu"
+  install -Dm644 binfmt.d/qemu-aarch64-static.conf "$pkgdir/etc/binfmt.d/qemu-aarch64-static.conf"
+  install -Dm644 setarch-aliases.d/aarch64 "$pkgdir/usr/share/devtools/setarch-aliases.d/aarch64"
+  install -Dm644 extra.conf "$pkgdir/etc/archci/aarch64/extra.conf"
+  install -d "$pkgdir/usr/share/pacman/keyrings"
+  GNUPGHOME=$srcdir/gnupg gpg --dearmor <keys/arch-linux-ports-aarch64.asc \
+    >"$pkgdir/usr/share/pacman/keyrings/archci-ports-aarch64.gpg"
+  install -Dm644 keys/arch-linux-ports-aarch64-trusted "$pkgdir/usr/share/pacman/keyrings/archci-ports-aarch64-trusted"
 }
 
 package_archci-signer-git() {

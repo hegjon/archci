@@ -126,36 +126,40 @@ elif [[ $role == worker ]]; then
 		# host keyring must trust since mkarchroot copies host trust into the chroot.
 		echo "==> worker: $ARCHCI_ARCH on a $(uname -m) host: qemu user-mode emulation"
 		pacman -S --needed --noconfirm qemu-user-static qemu-user-static-binfmt
-		# The stock registration has flags F and P. Add C so setuid binaries in
-		# the chroot keep their privileges (makepkg runs "sudo pacman" to install
-		# build dependencies; without C, sudo sees a non-root effective uid).
-		bf=/usr/lib/binfmt.d/qemu-$ARCHCI_ARCH-static.conf
-		if [[ -f $bf ]] && ! grep -qE ':[A-Z]*C[A-Z]*$' "/etc/binfmt.d/qemu-$ARCHCI_ARCH-static.conf" 2>/dev/null; then
-			install -d -m 755 /etc/binfmt.d
-			sed -E 's/:([A-Z]*)$/:\1C/' "$bf" >"/etc/binfmt.d/qemu-$ARCHCI_ARCH-static.conf"
-			echo "    wrote /etc/binfmt.d/qemu-$ARCHCI_ARCH-static.conf (flags +C for setuid in the chroot)"
-		fi
+		# The same files the archci-worker-qemu-<arch> package installs (PKGBUILD):
+		# the stock binfmt registration has flags F and P; the shipped copy adds C
+		# so setuid binaries in the chroot keep their privileges (makepkg runs
+		# "sudo pacman" to install build dependencies; without C, sudo sees a
+		# non-root effective uid). arch-nspawn runs "setarch $CARCH", which
+		# rejects a foreign name unless a devtools alias maps it.
+		qemu_dir=arch/$ARCHCI_ARCH/qemu
+		[[ -d $qemu_dir ]] || { echo "no $qemu_dir/ configs for emulating $ARCHCI_ARCH" >&2; exit 1; }
+		for f in "$qemu_dir"/binfmt.d/*.conf; do
+			[[ -e $f ]] || continue
+			install -D -m 644 "$f" "/etc/binfmt.d/${f##*/}"
+			echo "    wrote /etc/binfmt.d/${f##*/} (flags +C for setuid in the chroot)"
+		done
 		systemctl restart systemd-binfmt
 		[[ -f /proc/sys/fs/binfmt_misc/qemu-$ARCHCI_ARCH ]] || { echo "no binfmt handler for $ARCHCI_ARCH" >&2; exit 1; }
 		grep -qE '^flags: .*C' "/proc/sys/fs/binfmt_misc/qemu-$ARCHCI_ARCH" || { echo "binfmt handler for $ARCHCI_ARCH lacks the C flag" >&2; exit 1; }
-		alias_file=/usr/share/devtools/setarch-aliases.d/$ARCHCI_ARCH
-		[[ -f $alias_file ]] || { echo linux64 >"$alias_file"; echo "    wrote $alias_file (linux64)"; }
-		if [[ -d arch/$ARCHCI_ARCH/qemu ]]; then
+		for f in "$qemu_dir"/setarch-aliases.d/*; do
+			[[ -e $f ]] || continue
+			install -D -m 644 "$f" "/usr/share/devtools/setarch-aliases.d/${f##*/}"
+		done
+		if [[ -d $qemu_dir ]]; then
 			install -d -m 755 "/etc/archci/$ARCHCI_ARCH"
-			for f in arch/"$ARCHCI_ARCH"/qemu/*.conf; do
+			for f in "$qemu_dir"/*.conf; do
 				[[ -e /etc/archci/$ARCHCI_ARCH/${f##*/} ]] && continue
 				install -m 644 "$f" "/etc/archci/$ARCHCI_ARCH/"
 				echo "    wrote /etc/archci/$ARCHCI_ARCH/${f##*/} (chroot pacman.conf)"
 			done
-			for k in arch/"$ARCHCI_ARCH"/qemu/keys/*.asc; do
+			for k in "$qemu_dir"/keys/*.asc; do
 				[[ -e $k ]] || continue
 				fpr=$(gpg --show-keys --with-colons "$k" 2>/dev/null | awk -F: '/^fpr/ { print $10; exit }')
 				pacman-key --list-keys "$fpr" >/dev/null 2>&1 && continue
 				echo "    trusting the $ARCHCI_ARCH repo key $fpr in the host pacman keyring ($k)"
 				pacman-key --add "$k" && pacman-key --lsign-key "$fpr"
 			done
-		else
-			echo "WARNING: no arch/$ARCHCI_ARCH/qemu/ configs; write /etc/archci/$ARCHCI_ARCH/extra.conf yourself" >&2
 		fi
 	fi
 	echo "==> worker: build user and directories"

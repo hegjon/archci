@@ -12,7 +12,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; rc=1; }
 
 # Collect scripts by interpreter from the shebang (executables + known suffixes).
 mapfile -t files < <(find bin lib master worker signer arch test install.sh -type f 2>/dev/null | sort)
-bash_files=() ruby_files=()
+bash_files=(PKGBUILD *.install) ruby_files=()   # makepkg sources these as bash
 for f in "${files[@]}"; do
 	case $(head -1 "$f") in
 		*bash*|*/sh) bash_files+=("$f") ;;
