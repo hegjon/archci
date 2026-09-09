@@ -161,8 +161,12 @@ def frame(journal)
   # PHASE and the last output line from the journal (journal_tails), '-'
   # while it has not been read: the first frame, or --no-journal
   tails = journal_tails(journal, running.map { |j| [unit_name(j), j['claimed']] })
-  # by worker id, digits compared as numbers (worker-2 before worker-10)
-  running.sort_by { |j| j['worker'].to_s.gsub(/\d+/) { |d| d.rjust(6, '0') } }.each do |j|
+  # by host, its native workers first, then per emulated arch, instance
+  # numbers as numbers: host-1, host-3, host-aarch64-1, host-riscv64-2
+  running.sort_by do |j|
+    host, port = Archci.worker_host(j['worker'].to_s)
+    [host, port ? 1 : 0, port.to_s, j['worker'].to_s[/(\d+)\z/, 1].to_i]
+  end.each do |j|
     since = j['claimed'] ? now - Time.iso8601(j['claimed']) : j['heartbeat_age_s']
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
