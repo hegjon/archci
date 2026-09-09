@@ -157,7 +157,7 @@ while true; do
 		rc=0; master heartbeat "$job_id" || rc=$?
 		if (( rc == 255 )); then
 			(( try == 1 )) && archci_log "master unreachable, keeping $job_id's results until it is back"
-			sleep 30; continue
+			sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
 		elif (( rc )); then
 			archci_log "$job_id is no longer ours; dropping its results"; dropped=1; break
 		fi
@@ -166,14 +166,14 @@ while true; do
 				uploaded=1
 			else
 				archci_log "upload of $job_id failed (try $try)"
-				sleep 30; continue
+				sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
 			fi
 		fi
 		rc=0; master report "$job_id" "$status" || rc=$?
 		(( rc == 0 )) && { reported=1; break; }
 		(( rc == 255 )) || { archci_log "the master refused the report for $job_id; dropping it"; dropped=1; break; }
 		archci_log "could not report $job_id (try $try)"
-		sleep 30
+		sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"
 	done
 	(( reported && try > 1 )) && archci_log "$job_id delivered after $try tries"
 	rm -rf "$jobdir"

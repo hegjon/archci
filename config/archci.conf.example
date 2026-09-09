@@ -54,7 +54,7 @@ ARCHCI_R2_RELEASE=""
 ARCHCI_RCLONE_CONFIG=/etc/archci/rclone.conf
 # Master: the released repo's public URL, as clients use it, e.g.
 # "https://pub-xxxx.r2.dev". archci-signer-status shows the released
-# databases' age and size from it in archci-top/archci-status.
+# databases' age and size from it in archci-top.
 ARCHCI_RELEASE_URL=""
 
 ## Signing (see README "Signing") --------------------------------------------
@@ -102,4 +102,6 @@ ARCHCI_IGNOREARCH=1
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
 ARCHCI_CHROOT_UPDATE_MINUTES=60
 ARCHCI_IDLE_SLEEP=60
+# Between tries at delivering a finished build while the master is unreachable.
+ARCHCI_DELIVERY_RETRY_SECONDS=30
 ARCHCI_HEARTBEAT_SECONDS=60

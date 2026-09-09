@@ -98,6 +98,8 @@ archci_load_conf
 # 0 leaves only the unit's TimeoutStartSec.
 : "${ARCHCI_BUILD_IDLE_MINUTES:=30}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
+# Between tries at delivering a finished build while the master is unreachable.
+: "${ARCHCI_DELIVERY_RETRY_SECONDS:=30}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=60}"
 export "${!ARCHCI_@}"
 
