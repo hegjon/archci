@@ -82,3 +82,24 @@ file, which is how the tests run without network or root. Run them with
   report, reap, forced ssh command, rrsync upload), the two-stage signing gate
   with real gpg keys, and the R2 hand-off (master stage, signer verify, reject,
   release-sign, publish, drain) against a local rclone stand-in, in a temp dir.
+
+## Releasing
+
+A release is a tag `vX.Y.Z` on this repository plus the matching release
+PKGBUILD in the PKGBUILD repository (`pkgbuilds/archci/` in the fork), which
+the farm then builds and publishes like any other package. The release
+PKGBUILD is generated from the split `PKGBUILD` here, never edited:
+
+```
+git tag -a vX.Y.Z -m '...' && git push origin master vX.Y.Z
+tools/release-pkgbuild X.Y.Z /path/to/omarchy-pkgs/pkgbuilds/archci
+(cd /path/to/omarchy-pkgs && git add pkgbuilds/archci && git commit -m 'archci X.Y.Z' && git push)
+```
+
+The generator fetches the tag's tarball from GitHub for its checksum (push
+the tag first), rewrites the -git names, drops `pkgver()`, and copies the
+`.install` files; every rewrite checks that it matched and the result must
+pass `makepkg --printsrcinfo`, so a change to the split PKGBUILD the rules do
+not cover fails there. The master picks the fork commit up at its next scan
+(`systemctl start archci-scan` to hurry it), and `pacman -Syu` on each host
+installs the release once the signer has published it.

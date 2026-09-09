@@ -226,6 +226,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 
 ```
 bin/      archci: the entry point, `archci <name>` runs archci-<name> of an installed role
+tools/    release-pkgbuild: writes the fork's release PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
 worker/   archci-worker, archci-build, archci-worker-setup
