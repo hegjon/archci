@@ -1,0 +1,52 @@
+#!/bin/bash
+# archci-housekeeping -- the queue's 5-minute pass, run by
+# archci-housekeeping.timer as the archci user; not a command (it lives in
+# master/internal/, which `archci <name>` does not reach). It requeues
+# running jobs whose worker stopped heartbeating (ARCHCI_STALE_MINUTES),
+# drops queued and failed jobs a newer commit of their package supersedes,
+# requeues failed jobs whose retry delay is over (ARCHCI_RETRY_MINUTES, up
+# to ARCHCI_MAX_ATTEMPTS), and prunes done/ (ARCHCI_DONE_KEEP_DAYS).
+set -euo pipefail
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+source "$here/../../lib/archci-common.sh"
+source "$here/../../lib/archci-queue.sh"
+
+n=0
+now=$(date +%s)
+# Current commit of every package, to drop jobs a newer commit supersedes.
+declare -A current=()
+while read -r name _ c _; do
+	[[ -n $c ]] && current[$name]=$c
+done < <("$ARCHCI_MASTER_DIR/archci-pkgs" 2>/dev/null || true)
+lock_queue
+shopt -s nullglob
+for file in "$Q_RUNNING"/*.job; do
+	age=$(( now - $(stat -c %Y "$file") ))
+	(( age >= ARCHCI_STALE_MINUTES * 60 )) || continue
+	archci_read_job "$file" || continue
+	archci_log "$job_id: no heartbeat from $job_worker for $((age / 60)) min, requeueing"
+	requeue_file "$file"
+	(( ++n ))
+done
+# A newer commit of the package supersedes queued and failed jobs; claim
+# picks the new one up if its version is still not the built one.
+for file in "$Q_PENDING"/*.job "$Q_FAILED"/*.job; do
+	archci_read_job "$file" || continue
+	commit=${current[$job_pkgbase]:-}
+	if [[ -n $commit && $commit != "$job_commit" ]]; then
+		archci_log "$job_id: superseded by commit ${commit:0:12}, dropping"
+		rm -f "$file"
+	fi
+done
+for file in "$Q_FAILED"/*.job; do
+	archci_read_job "$file" || continue
+	(( job_attempt < ARCHCI_MAX_ATTEMPTS )) || continue
+	age=$(( now - $(stat -c %Y "$file") ))
+	(( age >= ARCHCI_RETRY_MINUTES * 60 )) || continue
+	archci_log "$job_id: retrying (attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS)"
+	requeue_file "$file"
+	(( ++n ))
+done
+shopt -u nullglob
+find "$Q_DONE" -name '*.job' -mtime +"$ARCHCI_DONE_KEEP_DAYS" -delete
+(( n == 0 )) || archci_log "requeued $n job(s)"

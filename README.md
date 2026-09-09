@@ -36,7 +36,7 @@ flowchart LR
   subgraph MASTER["master (holds no key)"]
     SCAN["archci-scan: pull + index"]
     JOB["archci-job: claim / report (ssh)"]
-    KEEP["archci-job housekeeping: stale / retry"]
+    KEEP["archci-housekeeping: stale / retry"]
     STAGE["archci-stage: pool to staging"]
   end
   subgraph WORKER["worker x N"]
@@ -232,8 +232,9 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ```
 bin/      archci: the entry point, `archci <name>` runs archci-<name> of an installed role
 tools/    release-pkgbuild: writes the fork's release PKGBUILD for a tag from PKGBUILD here (developers)
-lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
+lib/      archci-common.sh, archci-queue.sh (bash) and archci.rb (ruby): config, the job queue, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
+          internal/archci-housekeeping: the queue's timer pass, not a command
 worker/   archci-worker, archci-build, archci-worker-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
 arch/     chroot configs for arches devtools ships none for (aarch64/makepkg.conf.sed, qemu/)

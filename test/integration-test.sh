@@ -13,6 +13,7 @@ export ARCHCI_MAX_ATTEMPTS=2 ARCHCI_STALE_MINUTES=0 ARCHCI_RETRY_MINUTES=0 JOURN
 job=$here/../master/archci-job
 scan=$here/../master/archci-scan
 next=$here/../master/archci-next
+housekeeping=$here/../master/internal/archci-housekeeping
 status=$here/../master/archci-status
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # mkpkg DIR NAME VERSION [ARCH] -- smallest thing repo-add accepts as a package
@@ -108,14 +109,14 @@ id=$(sed -n 's/^id=//p' < <("$job" claim worker-2 x86_64))
 "$job" report "$id" failure
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
 grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be final yet"
-"$job" housekeeping
+"$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "housekeeping should have requeued"
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "attempt kept across requeue"
 id2=$(sed -n 's/^id=//p' < <("$job" claim worker-2 x86_64))
 [[ $id2 == "$id" ]] || fail "retry should be claimed first (prio 5 vs linux prio 5, older ts)"
 "$job" report "$id" failure
 grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final after max attempts"
-"$job" housekeeping
+"$housekeeping"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "final job must stay failed"
 [[ $("$next") == "5 omarchy x86_64 linux "* ]] || fail "a final failure at the same commit must be skipped"
 
@@ -129,7 +130,7 @@ echo "--- stale running job is requeued by housekeeping; abandoned does not coun
 "$job" retry "$id"
 id=$(sed -n 's/^id=//p' < <("$job" claim worker-4 x86_64))
 touch -d '1 hour ago' "$ARCHCI_HOME/queue/running/$id.job"
-"$job" housekeeping
+"$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "stale job not requeued"
 id=$(sed -n 's/^id=//p' < <("$job" claim worker-4 x86_64))
 "$job" report "$id" abandoned
@@ -140,7 +141,7 @@ mkpkgbuild linux 7.2.3.arch1-2 x86_64 '{"source": "arch", "note": "metadata only
 mkpkgbuild libsigc++ 2.12.3-1
 commit_pkgs bump
 "$scan"
-"$job" housekeeping
+"$housekeeping"
 ls "$ARCHCI_HOME/queue/pending" | grep -q 'linux,7.2.3.arch1-2' && fail "superseded pending job not dropped"
 (( $(ls "$ARCHCI_HOME/queue/failed" | wc -l) == 0 )) || fail "superseded final failure not dropped"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ 2.12.3-1 $(pkgcommit libsigc++) extra" ]] || fail "new libsigc++ version should be next: $("$next")"

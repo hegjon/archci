@@ -22,79 +22,14 @@
 #                             PKGBUILD repository clone), priority P (default
 #                             0), for ARCH (default ARCHCI_ARCH; "any" for an
 #                             arch-independent package)
-#   housekeeping              requeue stale running jobs and due retries, prune done/
 #
-# Jobs are files; moving them between queue/{pending,running,done,failed} is
-# the whole state machine. The backlog is never stored: pending/ only holds
-# manual enqueues and retries. Everything that touches the queue takes queue.lock.
+# The queue itself (files under queue/, moved between pending, running, done
+# and failed) is lib/archci-queue.sh; its periodic pass, requeueing stale
+# and due jobs, is master/internal/archci-housekeeping (a timer, not a
+# command).
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
-
-lock_queue() {
-	exec 9>"$ARCHCI_HOME/lock/queue.lock"
-	flock 9
-}
-
-# Move FILE to DIR, dropping bookkeeping fields and appending EXTRA lines. A
-# job that ends (done/, failed/) keeps its last heartbeat stats and when that
-# beat arrived (the file's mtime): the host's last known state for the UIs.
-rewrite_job() {
-	local file=$1 dest=$2 tmp beat=() drop
-	drop="worker|claimed|status|finished|final|heartbeat|$(archci_stats_re)"
-	shift 2
-	if [[ $dest == "$Q_DONE"/* || $dest == "$Q_FAILED"/* ]]; then
-		drop='worker|claimed|status|finished|final|heartbeat'
-		grep -q '^load=' "$file" && beat=("heartbeat=$(date -u -r "$file" +%FT%TZ)")
-	fi
-	tmp=$dest.tmp
-	{
-		grep -Ev "^($drop)=" "$file"
-		printf '%s\n' "$@" "${beat[@]}"
-	} >"$tmp"
-	mv "$tmp" "$dest"
-	[[ $file == "$dest" ]] || rm -f "$file"
-}
-
-set_attempt() {  # set_attempt FILE N  (in place)
-	local file=$1 n=$2 tmp=$1.tmp
-	{ grep -v '^attempt=' "$file"; printf 'attempt=%d\n' "$n"; } >"$tmp"
-	mv "$tmp" "$file"
-}
-
-requeue_file() {  # requeue_file FILE  (lock held)
-	local file=$1 name=${1##*/}
-	rewrite_job "$file" "$Q_PENDING/$name"
-	rm -rf "${ARCHCI_HOME:?}/incoming/${name%.job}"
-}
-
-# write_job DEST PRIO REPO ARCH PKGBASE VERSION COMMIT PROFILE -> prints the file name
-write_job() {
-	local dest=$1 prio=$2 repo=$3 arch=$4 pkgbase=$5 version=$6 commit=$7 profile=$8 id
-	id="$prio-$(date +%s)-$repo,$pkgbase,$version,$arch"
-	archci_valid_id "$id" || archci_die "cannot form a valid job id for $repo/$pkgbase $version $arch"
-	cat >"$dest/$id.job.tmp" <<-JOB
-		id=$id
-		repo=$repo
-		arch=$arch
-		pkgbase=$pkgbase
-		version=$version
-		commit=$commit
-		profile=$profile
-		attempt=0
-		created=$(archci_now)
-	JOB
-	mv "$dest/$id.job.tmp" "$dest/$id.job"
-	printf '%s\n' "$id.job"
-}
-
-find_job() {  # find_job ID DIR... -> path
-	local id=$1 d
-	shift
-	for d in "$@"; do
-		[[ -f $d/$id.job ]] && { printf '%s\n' "$d/$id.job"; return 0; }
-	done
-	return 1
-}
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-queue.sh"
 
 # ---------------------------------------------------------------------------
 cmd_claim() {
@@ -268,49 +203,6 @@ cmd_enqueue() {
 	archci_log "enqueued ${name%.job}"
 }
 
-cmd_housekeeping() {
-	local now file age commit n=0
-	now=$(date +%s)
-	# Current commit of every package, to drop jobs a newer commit supersedes.
-	local -A current=()
-	local name c
-	while read -r name _ c _; do
-		[[ -n $c ]] && current[$name]=$c
-	done < <("$ARCHCI_MASTER_DIR/archci-pkgs" 2>/dev/null || true)
-	lock_queue
-	shopt -s nullglob
-	for file in "$Q_RUNNING"/*.job; do
-		age=$(( now - $(stat -c %Y "$file") ))
-		(( age >= ARCHCI_STALE_MINUTES * 60 )) || continue
-		archci_read_job "$file" || continue
-		archci_log "$job_id: no heartbeat from $job_worker for $((age / 60)) min, requeueing"
-		requeue_file "$file"
-		(( ++n ))
-	done
-	# A newer commit of the package supersedes queued and failed jobs; claim
-	# picks the new one up if its version is still not the built one.
-	for file in "$Q_PENDING"/*.job "$Q_FAILED"/*.job; do
-		archci_read_job "$file" || continue
-		commit=${current[$job_pkgbase]:-}
-		if [[ -n $commit && $commit != "$job_commit" ]]; then
-			archci_log "$job_id: superseded by commit ${commit:0:12}, dropping"
-			rm -f "$file"
-		fi
-	done
-	for file in "$Q_FAILED"/*.job; do
-		archci_read_job "$file" || continue
-		(( job_attempt < ARCHCI_MAX_ATTEMPTS )) || continue
-		age=$(( now - $(stat -c %Y "$file") ))
-		(( age >= ARCHCI_RETRY_MINUTES * 60 )) || continue
-		archci_log "$job_id: retrying (attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS)"
-		requeue_file "$file"
-		(( ++n ))
-	done
-	shopt -u nullglob
-	find "$Q_DONE" -name '*.job' -mtime +"$ARCHCI_DONE_KEEP_DAYS" -delete
-	(( n == 0 )) || archci_log "requeued $n job(s)"
-}
-
 # ---------------------------------------------------------------------------
 cmd=${1:-}
 shift || true
@@ -321,6 +213,5 @@ case $cmd in
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
 	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; cmd_retry "$1" ;;
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
-	housekeeping) cmd_housekeeping ;;
 	*) sed -n '2,18p' "$0" >&2; exit 2 ;;
 esac
