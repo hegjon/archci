@@ -170,10 +170,11 @@ archci_read_job() {
 archci_worker_stats() {
 	local load total avail used=0 disk vendor
 	read -r load _ </proc/loadavg
+	# memory and chroot disk in use, in percent with one decimal
 	total=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
 	avail=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
-	(( total > 0 )) && used=$(( (total - avail) * 100 / total ))
-	disk=$(df --output=pcent "$ARCHCI_CHROOTS" 2>/dev/null | tail -1 | tr -dc 0-9)
+	(( total > 0 )) && used=$(awk -v t="$total" -v a="$avail" 'BEGIN { printf "%.1f", (t - a) * 100 / t }')
+	disk=$(df --output=used,size "$ARCHCI_CHROOTS" 2>/dev/null | awk 'NR == 2 && $2 > 0 { printf "%.1f", $1 * 100 / $2 }')
 	# who made the machine (DMI: "DigitalOcean", "AsrockRack"...), for the hosts table
 	vendor=$(tr -c 'A-Za-z0-9.-' '-' </sys/class/dmi/id/sys_vendor 2>/dev/null | sed -E 's/-+$//; s/^-+//' | cut -c1-32)
 	printf 'load=%s mem=%s disk=%s cpus=%s%s\n' "$load" "$used" "${disk:-0}" "$(nproc)" "${vendor:+ vendor=$vendor}"
