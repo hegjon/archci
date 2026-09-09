@@ -71,10 +71,19 @@ file, which is how the tests run without network or root. Run them with
 
 - `test/lint-test.sh` — `bash -n` and `ruby -c` on every script, plus
   `shellcheck` when installed.
-- `test/integration-test.sh` — the whole master side (scan, claim, heartbeat,
-  report, housekeeping, forced ssh command, rrsync upload), the two-stage signing gate
-  with real gpg keys, and the R2 hand-off (master stage, signer verify, reject,
-  release-sign, publish, drain) against a local rclone stand-in, in a temp dir.
+- `test/scan-test.sh`, `queue-test.sh`, `multiarch-test.sh` — the master side
+  on a throwaway state directory (`test/fixture.sh`): scan and the next-package
+  pick, claim, heartbeat, report, retries, housekeeping, `archci top`, and more
+  than one architecture.
+- `test/access-test.sh` — archci-authorize and the forced ssh command with
+  its rrsync upload. `test/cli-test.sh` — the `archci` entry point and its
+  bash completion.
+- `test/signer-test.sh` — the two-stage signing gate with real gpg keys and
+  the R2 hand-off (master stage, signer verify, reject, release-sign, publish,
+  drain) against a local rclone stand-in.
+- `test/worker-test.sh` — archci-worker end to end with ssh, systemctl and the
+  build faked: a normal job, a master outage, self-reload. `pool-test.sh`,
+  `watchdog-test.sh` and `config-test.sh` cover one function or file each.
 
 ## Releasing
 
