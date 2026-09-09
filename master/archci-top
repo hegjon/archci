@@ -44,6 +44,12 @@ def elapsed(seconds)
   format('%dm%02ds', s / 60, s % 60)
 end
 
+# the ELAPSED column: hh:mm:ss (hours keep counting past a day: 26:03:04)
+def hms(seconds)
+  s = seconds.to_i
+  format('%02d:%02d:%02d', s / 3600, s % 3600 / 60, s % 60)
+end
+
 # The build unit's name on the worker (archci-worker's rule) and, from its
 # journal streamed to the master, the makepkg phase and last output line.
 def unit_name(j)
@@ -180,7 +186,7 @@ def frame(journal)
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = tails[unit_name(j)] || ['', '']
-    line = format('%-8s %-22s %-8s %-3d %4s %5s %5s %5s %6s  %-9s %s %s', elapsed(since), j['worker'], j['arch'], j['attempt'], hb,
+    line = format('%-8s %-22s %-8s %-3d %4s %5s %5s %5s %6s  %-9s %s %s', hms(since), j['worker'], j['arch'], j['attempt'], hb,
                   j['cpu'] || '-', mem[j['rss']], mem[j['peak']], j['build'] || '-',
                   phase.empty? ? '-' : phase[0, 9], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
