@@ -91,17 +91,23 @@ while true; do
 	archci_log "building $job_id as archci-build@$name"
 
 	unit=archci-build@$name
+	date +%s%6N >"$jobdir/started"   # the job's start, for the first CPU sample (archci_job_stats)
 	# Keep the master's housekeeping from calling the job stale while the build runs. Each beat
 	# carries this machine's load, memory, chroot disk use and core count, and
 	# the job's own CPU, memory and build-tree size from its cgroup, which the
 	# master keeps with the job for archci-top and archci-status.
 	(
 		trap - TERM INT
-		hb_down=0 wait=5   # the first beat soon after the start, then every ARCHCI_HEARTBEAT_SECONDS
+		# The first beat goes soon after the start, and beats come every 10 s
+		# until one has carried the job's own stats (the build's scope only
+		# exists once makechrootpkg has set the chroot up and installed the
+		# dependencies), then every ARCHCI_HEARTBEAT_SECONDS.
+		hb_down=0 wait=5 jobstats=''
 		while sleep "$wait"; do
-			wait=$ARCHCI_HEARTBEAT_SECONDS
-			# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-			if master heartbeat "$job_id" $(archci_worker_stats) $(archci_job_stats "$jobdir" "$unit"); then
+			jobstats=$(archci_job_stats "$jobdir" "$unit")
+			wait=$(( ${#jobstats} ? ARCHCI_HEARTBEAT_SECONDS : 10 ))
+			# shellcheck disable=SC2046,SC2086  # the stats are separate key=value words on purpose
+			if master heartbeat "$job_id" $(archci_worker_stats) $jobstats; then
 				(( hb_down )) && archci_log "heartbeat for $job_id reaches the master again"
 				hb_down=0
 			else

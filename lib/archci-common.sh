@@ -203,7 +203,9 @@ archci_job_stats() {
 		usage=$(awk '/^usage_usec/ { print $2 }' "$cg/cpu.stat" 2>/dev/null) || return 0
 		now=$(date +%s%6N)
 		# cores used since the previous sample; on the first, since the scope
-		# started (systemd's monotonic clock against /proc/uptime, both in us)
+		# started (systemd's monotonic clock against /proc/uptime, both in us),
+		# or since the job started (JOBDIR/started, written by archci-worker)
+		# when the scope is too young to have a start time yet
 		cpu=''
 		if [[ -f $jobdir/cpu.prev ]]; then
 			read -r prev_usage prev_now <"$jobdir/cpu.prev"
@@ -212,7 +214,11 @@ archci_job_stats() {
 			local started up
 			started=$(systemctl show -p ActiveEnterTimestampMonotonic --value "${cg##*/}" 2>/dev/null || true)
 			up=$(awk '{ printf "%d", $1 * 1000000 }' /proc/uptime)
-			[[ $started =~ ^[0-9]+$ ]] && (( up > started )) && cpu=$(awk -v u="$usage" -v t="$((up - started))" 'BEGIN { printf "%.1f", u / t }')
+			if [[ $started =~ ^[1-9][0-9]*$ ]] && (( up > started )); then
+				cpu=$(awk -v u="$usage" -v t="$((up - started))" 'BEGIN { printf "%.1f", u / t }')
+			elif [[ -f $jobdir/started ]] && started=$(<"$jobdir/started") && [[ $started =~ ^[0-9]+$ ]] && (( now > started )); then
+				cpu=$(awk -v u="$usage" -v t="$((now - started))" 'BEGIN { printf "%.1f", u / t }')
+			fi
 		fi
 		printf '%s %s\n' "$usage" "$now" >"$jobdir/cpu.prev"
 		mem=$(( $(<"$cg/memory.current") / 1048576 ))
