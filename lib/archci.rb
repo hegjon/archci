@@ -119,9 +119,10 @@ module Archci
       h['workers'] |= [j['worker']]
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
+      h['vendor'] ||= j['vendor']   # constant for a host: any worker that sent it will do
       next unless beat && j['load'] && (h['heartbeat_age_s'].nil? || now - beat < h['heartbeat_age_s'])
 
-      h.merge!('heartbeat_age_s' => (now - beat).to_i, **j.slice(*HOST_STATS))
+      h.merge!('heartbeat_age_s' => (now - beat).to_i, **j.slice(*HOST_STATS).compact)
     end
     hosts.values.sort_by { |h| h['host'] }.each { |h| h['workers'].sort! }
   end
