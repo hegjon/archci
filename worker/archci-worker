@@ -91,7 +91,7 @@ while true; do
 	archci_log "building $job_id as archci-build@$name"
 
 	unit=archci-build@$name
-	# Keep the master's stale-job reaper away while the build runs. Each beat
+	# Keep the master's housekeeping from calling the job stale while the build runs. Each beat
 	# carries this machine's load, memory, chroot disk use and core count, and
 	# the job's own CPU, memory and build-tree size from its cgroup, which the
 	# master keeps with the job for archci-top and archci-status.
@@ -127,9 +127,9 @@ while true; do
 	# Upload the results, then report. While the master is unreachable (a
 	# reboot, a night, a weekend) the finished build is kept and retried every
 	# 30 s for as long as it takes; a heartbeat first keeps the master's
-	# reaper from requeueing the job as stale when it comes back. Only ssh
+	# housekeeping from requeueing the job as stale when it comes back. Only ssh
 	# failures (exit 255) mean "unreachable": a heartbeat or report the master
-	# itself refuses says the job is no longer ours (reaped, or re-claimed by
+	# itself refuses says the job is no longer ours (taken by housekeeping, or re-claimed by
 	# another worker), and only then are the results dropped.
 	uploaded=0 try=0 dropped=0
 	while true; do

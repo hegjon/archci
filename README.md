@@ -36,7 +36,7 @@ flowchart LR
   subgraph MASTER["master (holds no key)"]
     SCAN["archci-scan: pull + index"]
     JOB["archci-job: claim / report (ssh)"]
-    REAP["archci-job reap: stale / retry"]
+    KEEP["archci-job housekeeping: stale / retry"]
     STAGE["archci-stage: pool to staging"]
   end
   subgraph WORKER["worker x N"]
@@ -127,7 +127,7 @@ and is printed. The worker then:
 6. reports `success` or `failure`; while the master is unreachable (a
    reboot, a night, a weekend) the results are kept and upload and report
    retried every 30 s until it is back, with a heartbeat first so the master
-   does not reap the job when it returns. The verdict comes from a `result` file
+   does not requeue the job as stale when it returns. The verdict comes from a `result` file
    `archci-build` writes last, not from the unit's exit status, because systemd
    counts a build killed by SIGTERM (an external stop) as a clean exit. A
    `TimeoutStartSec` timeout does fail the unit, but the result file also covers
@@ -138,7 +138,7 @@ While building, a background loop sends a heartbeat every minute
 disk use and core count, and the job's own CPU, memory and build-tree size
 read from its cgroup; the master keeps them with the job for `archci-top`
 and `archci-status`. A job
-without a heartbeat for 30 minutes is put back in `pending/` by the reaper, so
+without a heartbeat for 30 minutes is put back in `pending/` by housekeeping (a 5-minute timer), so
 a worker can be destroyed at any time. On `systemctl stop` the worker reports
 `abandoned`, which requeues without counting an attempt.
 
@@ -323,7 +323,7 @@ template does this).
 
 ```
 pacman -U archci-git-*.pkg.tar.zst archci-master-git-*.pkg.tar.zst
-systemctl enable --now archci-scan.timer archci-reaper.timer archci-stage.timer archci-signer-status.timer
+systemctl enable --now archci-scan.timer archci-housekeeping.timer archci-stage.timer archci-signer-status.timer
 systemctl enable --now systemd-journal-remote.socket   # worker journals
 ```
 

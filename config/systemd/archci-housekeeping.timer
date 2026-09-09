@@ -1,5 +1,5 @@
 [Unit]
-Description=archci: reap the queue every 5 minutes
+Description=archci: queue housekeeping every 5 minutes
 
 [Timer]
 OnBootSec=5min

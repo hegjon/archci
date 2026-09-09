@@ -79,7 +79,7 @@ file, which is how the tests run without network or root. Run them with
 - `test/lint-test.sh` — `bash -n` and `ruby -c` on every script, plus
   `shellcheck` when installed.
 - `test/integration-test.sh` — the whole master side (scan, claim, heartbeat,
-  report, reap, forced ssh command, rrsync upload), the two-stage signing gate
+  report, housekeeping, forced ssh command, rrsync upload), the two-stage signing gate
   with real gpg keys, and the R2 hand-off (master stage, signer verify, reject,
   release-sign, publish, drain) against a local rclone stand-in, in a temp dir.
 
