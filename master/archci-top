@@ -212,9 +212,9 @@ def frame(journal)
   out << '(nothing running)' if running.empty?
   out << ''
   unless failed.empty?
-    out << bold(format('%-31s %-7s  %-20s %8s  %s', 'FAILED (newest first)', 'ARCH', 'WORKER', 'FAILURES', 'FINISHED'))
+    out << bold(format('%-31s %-7s  %-18s %8s  %s', 'FAILED (newest first)', 'ARCH', 'WORKER', 'FAILURES', 'FINISHED'))
     failed.each do |j|
-      out << format('%-31s %-7s  %-20s %8d  %s%s', "#{j['pkgbase']} #{j['version']}", j['arch'], short_worker(j['worker']),
+      out << format('%-31s %-7s  %-18s %8d  %s%s', "#{j['pkgbase']} #{j['version']}", j['arch'], short_worker(j['worker']),
                     j['attempt'], j['finished'], j['final'] ? '  GAVE UP' : '')[0, width]
     end
   end
