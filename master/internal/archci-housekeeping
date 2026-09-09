@@ -5,7 +5,8 @@
 # running jobs whose worker stopped heartbeating (ARCHCI_STALE_MINUTES),
 # drops queued and failed jobs a newer commit of their package supersedes,
 # requeues failed jobs whose retry delay is over (ARCHCI_RETRY_MINUTES, up
-# to ARCHCI_MAX_ATTEMPTS), and prunes done/ (ARCHCI_DONE_KEEP_DAYS).
+# to ARCHCI_MAX_ATTEMPTS), prunes done/ (ARCHCI_DONE_KEEP_DAYS) and the
+# polls of workers not heard from for a day (hosts/).
 set -euo pipefail
 here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 source "$here/../../lib/archci-common.sh"
@@ -49,4 +50,6 @@ for file in "$Q_FAILED"/*.job; do
 done
 shopt -u nullglob
 find "$Q_DONE" -name '*.job' -mtime +"$ARCHCI_DONE_KEEP_DAYS" -delete
+# a worker's last poll (hosts/<worker>, from its claims): gone a day, gone for good
+[[ -d $ARCHCI_HOME/hosts ]] && find "$ARCHCI_HOME/hosts" -type f -mtime +1 -delete
 (( n == 0 )) || archci_log "requeued $n job(s)"

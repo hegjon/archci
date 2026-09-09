@@ -438,6 +438,11 @@ ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep
 ! ARCHCI_ARCHES="x86_64 riscv64" "$job" claim idle-host-1 riscv64 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
 touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^idle-host " && fail "a worker that stopped polling must drop out of the hosts table"
+"$housekeeping"
+[[ -f $ARCHCI_HOME/hosts/idle-host-1 ]] || fail "housekeeping must keep a poll younger than a day"
+touch -d '2 days ago' "$ARCHCI_HOME/hosts/idle-host-1"
+"$housekeeping"
+[[ ! -e $ARCHCI_HOME/hosts/idle-host-1 ]] || fail "housekeeping must drop a poll older than a day"
 
 echo "--- a claim from a worker whose job is still running hands that job back"
 id=$(sed -n 's/^id=//p' < <("$job" claim dup-1 x86_64))
