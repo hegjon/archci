@@ -26,7 +26,7 @@ puts format('  outstanding: %d update(s), %d unbuilt', out['updates'], out['back
 puts format('  built: %s', report['built'].map { |r, n| "#{r} #{n}/#{report['tracked'][r]}" }.join('  '))
 if (s = report['signer'])
   st = s['staging'] || {}
-  rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{r['packages']} pkg @ #{r['updated']}" : "#{a} unreachable" }
+  rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{r['packages']} pkg" : "#{a} unreachable" }
   puts format('  signer: %d in staging%s%s', st['waiting'].to_i,
               st['oldest_s'] ? " (oldest #{(st['oldest_s'] / 60.0).round} min)" : '',
               rel.empty? ? '' : "   release: #{rel.join('  ')}")
