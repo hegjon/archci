@@ -137,9 +137,9 @@ def frame(journal)
 
   out = []
   out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s   (q or Esc quits)', now.strftime('%H:%M:%S'), repo, snap['arches'].join(' '))
-  out << format('queue: pending %d  running %d  failed %d  done %d (%d in the last hour)    outstanding: %d update(s), %d unbuilt',
-                counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
-                snap['outstanding']['updates'], snap['outstanding']['backlog'])
+  out << format('queue: pending %s  running %s  failed %s  done %s (%s in the last hour)    outstanding: %s update(s), %s unbuilt',
+                *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
+                  snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })
   out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{bold(n)}/#{snap['tracked'][k]}" }.join('  '))
   # the signer, as seen through R2 by archci-signer-status: staging backlog
   # and the released databases' age and size
@@ -155,7 +155,7 @@ def frame(journal)
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
-  out << inv(format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%MEM', '%DISK', 'THREADS', 'WORKERS', 'ACTIVE').ljust(width)[0, width])
+  out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%MEM', '%DISK', 'THREADS', 'WORKERS', 'ACTIVE')
   # the load in five characters: as sent (two decimals) below 100, whole from 100
   load = ->(l) { l.nil? ? '-' : (l.to_f < 100 ? l : format('%.0f', l.to_f)) }
   snap['hosts'].each do |h|
