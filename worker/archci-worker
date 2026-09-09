@@ -97,8 +97,9 @@ while true; do
 	# master keeps with the job for archci-top and archci-status.
 	(
 		trap - TERM INT
-		hb_down=0
-		while sleep "$ARCHCI_HEARTBEAT_SECONDS"; do
+		hb_down=0 wait=5   # the first beat soon after the start, then every ARCHCI_HEARTBEAT_SECONDS
+		while sleep "$wait"; do
+			wait=$ARCHCI_HEARTBEAT_SECONDS
 			# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
 			if master heartbeat "$job_id" $(archci_worker_stats) $(archci_job_stats "$jobdir" "$unit"); then
 				(( hb_down )) && archci_log "heartbeat for $job_id reaches the master again"
