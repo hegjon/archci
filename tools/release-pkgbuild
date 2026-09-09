@@ -103,6 +103,8 @@ fi
 grep -q '\$pkgbase' "$out/PKGBUILD.new" && ! grep -q 'cd "\$srcdir/\$_src"' "$out/PKGBUILD.new" && die "a \$pkgbase path survived"
 
 mv "$out/PKGBUILD.new" "$out/PKGBUILD"
+# the .install files: the tree's, and none the tree no longer has
+for f in "$out"/*.install; do [[ -e $f && ! -e $here/${f##*/} ]] && rm -f "$f"; done
 for f in "$here"/*.install; do install -m644 "$f" "$out/${f##*/}"; done
 # it must parse, name the release packages and no -git one
 srcinfo=$(cd "$out" && makepkg --printsrcinfo 2>&1) || die "makepkg --printsrcinfo failed: $srcinfo"
