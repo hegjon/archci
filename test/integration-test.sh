@@ -170,6 +170,18 @@ ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" "$tmp/wkey.pub" 2
 { (( $(wc -l <"$akf") == 1 )) && grep -q 'permitopen' "$akf"; } || fail "rewrite left the file wrong: $(<"$akf")"
 [[ $(stat -c %a "$akf") == 644 ]] || fail "authorized_keys should be world-readable, root-writable"
 ! ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" 'not a key' 2>/dev/null || fail "garbage must be rejected"
+
+echo "--- archci-authorize --revoke: by key file, by key, by comment"
+ssh-keygen -q -t ed25519 -N '' -C archci-worker@other -f "$tmp/okey" >/dev/null
+ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" "$tmp/okey.pub"
+(( $(grep -c . "$akf") == 2 )) || fail "two keys expected before revoking"
+ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" --revoke archci-worker@other 2>&1 | grep -q "revoked 1 key" || fail "revoke by comment"
+grep -q 'archci-worker@other' "$akf" && fail "the revoked key must be gone"
+grep -q "$(cut -d' ' -f2 "$tmp/wkey.pub")" "$akf" || fail "the other key must stay"
+ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" --revoke "$tmp/wkey.pub" 2>&1 | grep -q "revoked 1 key" || fail "revoke by key file"
+[[ ! -s $akf ]] || fail "no key should be left: $(<"$akf")"
+! ARCHCI_AUTHORIZED_KEYS=$akf "$here/../master/archci-authorize" --revoke nobody@nowhere 2>/dev/null || fail "revoking an unknown key must fail"
+[[ $(stat -c %a "$akf") == 644 ]] || fail "authorized_keys mode must survive a revoke"
 # keys from the old per-user file are carried over once
 mkdir -p "$ARCHCI_HOME/.ssh"; echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOldKeyOldKeyOldKeyOldKeyOldKeyOldKeyOldKeyOldKe old" >"$ARCHCI_HOME/.ssh/authorized_keys"
 ARCHCI_AUTHORIZED_KEYS=$tmp/ak2 "$here/../master/archci-authorize" "$tmp/wkey.pub"
