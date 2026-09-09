@@ -1,0 +1,7 @@
+# shellcheck shell=bash
+# archci-worker-qemu-riscv64: the work is in archci-qemu-setup (archci-worker,
+# which this package depends on); this file only names the arch, since makepkg
+# wants a literal install file per package.
+post_install() { /usr/lib/archci/worker/archci-qemu-setup riscv64; }
+post_upgrade() { post_install; }
+post_remove() { [[ -x /usr/lib/archci/worker/archci-qemu-setup ]] && /usr/lib/archci/worker/archci-qemu-setup --remove riscv64 || true; }

@@ -1,0 +1,39 @@
+#!/bin/bash
+# archci-qemu-setup ARCH | --remove ARCH -- activate (or let go of) building
+# ARCH under qemu user-mode emulation on this worker, for the
+# archci-worker-qemu-ARCH package's install script; runs as root.
+#
+# The package ships the pieces devtools lacks for a port (docs/ports.md);
+# two of them need a hand after installation: the port repository's key must
+# be trusted by the host's pacman (mkarchroot and arch-nspawn copy the host's
+# trust into the chroot), and systemd-binfmt must re-read /etc/binfmt.d for
+# the qemu registration with the C flag. Then say how to start a worker.
+set -euo pipefail
+remove=0
+[[ ${1:-} == --remove ]] && { remove=1; shift; }
+a=${1:-}
+[[ -n $a ]] || { echo "usage: archci-qemu-setup ARCH | --remove ARCH" >&2; exit 2; }
+
+if (( remove )); then
+	systemctl restart systemd-binfmt.service 2>/dev/null || true
+	echo "==> The $a port's repo key stays in the pacman keyring; list keys with pacman-key --list-keys"
+	echo "    and drop one with pacman-key --delete <fingerprint>."
+	exit 0
+fi
+
+k=/usr/share/pacman/keyrings/archci-ports-$a.gpg
+if [[ -e $k ]]; then
+	if [[ -x /usr/bin/pacman-key && -f /etc/pacman.d/gnupg/pubring.gpg ]]; then
+		pacman-key --populate "archci-ports-$a"
+	else
+		echo "==> run: pacman-key --init && pacman-key --populate archci-ports-$a"
+	fi
+fi
+systemctl restart systemd-binfmt.service 2>/dev/null || true
+if [[ $(uname -m) == "$a" ]]; then
+	echo "==> WARNING: this is a $a machine; it builds $a natively with archci-worker@N," >&2
+	echo "    and the qemu-$a binfmt registration is not wanted here. Remove archci-worker-qemu-$a." >&2
+else
+	echo "==> Start a $a worker instance (the master must list $a in ARCHCI_ARCHES):"
+	echo "      systemctl enable --now archci-worker-$a@1"
+fi

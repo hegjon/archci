@@ -134,7 +134,7 @@ package_archci-worker-git() {
 # the qemu-<arch> binfmt registration with the C flag, the devtools setarch
 # alias, the chroot pacman.conf for that port's repository, and the port's key
 # as a pacman keyring archci-ports-<arch> when arch/<arch>/qemu/keys/ has one
-# (the shared archci-worker-qemu.install populates it).
+# (archci-qemu-setup, run by the package's install script, populates it).
 _package_qemu_arch() {
   local a=$1
   cd "$srcdir/$pkgbase"
@@ -165,7 +165,7 @@ _package_qemu_arch() {
 package_archci-worker-qemu-aarch64-git() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: aarch64 instances on x86_64 under qemu user-mode emulation)'
   depends=(archci-worker-git qemu-user-static qemu-user-static-binfmt)
-  install=archci-worker-qemu.install
+  install=archci-worker-qemu-aarch64.install
   backup=(etc/binfmt.d/qemu-aarch64-static.conf etc/archci/aarch64/extra.conf)
   provides=(archci-worker-qemu-aarch64)
   conflicts=(archci-worker-qemu-aarch64 archci-worker-aarch64)
@@ -176,7 +176,7 @@ package_archci-worker-qemu-aarch64-git() {
 package_archci-worker-qemu-riscv64-git() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: riscv64 instances on x86_64 under qemu user-mode emulation)'
   depends=(archci-worker-git qemu-user-static qemu-user-static-binfmt)
-  install=archci-worker-qemu.install
+  install=archci-worker-qemu-riscv64.install
   backup=(etc/binfmt.d/qemu-riscv64-static.conf etc/archci/riscv64/extra.conf)
   provides=(archci-worker-qemu-riscv64)
   conflicts=(archci-worker-qemu-riscv64)
