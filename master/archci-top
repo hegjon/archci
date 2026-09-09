@@ -50,11 +50,11 @@ def hms(seconds)
   format('%02d:%02d:%02d', s / 3600, s % 3600 / 60, s % 60)
 end
 
-# A worker id with an emulated arch in it, host-aarch64-2, shown as host-a~2:
-# the ARCH column says which arch, the tilde says emulated.
+# A worker id with an emulated arch in it, host-aarch64-2, shown as host-a2:
+# the ARCH column says which arch; the letter keeps it apart from host-2.
 def short_worker(worker)
   host, port = Archci.worker_host(worker.to_s)
-  port ? "#{host}-#{port[0]}~#{worker[/(\d+)\z/, 1]}" : worker
+  port ? "#{host}-#{port[0]}#{worker[/(\d+)\z/, 1]}" : worker
 end
 
 # The build unit's name on the worker (archci-worker's rule) and, from its
