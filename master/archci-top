@@ -164,8 +164,9 @@ def frame(journal)
   end
   out << ''
 
-  out << format('%-8s %-22s %-8s %-3s %4s %5s %6s %6s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'RSS', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output')
-  mib = ->(v) { v ? "#{v}M" : '-' }
+  out << format('%-8s %-22s %-8s %-3s %4s %5s %11s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'RSS/PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output')
+  # a MiB count as 458M or 1.2G; RSS and its peak share a column
+  mem = ->(v) { v.nil? ? '-' : (v.to_i >= 1024 ? format('%.1fG', v.to_i / 1024.0) : "#{v}M") }
   # PHASE and the last output line from the journal (journal_tails), '-'
   # while it has not been read: the first frame, or --no-journal
   tails = journal_tails(journal, running.map { |j| [unit_name(j), j['claimed']] })
@@ -179,8 +180,8 @@ def frame(journal)
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = tails[unit_name(j)] || ['', '']
-    line = format('%-8s %-22s %-8s %-3d %4s %5s %6s %6s %6s  %-9s %s %s', elapsed(since), j['worker'], j['arch'], j['attempt'], hb,
-                  j['cpu'] || '-', mib[j['rss']], mib[j['peak']], j['build'] || '-',
+    line = format('%-8s %-22s %-8s %-3d %4s %5s %11s %6s  %-9s %s %s', elapsed(since), j['worker'], j['arch'], j['attempt'], hb,
+                  j['cpu'] || '-', j['rss'] ? "#{mem[j['rss']]}/#{mem[j['peak']]}" : '-', j['build'] || '-',
                   phase.empty? ? '-' : phase[0, 9], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
   end
