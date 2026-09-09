@@ -82,7 +82,6 @@ package_archci-master-git() {
               'libmicrohttpd: receive worker journals with systemd-journal-remote')
   provides=(archci-master)
   conflicts=(archci-master)
-  install=archci-master.install
 
   _install_role master archci-scan.service archci-scan.timer \
     archci-housekeeping.service archci-housekeeping.timer archci-stage.service archci-stage.timer \
