@@ -149,9 +149,9 @@ def frame(journal)
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
-  out << format('%-22s %-13s %-8s %6s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', 'MEM%', 'DISK%', 'THREADS', 'WORKERS', 'ACTIVE')
+  out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', 'MEM%', 'DISK%', 'THREADS', 'WORKERS', 'ACTIVE')
   snap['hosts'].each do |h|
-    out << format('%-22s %-13s %-8s %6s %5s %5s %7s %7d %6d', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', h['load'] || '-',
+    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7d %6d', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', h['load'] || '-',
                   h['mem'] || '-', h['disk'] || '-', h['cpus'] || '-', h['workers'].size, h['building'])
   end
   out << ''
