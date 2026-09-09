@@ -65,7 +65,6 @@ _archci() {
 		stage)    mapfile -t COMPREPLY < <(compgen -W '--force' -- "$cur") ;;
 		next)     mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches)" -- "$cur") ;;
 		pkgs)     mapfile -t COMPREPLY < <(compgen -W "$(archci pkgs 2>/dev/null | awk '{ print $1 }')" -- "$cur") ;;
-		qemu-setup) mapfile -t COMPREPLY < <(compgen -W "--remove $(_archci_arches)" -- "$cur") ;;
 		authorize)
 			if [[ $cur == -* ]]; then mapfile -t COMPREPLY < <(compgen -W '--revoke' -- "$cur")
 			else mapfile -t COMPREPLY < <(compgen -f -- "$cur"); fi

@@ -87,10 +87,11 @@ file, which is how the tests run without network or root. Run them with
 
 ## Releasing
 
-A release is a tag `vX.Y.Z` on this repository plus the matching release
-PKGBUILD in the PKGBUILD repository (`pkgbuilds/archci/` in the fork), which
-the farm then builds and publishes like any other package. The release
-PKGBUILD is generated from the split `PKGBUILD` here, never edited:
+A release is a tag `vX.Y.Z` on this repository plus the matching PKGBUILD
+in the PKGBUILD repository (`pkgbuilds/archci/` in the fork), which the
+farm then builds and publishes like any other package. That PKGBUILD is
+this tree's with the tag's version and checksum filled in, generated, never
+edited:
 
 ```
 git tag -a vX.Y.Z -m '...' && git push origin master vX.Y.Z
@@ -99,9 +100,8 @@ tools/release-pkgbuild X.Y.Z /path/to/omarchy-pkgs/pkgbuilds/archci
 ```
 
 The generator fetches the tag's tarball from GitHub for its checksum (push
-the tag first), rewrites the -git names, drops `pkgver()`, and copies the
-`.install` files; every rewrite checks that it matched and the result must
-pass `makepkg --printsrcinfo`, so a change to the split PKGBUILD the rules do
-not cover fails there. The master picks the fork commit up at its next scan
+the tag first), sets `pkgver` and `sha256sums`, and copies the `.install`
+files; the result must pass `makepkg --printsrcinfo`. The master picks the
+fork commit up at its next scan
 (`systemctl start archci-scan` to hurry it), and `pacman -Syu` on each host
 installs the release once the signer has published it.

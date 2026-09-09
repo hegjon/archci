@@ -229,8 +229,8 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ## Source layout
 
 ```
-bin/      archci: the entry point, `archci <name>` runs archci-<name> of an installed role
-tools/    release-pkgbuild: writes the fork's release PKGBUILD for a tag from PKGBUILD here (developers)
+bin/      archci: the command line (archci-cli), `archci <name>` runs archci-<name> of an installed role
+tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh, archci-queue.sh (bash) and archci.rb (ruby): config, the job queue, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-top
           internal/archci-housekeeping: the queue's timer pass, not a command
@@ -289,16 +289,19 @@ claimed=2026-09-05T07:41:12Z
 
 All three roles (master, worker, signer) run on Arch or Omarchy machines and
 are installed as pacman packages. `PKGBUILD` is a split package built from
-the git repository (`makepkg -s` in a checkout), one package per role on top
-of a shared one:
+a tagged release (the farm builds and publishes it like any other package,
+see [docs/operating.md](docs/operating.md) "Releasing"), one package per
+role on top of a shared one:
 
-- `archci-git`: `lib/` under `/usr/lib/archci`, the config as
+- `archci`: `lib/` under `/usr/lib/archci`, the config as
   `/etc/archci/archci.conf`, and the `archci` user (sysusers)
-- `archci-master-git`, `archci-worker-git`, `archci-signer-git`: the role's
-  scripts under `/usr/lib/archci/<role>/` (run as `archci <name>` or by its
-  units), its units in `/usr/lib/systemd/system`,
-  its directories (tmpfiles), and its dependencies
-- `archci-worker-qemu-aarch64-git`, `archci-worker-qemu-riscv64-git`: add-ons
+- `archci-master`, `archci-worker`, `archci-signer`: the role's
+  scripts under `/usr/lib/archci/<role>/` (run by its units), its units in
+  `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies
+- `archci-cli`: the `archci <name>` command line (and its bash completion)
+  the master and the signer are operated with; pulled in by those two. A
+  worker has no commands to run by hand, so it gets none
+- `archci-worker-qemu-aarch64`, `archci-worker-qemu-riscv64`: add-ons
   for an x86_64 worker: aarch64 or riscv64 worker
   instances under qemu user-mode emulation (see [docs/ports.md](docs/ports.md))
 
@@ -309,11 +312,12 @@ keyrings are directories the package creates. What remains is per-site:
 keys to authorize, R2 credentials, and enabling units, listed per role
 below. The signer needs only R2 access; workers need only ssh to the master.
 
-To try a change, build the packages from the checkout and install them:
-
-```
-makepkg -s && pacman -U archci-git-*.pkg.tar.zst archci-<role>-git-*.pkg.tar.zst
-```
+With the farm's repository in `pacman.conf` (see
+[docs/test-instance.md](docs/test-instance.md)), `pacman -S archci-<role>`
+installs a role and `pacman -Syu` upgrades it with each release. To try a
+change before a release, copy the changed file over the installed one under
+`/usr/lib/archci/` (a worker re-executes itself when its script changes;
+the next upgrade overwrites the copy).
 
 ### Master
 
@@ -322,7 +326,7 @@ The master droplet is named `master`, and workers reach it as `archci@master`
 template does this).
 
 ```
-pacman -U archci-git-*.pkg.tar.zst archci-master-git-*.pkg.tar.zst
+pacman -S archci-master
 systemctl enable --now archci-scan.timer archci-housekeeping.timer archci-stage.timer archci-signer-status.timer
 systemctl enable --now systemd-journal-remote.socket   # worker journals
 ```
@@ -371,7 +375,7 @@ Server = https://<r2 release domain>/$repo/os/$arch
 ### Worker
 
 ```
-pacman -U archci-git-*.pkg.tar.zst archci-worker-git-*.pkg.tar.zst
+pacman -S archci-worker
 systemctl enable --now archci-worker@1
 ```
 
@@ -423,7 +427,7 @@ name. The master may run `archci-worker@1` too if `master` resolves to itself.
 On a dedicated droplet (it needs only R2 access, not the VPC):
 
 ```
-pacman -U archci-git-*.pkg.tar.zst archci-signer-git-*.pkg.tar.zst
+pacman -S archci-signer
 ```
 
 The package creates the release and builder keyrings under `/etc/archci`,

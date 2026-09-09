@@ -1,4 +1,4 @@
-# devtools ships makepkg.conf.d/x86_64.conf only. archci-worker-git derives the
+# devtools ships makepkg.conf.d/x86_64.conf only. archci-worker derives the
 # aarch64 one from it at package build time with these substitutions, so the
 # port follows devtools' flags (the Arch Linux Ports RFC asks a port to stay
 # as close as possible to x86_64's): -march=armv8-a, and the x86-only

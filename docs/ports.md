@@ -57,7 +57,7 @@ a fleet, but it needs no ARM hardware. The same recipe, with the arch
 swapped, applies to every `archci-worker-qemu-<arch>` package:
 
 ```
-pacman -U archci-worker-qemu-aarch64-git-*.pkg.tar.zst
+pacman -S archci-worker-qemu-aarch64
 systemctl enable --now archci-worker-aarch64@1
 ```
 
@@ -92,7 +92,7 @@ extra key is needed on the worker.
 - **Master:** add `riscv64` to `ARCHCI_ARCHES`.
 - **Native worker:** a RISC-V board or server running Arch Linux RISC-V, with
   the plain worker package: `archci-worker@N` builds riscv64 there.
-- **Emulated worker:** `archci-worker-qemu-riscv64-git` and
+- **Emulated worker:** `archci-worker-qemu-riscv64` and
   `systemctl enable --now archci-worker-riscv64@1`, exactly as for aarch64.
   Emulated riscv64 is slower still than emulated aarch64; native hardware
   (a Milk-V Pioneer, or a rented RISC-V server) is where volume belongs.
