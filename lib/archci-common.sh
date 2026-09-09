@@ -60,6 +60,10 @@ archci_load_conf
 : "${ARCHCI_R2_STAGING:=}"
 : "${ARCHCI_R2_RELEASE:=}"
 : "${ARCHCI_RCLONE_CONFIG:=/etc/archci/rclone.conf}"
+# Master: the released repo's public URL, as clients use it (the master's
+# rclone token need not read RELEASE). archci-signer-status reports the
+# released databases' age and size from it. Empty = not reported.
+: "${ARCHCI_RELEASE_URL:=}"
 # --- signing (see README "Signing") -------------------------------------------
 # Master holds NO key. Workers sign each package with a builder key (internal
 # provenance); the signer droplet verifies that, adds the client-facing release

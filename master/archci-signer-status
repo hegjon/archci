@@ -1,0 +1,51 @@
+#!/bin/bash
+# archci-signer-status -- what the master can see of the signer, through R2.
+#
+# The signer never talks to the master: it takes packages from staging and
+# publishes the released repo, both on R2. What the master can observe is the
+# release pipeline as a client sees it: how many packages wait in staging and
+# for how long (rclone, with the master's staging token), and per arch when
+# the released database was last updated and how many packages it lists
+# (over ARCHCI_RELEASE_URL, the clients' repo URL; the master's token cannot
+# read RELEASE). Writes $ARCHCI_HOME/signer.status (JSON) for archci-top and
+# archci-status. Run by archci-signer-status.timer every 2 minutes.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+
+out=$ARCHCI_HOME/signer.status
+now=$(date +%s)
+
+waiting=0 oldest=null
+if [[ -n $ARCHCI_R2_STAGING ]] && command -v rclone >/dev/null; then
+	export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
+	# one "<modtime>|<path>" per file; the oldest package is what a stalled
+	# signer shows first
+	first=''
+	while IFS='|' read -r mtime path; do
+		[[ $path == *.pkg.tar.zst ]] || continue
+		(( ++waiting ))
+		[[ -z $first || $mtime < $first ]] && first=$mtime
+	done < <(rclone lsf -R --files-only --format tp --separator '|' "$ARCHCI_R2_STAGING" 2>/dev/null || true)
+	[[ -n $first ]] && oldest=$(( now - $(date -d "$first" +%s) ))
+fi
+
+release='{}'
+if [[ -n $ARCHCI_RELEASE_URL ]]; then
+	tmp=$(mktemp)
+	trap 'rm -f "$tmp"' EXIT
+	for arch in $ARCHCI_ARCHES; do
+		url=$ARCHCI_RELEASE_URL/$ARCHCI_REPO/os/$arch/$ARCHCI_REPO.db
+		updated=null packages=null
+		if hdr=$(curl -fsS -D - -o "$tmp" "$url" 2>/dev/null); then
+			lm=$(printf '%s\n' "$hdr" | tr -d '\r' | awk 'tolower($1) == "last-modified:" { sub(/^[^ ]+ /, ""); print; exit }')
+			[[ -n $lm ]] && updated=$(date -u -d "$lm" +%FT%TZ)
+			packages=$(bsdtar -xOf "$tmp" '*/desc' 2>/dev/null | grep -c '^%FILENAME%$') || packages=0
+		fi
+		release=$(jq --arg a "$arch" --arg u "$updated" --argjson n "$packages" \
+			'.[$a] = {updated: (if $u == "null" then null else $u end), packages: $n}' <<<"$release")
+	done
+fi
+
+jq -n --arg g "$(date -u +%FT%TZ)" --argjson w "$waiting" --argjson o "$oldest" --argjson r "$release" \
+	'{generated: $g, staging: {waiting: $w, oldest_s: $o}, release: $r}' >"$out.tmp"
+mv "$out.tmp" "$out"

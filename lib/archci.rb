@@ -232,6 +232,13 @@ module Archci
       job[j].merge('final' => j['final'] == '1', 'finished' => j['finished'],
                    'log' => "logs/#{j['repo']}/#{j['pkgbase']}/#{j['version']}/#{j['arch']}/attempt-#{j['attempt']}.log")
     end
+    # What archci-signer-status last saw of the signer through R2, if it runs.
+    status = File.join(home, 'signer.status')
+    signer = begin
+      JSON.parse(File.read(status)).merge('age_s' => (now - File.mtime(status)).to_i)
+    rescue Errno::ENOENT, JSON::ParserError
+      nil
+    end
     done = jobs('done').sort_by { |j| -j['mtime'].to_i }
     recent = done.first(50).map do |j|
       job[j].merge('finished' => j['finished'], 'heartbeat' => j['heartbeat'],
@@ -251,6 +258,7 @@ module Archci
       'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
       'workers' => (running + recent).filter_map { |j| j['worker'] }.tally,
       'hosts' => hosts(running, recent, now),
+      'signer' => signer,
       'running' => running,
       'failed' => failed,
       'recent' => recent

@@ -76,7 +76,8 @@ package_archci-master-git() {
   conflicts=(archci-master)
 
   _install_role master archci-scan.service archci-scan.timer \
-    archci-reaper.service archci-reaper.timer archci-stage.service archci-stage.timer
+    archci-reaper.service archci-reaper.timer archci-stage.service archci-stage.timer \
+    archci-signer-status.service archci-signer-status.timer
   cd "$srcdir/$pkgbase"
   install -Dm644 config/systemd/systemd-journal-remote.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-remote.service.d/archci.conf"

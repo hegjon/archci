@@ -74,6 +74,21 @@ def frame(journal)
                 counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                 snap['outstanding']['updates'], snap['outstanding']['backlog'])
   out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{n}/#{snap['tracked'][k]}" }.join('  '))
+  # the signer, as seen through R2 by archci-signer-status: staging backlog
+  # and the released databases' age and size
+  if (s = snap['signer'])
+    st = s['staging'] || {}
+    line = format('signer: staging %d pkg%s', st['waiting'].to_i, st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
+    rel = (s['release'] || {}).map do |a, r|
+      next "#{a} unreachable" unless r['updated']
+
+      t = Time.iso8601(r['updated'])
+      "#{a} #{r['packages']} pkg #{t.utc.strftime('%H:%MZ')} (#{elapsed((now - t).to_i)} ago)"
+    end
+    line += "   release #{rel.join('  ')}" unless rel.empty?
+    line += "   [status #{elapsed(s['age_s'])} old]" if s['age_s'] > 600
+    out << line
+  end
   out << ''
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any

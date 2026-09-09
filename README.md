@@ -314,7 +314,7 @@ template does this).
 
 ```
 pacman -U archci-git-*.pkg.tar.zst archci-master-git-*.pkg.tar.zst
-systemctl enable --now archci-scan.timer archci-reaper.timer archci-stage.timer
+systemctl enable --now archci-scan.timer archci-reaper.timer archci-stage.timer archci-signer-status.timer
 systemctl enable --now systemd-journal-remote.socket   # worker journals
 ```
 

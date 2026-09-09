@@ -24,6 +24,13 @@ puts format('  pkgbuilds: %s (%s), %d package(s) -> repo [%s]',
 puts format('  queue: %s', report['queue'].map { |q, n| "#{q}=#{n}" }.join('  '))
 puts format('  outstanding: %d update(s), %d unbuilt', out['updates'], out['backlog'])
 puts format('  built: %s', report['built'].map { |r, n| "#{r} #{n}/#{report['tracked'][r]}" }.join('  '))
+if (s = report['signer'])
+  st = s['staging'] || {}
+  rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{r['packages']} pkg @ #{r['updated']}" : "#{a} unreachable" }
+  puts format('  signer: %d in staging%s%s', st['waiting'].to_i,
+              st['oldest_s'] ? " (oldest #{(st['oldest_s'] / 60.0).round} min)" : '',
+              rel.empty? ? '' : "   release: #{rel.join('  ')}")
+end
 puts format('  arches: %s (any packages built on %s)', report['arches'].join(' '), report['any_arch'])
 puts
 unless running.empty?

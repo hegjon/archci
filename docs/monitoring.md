@@ -32,3 +32,23 @@ Because full build output goes through journald and journal-upload, size the
 master's `journal-remote.conf` limits and the workers' `journald@archci.conf`
 `SystemMaxUse` for it; large builds such as browsers produce hundreds of
 megabytes of log.
+
+## The signer, through R2
+
+The signer never talks to the master: it takes packages from staging and
+publishes the released repo, both on R2. What the master can see is the
+release pipeline as a client sees it. `archci-signer-status.timer` (every 2
+minutes) lists staging with the master's rclone token and fetches each
+arch's released database over `ARCHCI_RELEASE_URL`, the clients' repo URL,
+then writes `/var/lib/archci/signer.status`. `archci-top` and `archci-status`
+show it as
+
+```
+signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg 07:52Z (11m ago)  aarch64 87 pkg 07:41Z (22m ago)
+```
+
+A growing staging backlog with an ageing oldest package means the signer is
+not draining it (timer stopped, key locked); a database that stops updating
+while packages leave staging means publishing fails. Whether the release key
+is locked is known only on the signer: `journalctl -u archci-sign-health`
+there.

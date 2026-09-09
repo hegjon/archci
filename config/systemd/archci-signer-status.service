@@ -1,0 +1,10 @@
+[Unit]
+Description=archci: note what the signer left in staging and released, through R2
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/archci
+
+[Service]
+Type=oneshot
+User=archci
+ExecStart=/usr/bin/archci-signer-status
