@@ -115,9 +115,15 @@ for reldir in "${!touched[@]}"; do
 		archci_log "skipping prune of [$db]: local database is empty or unreadable"
 		continue
 	fi
+	# Membership through an associative array, not a pipeline into grep -q:
+	# grep quits at the first match, and with a database of a few hundred
+	# entries the printf feeding it then dies of SIGPIPE, which pipefail
+	# turned into "not in the database" -- and pruned live packages.
+	declare -A inset=()
+	for f in "${indb[@]}"; do inset[$f]=1; done
 	while IFS= read -r f; do
 		[[ $f == *.pkg.tar.zst ]] || continue
-		printf '%s\n' "${indb[@]}" | grep -qxF "$f" && continue
+		[[ -n ${inset[$f]:-} ]] && continue
 		archci_log "pruning superseded $reldir/$f from release"
 		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f" 2>/dev/null || true
 		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f.sig" 2>/dev/null || true
