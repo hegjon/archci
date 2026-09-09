@@ -180,7 +180,7 @@ def frame(journal)
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
-  out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%MEM', '%DISK', 'THREADS', 'WORKERS', 'ACTIVE')
+  out << bold(format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%MEM', '%DISK', 'THREADS', 'WORKERS', 'ACTIVE'))
   # the load in five characters: as sent (two decimals) below 100, whole from 100
   load = ->(l) { l.nil? ? '-' : (l.to_f < 100 ? l : format('%.0f', l.to_f)) }
   snap['hosts'].each do |h|
