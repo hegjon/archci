@@ -19,14 +19,14 @@ write_files:
     permissions: '0600'
     content: |
       -----BEGIN OPENSSH PRIVATE KEY-----
-      ...paste the worker key authorized on the master with archci-authorize...
+      ...paste the worker key authorized on the master with 'archci authorize'...
       -----END OPENSSH PRIVATE KEY-----
   - path: /etc/archci/builder-secret.asc
     permissions: '0600'
     content: |
       -----BEGIN PGP PRIVATE KEY BLOCK-----
       ...one shared builder key for the fleet; its public half is trusted once
-      on the signer with archci-authorize-builder...
+      on the signer with 'archci authorize-builder'...
       -----END PGP PRIVATE KEY BLOCK-----
   - path: /etc/hosts
     append: true

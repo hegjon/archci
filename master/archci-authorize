@@ -16,7 +16,7 @@
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-usage="usage: archci-authorize PUBKEY-FILE | 'ssh-ed25519 AAAA... comment' | --revoke PUBKEY-FILE|KEY|COMMENT"
+usage="usage: archci authorize PUBKEY-FILE | 'ssh-ed25519 AAAA... comment' | --revoke PUBKEY-FILE|KEY|COMMENT"
 akf=${ARCHCI_AUTHORIZED_KEYS:-/etc/archci/authorized_keys}
 keyre='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9-]+@openssh.com) [A-Za-z0-9+/=]+'
 

@@ -3,7 +3,8 @@
 #
 # Split package: archci-git holds what every role shares (lib/, the config,
 # the archci user); archci-master-git, archci-worker-git and archci-signer-git
-# hold one role each (its scripts as /usr/bin commands, its units, its state
+# hold one role each (its scripts under /usr/lib/archci/<role>/, run as
+# `archci <name>` or by its units, its state
 # directories). Keys, R2 config and enabling the role's units stay manual
 # (README "Install").
 
@@ -31,19 +32,16 @@ pkgver() {
   )
 }
 
-# _install_role ROLE UNIT... -> the role's scripts (same layout as the source
-# tree, so they find lib/ relative to themselves) as /usr/bin commands, its
-# units, and its tmpfiles entry.
+# _install_role ROLE UNIT... -> the role's scripts under /usr/lib/archci/ROLE/
+# (same layout as the source tree, so they find lib/ relative to themselves;
+# `archci <name>` and the units run them there, nothing goes to /usr/bin),
+# its units, and its tmpfiles entry.
 _install_role() {
   local role=$1 f
   shift
   cd "$srcdir/$pkgbase"
   (cd "$role" && find . -type f -exec install -Dm755 '{}' "$pkgdir$_libdir/$role/{}" \;)
-  install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/systemd/system"
-  for f in "$role"/*; do
-    [[ ${f##*/} == archci-shell ]] && continue   # the ssh forced command, not a user command
-    ln -s "$_libdir/$f" "$pkgdir/usr/bin/${f##*/}"
-  done
+  install -d "$pkgdir/usr/lib/systemd/system"
   for f in "$@"; do
     install -m644 "config/systemd/$f" "$pkgdir/usr/lib/systemd/system/$f"
   done
@@ -141,10 +139,10 @@ _package_qemu_arch() {
   cd "$srcdir/$pkgbase"
   install -d "$pkgdir/usr/lib/systemd/system"
   sed -e "s/^Description=archci build worker %i\$/Description=archci build worker %i ($a)/" \
-      -e "s#^ExecStart=/usr/bin/archci-worker %i\$#ExecStart=/usr/bin/archci-worker %i $a#" \
+      -e "s#^ExecStart=/usr/lib/archci/worker/archci-worker %i\$#ExecStart=/usr/lib/archci/worker/archci-worker %i $a#" \
       -e "1i # A worker instance building $a: natively on a $a machine, under qemu\n# user-mode emulation on another (archci-worker-qemu-$a). Runs alongside\n# archci-worker@ instances of the machine's own arch; known to the master as\n# <host>-$a-N." \
       config/systemd/archci-worker@.service >"$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service"
-  grep -q "^ExecStart=/usr/bin/archci-worker %i $a\$" "$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service" ||
+  grep -q "^ExecStart=/usr/lib/archci/worker/archci-worker %i $a\$" "$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service" ||
     { echo "could not derive archci-worker-$a@.service from the worker template" >&2; return 1; }
   cd "arch/$a/qemu"
   install -Dm644 "binfmt.d/qemu-$a-static.conf" "$pkgdir/etc/binfmt.d/qemu-$a-static.conf"

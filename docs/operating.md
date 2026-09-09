@@ -41,8 +41,9 @@ archci master status  (2026-09-06T08:34:59Z)
 ```
 
 Every command is a subcommand of `archci` (`archci job`, `archci top`, ...;
-`archci help` lists the ones installed on a host). The `archci-<name>` forms
-remain as aliases. The other operator commands:
+`archci help` lists the ones installed on a host). The scripts themselves
+live under `/usr/lib/archci/<role>/`, where the units run them. The other
+operator commands:
 
 ```
 archci status                       queue counts, running builds, recent failures

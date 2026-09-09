@@ -289,7 +289,8 @@ of a shared one:
 - `archci-git`: `lib/` under `/usr/lib/archci`, the config as
   `/etc/archci/archci.conf`, and the `archci` user (sysusers)
 - `archci-master-git`, `archci-worker-git`, `archci-signer-git`: the role's
-  scripts as `/usr/bin` commands, its units in `/usr/lib/systemd/system`,
+  scripts under `/usr/lib/archci/<role>/` (run as `archci <name>` or by its
+  units), its units in `/usr/lib/systemd/system`,
   its directories (tmpfiles), and its dependencies
 - `archci-worker-qemu-aarch64-git`, `archci-worker-qemu-riscv64-git`: add-ons
   for an x86_64 worker: aarch64 or riscv64 worker

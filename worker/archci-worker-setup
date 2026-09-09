@@ -51,6 +51,6 @@ fi
 
 cat <<MSG
 worker $host ready (arch $ARCHCI_ARCH; journal -> ${ARCHCI_JOURNAL_URL:-not streamed}). Authorize it:
-  on the master:  archci-authorize '$(<"$ARCHCI_WORKER_KEY.pub")'
-  on the signer:  archci-authorize-builder builder_key.pub   (this host's /etc/archci/builder_key.pub)
+  on the master:  archci authorize '$(<"$ARCHCI_WORKER_KEY.pub")'
+  on the signer:  archci authorize-builder builder_key.pub   (this host's /etc/archci/builder_key.pub)
 MSG

@@ -28,7 +28,7 @@ ARGV.each_with_index do |a, i|
   when '--once' then once = true
   when '--no-journal' then with_journal = false
   when '-h', '--help'
-    puts 'usage: archci-top [-n SECONDS] [--once] [--no-journal]'
+    puts 'usage: archci top [-n SECONDS] [--once] [--no-journal]'
     puts '  --no-journal  skip the workers\' streamed journals (no PHASE and last output): instant'
     exit
   end

@@ -7,4 +7,4 @@ RequiresMountsFor=/var/lib/archci
 [Service]
 Type=oneshot
 User=archci
-ExecStart=/usr/bin/archci-stage
+ExecStart=/usr/lib/archci/master/archci-stage

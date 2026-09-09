@@ -26,9 +26,9 @@ fi
 waiting=$(rclone lsf -R --files-only "$ARCHCI_R2_STAGING" 2>/dev/null | grep -c '\.pkg\.tar\.zst$' || true)
 
 if (( locked )) && (( waiting > 0 )); then
-	archci_log "ALERT: release key is LOCKED and $waiting package(s) wait in staging; run 'archci-sign --unlock' on the signer"
+	archci_log "ALERT: release key is LOCKED and $waiting package(s) wait in staging; run 'archci sign --unlock' on the signer"
 elif (( locked )); then
-	archci_log "WARNING: release key is locked; run 'archci-sign --unlock' before packages arrive (staging empty for now)"
+	archci_log "WARNING: release key is locked; run 'archci sign --unlock' before packages arrive (staging empty for now)"
 elif (( waiting >= ARCHCI_STAGING_WARN )); then
 	archci_log "WARNING: $waiting package(s) in staging are not draining; check 'systemctl status archci-sign.timer' and 'journalctl -u archci-sign'"
 fi
