@@ -38,7 +38,12 @@ work=$ARCHCI_SIGNER_HOME/work
 localrepo=$ARCHCI_SIGNER_HOME/repo         # persistent home of the release databases
 rm -rf "$work"; mkdir -p "$work" "$localrepo"
 
-mapfile -t rels < <(rclone lsf -R --files-only "$ARCHCI_R2_STAGING" 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
+# The farm's own packages first (a release must not queue behind a burst of
+# others), then oldest first: "<modtime>|<path>" from rclone, keyed by 0/1 for
+# archci or not and the time, then stripped to the path.
+mapfile -t rels < <(rclone lsf -R --files-only --format tp --separator '|' "$ARCHCI_R2_STAGING" 2>/dev/null | grep '\.pkg\.tar\.zst$' |
+	awk -F'|' '{ n = $2; sub(/.*\//, "", n); printf "%d|%s|%s\n", (n ~ /^archci(-[a-z0-9-]+)?-[0-9]/ ? 0 : 1), $1, $2 }' |
+	sort -t'|' -k1,1n -k2,2 | cut -d'|' -f3- || true)
 (( ${#rels[@]} )) || exit 0
 archci_log "staging holds ${#rels[@]} package(s) to sign"
 

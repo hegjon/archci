@@ -228,16 +228,20 @@ echo "--- R2 transport: master stages, signer verifies+signs+publishes (fake rcl
 # A faithful stand-in for rclone: every remote is a local path.
 cat >"$tmp/rclone" <<'SH'
 #!/bin/bash
-sub=""; pos=()
+sub=""; pos=(); fmt=""; sep=""
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --format) fmt=$2; shift 2;;
+    --separator) sep=$2; shift 2;;
     --transfers|--checkers|--config|--stats|--timeout|--contimeout) shift 2;;
     -R|--*) shift;;
     *) [[ -z $sub ]] && sub=$1 || pos+=("$1"); shift;;
   esac
 done
 case $sub in
-  lsf) [[ -d ${pos[0]} ]] && (cd "${pos[0]}" && find . -type f -printf '%P\n');;
+  lsf) if [[ -d ${pos[0]} ]]; then   # --format tp: "<modtime><sep><path>", as the signer orders by
+         if [[ ${fmt:-p} == tp ]]; then (cd "${pos[0]}" && find . -type f -printf "%TY-%Tm-%Td %TH:%TM:%TS${sep:-;}%P\n")
+         else (cd "${pos[0]}" && find . -type f -printf '%P\n'); fi; fi;;
   copyto) [[ -f ${pos[0]} ]] || exit 1; mkdir -p "$(dirname "${pos[1]}")"; cp "${pos[0]}" "${pos[1]}";;
   deletefile) rm -f "${pos[0]}";;
   move) if [[ -d ${pos[0]} ]]; then (cd "${pos[0]}" && find . -type f -printf '%P\n') | while IFS= read -r f; do
