@@ -9,6 +9,10 @@ require 'time'
 
 module Archci
   CONF = ENV.fetch('ARCHCI_CONF', '/etc/archci/archci.conf')
+  # The heartbeat's stats (the same two lists as archci-common.sh): the host's
+  # and the job's, kept with the job file by archci-job heartbeat.
+  HOST_STATS = %w[load mem disk cpus vendor].freeze
+  JOB_STATS = %w[cpu rss peak build].freeze
 
   DEFAULTS = {
     'ARCHCI_HOME' => '/var/lib/archci',
@@ -111,14 +115,13 @@ module Archci
 
       host, port = worker_host(j['worker'])
       h = hosts[host] ||= { 'host' => host, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
-                            'load' => nil, 'mem' => nil, 'disk' => nil, 'cpus' => nil, 'vendor' => nil }
+                            **HOST_STATS.to_h { |k| [k, nil] } }
       h['workers'] |= [j['worker']]
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       next unless beat && j['load'] && (h['heartbeat_age_s'].nil? || now - beat < h['heartbeat_age_s'])
 
-      h.merge!('heartbeat_age_s' => (now - beat).to_i, 'load' => j['load'], 'mem' => j['mem'],
-               'disk' => j['disk'], 'cpus' => j['cpus'], 'vendor' => j['vendor'])
+      h.merge!('heartbeat_age_s' => (now - beat).to_i, **j.slice(*HOST_STATS))
     end
     hosts.values.sort_by { |h| h['host'] }.each { |h| h['workers'].sort! }
   end
@@ -224,9 +227,7 @@ module Archci
     end
     running = jobs('running').sort_by { |j| j['claimed'].to_s }.map do |j|
       job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i,
-                   'heartbeat_age_min' => ((now - j['mtime']) / 60).round,
-                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'], 'vendor' => j['vendor'],
-                   'cpu' => j['cpu'], 'rss_mib' => j['rss'], 'peak_mib' => j['peak'], 'build' => j['build'])
+                   'heartbeat_age_min' => ((now - j['mtime']) / 60).round, **j.slice(*HOST_STATS, *JOB_STATS))
     end
     failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
       job[j].merge('final' => j['final'] == '1', 'finished' => j['finished'],
@@ -241,8 +242,7 @@ module Archci
     end
     done = jobs('done').sort_by { |j| -j['mtime'].to_i }
     recent = done.first(50).map do |j|
-      job[j].merge('finished' => j['finished'], 'heartbeat' => j['heartbeat'],
-                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'], 'vendor' => j['vendor'])
+      job[j].merge('finished' => j['finished'], 'heartbeat' => j['heartbeat'], **j.slice(*HOST_STATS))
     end
     {
       'generated' => now.utc.iso8601,

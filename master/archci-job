@@ -6,8 +6,8 @@
 #                             the worker can build, else the next outstanding
 #                             package (archci-next ARCH), chosen just in time
 #   heartbeat ID [K=V...]     mark a running job as still alive; the worker's
-#                             load=, mem=, disk=, cpus=, vendor= and the job's cpu=,
-#                             rss=, peak=, build= are kept with the job
+#                             host stats (ARCHCI_HOST_STATS) and the job's
+#                             (ARCHCI_JOB_STATS) are kept with the job
 #   report ID STATUS          finish a job: success | failure | abandoned
 #                             (results are expected in incoming/ID/)
 #   requeue ID                move a running/failed job back to pending
@@ -35,7 +35,8 @@ lock_queue() {
 # job that ends (done/, failed/) keeps its last heartbeat stats and when that
 # beat arrived (the file's mtime): the host's last known state for the UIs.
 rewrite_job() {
-	local file=$1 dest=$2 tmp beat=() drop='worker|claimed|status|finished|final|heartbeat|load|mem|disk|cpus|vendor|cpu|rss|peak|build'
+	local file=$1 dest=$2 tmp beat=() drop
+	drop="worker|claimed|status|finished|final|heartbeat|$(archci_stats_re)"
 	shift 2
 	if [[ $dest == "$Q_DONE"/* || $dest == "$Q_FAILED"/* ]]; then
 		drop='worker|claimed|status|finished|final|heartbeat'
@@ -132,10 +133,10 @@ cmd_heartbeat() {
 	file=$Q_RUNNING/$id.job
 	[[ -f $file ]] || archci_die "job $id is not running"
 	for stat in "$@"; do
-		[[ $stat =~ ^(load|mem|disk|cpus|vendor|cpu|rss|peak|build)=[A-Za-z0-9./-]{1,32}$ ]] || archci_die "bad heartbeat stat: $stat"
+		[[ $stat =~ ^($(archci_stats_re))=[A-Za-z0-9./-]{1,32}$ ]] || archci_die "bad heartbeat stat: $stat"
 	done
 	if (( $# )); then
-		{ grep -Ev '^(load|mem|disk|cpus|vendor|cpu|rss|peak|build)=' "$file"; printf '%s\n' "$@"; } >"$file.tmp"
+		{ grep -Ev "^($(archci_stats_re))=" "$file"; printf '%s\n' "$@"; } >"$file.tmp"
 		mv "$file.tmp" "$file"   # the new mtime is the heartbeat
 	else
 		touch "$file"

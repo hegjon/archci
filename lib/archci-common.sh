@@ -101,6 +101,13 @@ archci_load_conf
 : "${ARCHCI_HEARTBEAT_SECONDS:=60}"
 export "${!ARCHCI_@}"
 
+# The heartbeat's stats, in one place (archci.rb keeps the same two lists):
+# the host's, sent by archci_worker_stats, and the job's, by archci_job_stats.
+# The master keeps them with the job (archci-job heartbeat) for the UIs.
+ARCHCI_HOST_STATS='load mem disk cpus vendor'
+ARCHCI_JOB_STATS='cpu rss peak build'
+archci_stats_re() { local s="$ARCHCI_HOST_STATS $ARCHCI_JOB_STATS"; printf '%s' "${s// /|}"; }
+
 # Master: the PKGBUILD repository clone and the package index over it.
 ARCHCI_PKGBUILDS_CLONE=$ARCHCI_HOME/pkgbuilds
 ARCHCI_PKGBUILDS_INDEX=$ARCHCI_HOME/pkgbuilds.index
