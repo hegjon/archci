@@ -71,13 +71,13 @@ grep -q '^attempt=1$' <<<"$out" || fail "attempt should be 1"
 "$job" heartbeat "$id"
 "$job" heartbeat "$id" load=1.50 mem=42 disk=61 cpus=4
 grep -q '^load=1.50$' "$ARCHCI_HOME/queue/running/$id.job" || fail "heartbeat stats not kept with the job"
-"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 cpu=3.7 rss=1840 peak=2100 build=5.0G
+"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu=3.7 rss=1840 peak=2100 build=5.0G
 grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats not kept"
 (( $(grep -c '^load=' "$ARCHCI_HOME/queue/running/$id.job") == 1 )) || fail "heartbeat stats must be replaced, not appended"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
-ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *x86_64  *0.10 .* 4  *1  *1$" || fail "archci-top must show the host's arch, stats, threads, worker count and active workers"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *x86_64  *DigitalOcean  *0.10 .* 4  *1  *1$" || fail "archci-top must show the host's arch, vendor, stats, threads, worker count and active workers"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "archci-top must show the signer status from signer.status"
 "$here/../master/archci-status" | grep -q "^  signer: 2 in staging (oldest 2 min)   release: x86_64 63 pkg  aarch64 unreachable" || fail "archci-status must show the signer status"
@@ -93,7 +93,7 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
 grep -q '^heartbeat=20[0-9][0-9]-.*Z$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep when its last heartbeat arrived"
-ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *x86_64  *0.10 .* 4  *1  *0$" || fail "archci-top must show an idle host with its last heartbeat and no active workers"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *x86_64  *DigitalOcean  *0.10 .* 4  *1  *0$" || fail "archci-top must show an idle host with its last heartbeat and no active workers"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"

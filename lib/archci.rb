@@ -111,14 +111,14 @@ module Archci
 
       host, port = worker_host(j['worker'])
       h = hosts[host] ||= { 'host' => host, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
-                            'load' => nil, 'mem' => nil, 'disk' => nil, 'cpus' => nil }
+                            'load' => nil, 'mem' => nil, 'disk' => nil, 'cpus' => nil, 'vendor' => nil }
       h['workers'] |= [j['worker']]
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       next unless beat && j['load'] && (h['heartbeat_age_s'].nil? || now - beat < h['heartbeat_age_s'])
 
       h.merge!('heartbeat_age_s' => (now - beat).to_i, 'load' => j['load'], 'mem' => j['mem'],
-               'disk' => j['disk'], 'cpus' => j['cpus'])
+               'disk' => j['disk'], 'cpus' => j['cpus'], 'vendor' => j['vendor'])
     end
     hosts.values.sort_by { |h| h['host'] }.each { |h| h['workers'].sort! }
   end
@@ -225,7 +225,7 @@ module Archci
     running = jobs('running').sort_by { |j| j['claimed'].to_s }.map do |j|
       job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i,
                    'heartbeat_age_min' => ((now - j['mtime']) / 60).round,
-                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'],
+                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'], 'vendor' => j['vendor'],
                    'cpu' => j['cpu'], 'rss_mib' => j['rss'], 'peak_mib' => j['peak'], 'build' => j['build'])
     end
     failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
@@ -242,7 +242,7 @@ module Archci
     done = jobs('done').sort_by { |j| -j['mtime'].to_i }
     recent = done.first(50).map do |j|
       job[j].merge('finished' => j['finished'], 'heartbeat' => j['heartbeat'],
-                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'])
+                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'], 'vendor' => j['vendor'])
     end
     {
       'generated' => now.utc.iso8601,

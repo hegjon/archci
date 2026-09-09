@@ -161,13 +161,15 @@ archci_read_job() {
 # what a worker sends with each heartbeat (archci-job heartbeat validates the
 # tokens and keeps them in the job file).
 archci_worker_stats() {
-	local load total avail used=0 disk
+	local load total avail used=0 disk vendor
 	read -r load _ </proc/loadavg
 	total=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
 	avail=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
 	(( total > 0 )) && used=$(( (total - avail) * 100 / total ))
 	disk=$(df --output=pcent "$ARCHCI_CHROOTS" 2>/dev/null | tail -1 | tr -dc 0-9)
-	printf 'load=%s mem=%s disk=%s cpus=%s\n' "$load" "$used" "${disk:-0}" "$(nproc)"
+	# who made the machine (DMI: "DigitalOcean", "AsrockRack"...), for the hosts table
+	vendor=$(tr -c 'A-Za-z0-9.-' '-' </sys/class/dmi/id/sys_vendor 2>/dev/null | sed -E 's/-+$//; s/^-+//' | cut -c1-32)
+	printf 'load=%s mem=%s disk=%s cpus=%s%s\n' "$load" "$used" "${disk:-0}" "$(nproc)" "${vendor:+ vendor=$vendor}"
 }
 
 # archci_job_stats JOBDIR UNIT -> "cpu=<cores> rss=<MiB> peak=<MiB> build=<MiB>"
