@@ -120,6 +120,12 @@ rescue StandardError
   {}
 end
 
+# top's looks on a terminal: inverse column headers, bold figures. Plain when
+# the output is not a terminal (--once into a pipe, the tests).
+STYLE = $stdout.tty?
+def inv(s)  = STYLE ? "\e[7m#{s}\e[0m" : s
+def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
+
 def frame(journal)
   now = Time.now
   width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
@@ -134,13 +140,13 @@ def frame(journal)
   out << format('queue: pending %d  running %d  failed %d  done %d (%d in the last hour)    outstanding: %d update(s), %d unbuilt',
                 counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                 snap['outstanding']['updates'], snap['outstanding']['backlog'])
-  out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{n}/#{snap['tracked'][k]}" }.join('  '))
+  out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{bold(n)}/#{snap['tracked'][k]}" }.join('  '))
   # the signer, as seen through R2 by archci-signer-status: staging backlog
   # and the released databases' age and size
   if (s = snap['signer'])
     st = s['staging'] || {}
-    line = format('signer: staging %d pkg%s', st['waiting'].to_i, st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
-    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{r['packages']} pkg" : "#{a} unreachable" }
+    line = format('signer: staging %s pkg%s', bold(st['waiting'].to_i), st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
+    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} unreachable" }
     line += "   release #{rel.join('  ')}" unless rel.empty?
     line += "   [status #{elapsed(s['age_s'])} old]" if s['age_s'] > 600
     out << line
@@ -149,7 +155,7 @@ def frame(journal)
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
-  out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', 'MEM%', 'DISK%', 'THREADS', 'WORKERS', 'ACTIVE')
+  out << inv(format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%MEM', '%DISK', 'THREADS', 'WORKERS', 'ACTIVE').ljust(width)[0, width])
   # the load in five characters: as sent (two decimals) below 100, whole from 100
   load = ->(l) { l.nil? ? '-' : (l.to_f < 100 ? l : format('%.0f', l.to_f)) }
   snap['hosts'].each do |h|
@@ -158,7 +164,7 @@ def frame(journal)
   end
   out << ''
 
-  out << format('%-8s %-22s %-8s %-3s %4s %5s %5s %5s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'MEM', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output')
+  out << inv(format('%-8s %-22s %-8s %-3s %4s %5s %5s %5s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'MEM', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output').ljust(width)[0, width])
   # a MiB count in five characters: 458M up to 999M, then 1.2G
   mem = ->(v) { v.nil? ? '-' : (v.to_i > 999 ? format('%.1fG', v.to_i / 1024.0) : "#{v}M") }
   # PHASE and the last output line from the journal (journal_tails), '-'
