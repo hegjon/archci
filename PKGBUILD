@@ -63,6 +63,7 @@ package_archci-git() {
   printf '%s\n' "$pkgver-$pkgrel" >"$pkgdir$_libdir/VERSION"   # what `archci version` prints
   install -d "$pkgdir/usr/bin"
   ln -s "$_libdir/bin/archci" "$pkgdir/usr/bin/archci"
+  install -Dm644 config/bash-completion/archci "$pkgdir/usr/share/bash-completion/completions/archci"
   # the live config is a stub (only what differs from the defaults goes in),
   # so an upgrade rarely has a .pacnew to offer; the annotated full sample
   # is documentation

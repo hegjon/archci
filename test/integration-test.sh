@@ -455,4 +455,21 @@ grep -q '^  shell' <<<"$help" && fail "archci-shell is not a subcommand"
 ! "$archci" shell 2>/dev/null || fail "archci shell must be refused"
 [[ $("$archci" version) == "archci "?* && $("$archci" --version) == "$("$archci" version)" ]] || fail "archci version must print a version: $("$archci" version)"
 ! "$archci" nosuch 2>/dev/null || fail "an unknown subcommand must fail"
+
+echo "--- bash completion: subcommands, job subcommands, job ids"
+complete_words() {   # complete_words WORD... -> COMPREPLY for the last (possibly empty) word
+	# shellcheck disable=SC2034  # COMP_WORDS/COMP_CWORD are what the completion reads
+	COMP_WORDS=("$@") COMP_CWORD=$(( $# - 1 )); COMPREPLY=()
+	_archci; printf '%s\n' "${COMPREPLY[@]}"
+}
+# shellcheck disable=SC1091
+source "$here/../config/bash-completion/archci"
+PATH=$here/../bin:$PATH
+complete_words archci "" | grep -qx job || fail "completion must offer the installed subcommands"
+complete_words archci "" | grep -qx version || fail "completion must offer version"
+complete_words archci to | grep -qx top || fail "completion must narrow on the prefix"
+complete_words archci job "" | grep -qx retry || fail "completion must offer archci job's subcommands"
+complete_words archci job retry "" | grep -qx -- --all || fail "archci job retry must offer --all"
+complete_words archci job retry "" | grep -q "dup-1\|acl\|libsigc" || fail "archci job retry must offer the queue's job ids"
+complete_words archci top -- | grep -qx -- --no-journal || fail "archci top must offer --no-journal"
 echo "ALL OK"

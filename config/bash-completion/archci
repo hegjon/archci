@@ -1,0 +1,80 @@
+# shellcheck shell=bash
+# bash completion for archci: the subcommands installed on this host (what
+# `archci help` lists), their options, and where it fits, job ids from the
+# master's queue, package names and arches. Installed as
+# /usr/share/bash-completion/completions/archci; a zsh user gets it through
+# bashcompinit.
+
+_archci_home() {
+	local home
+	home=$(sed -n 's/^ARCHCI_HOME=//p' /etc/archci/archci.conf 2>/dev/null | tail -1)
+	home=${home%\"}; home=${home#\"}
+	printf '%s' "${ARCHCI_HOME:-${home:-/var/lib/archci}}"
+}
+
+_archci_arches() {
+	local a
+	a=$(sed -n 's/^ARCHCI_ARCHES=//p' /etc/archci/archci.conf 2>/dev/null | tail -1)
+	a=${a%\"}; a=${a#\"}
+	printf '%s' "${a:-$(uname -m)}"
+}
+
+# job ids of the queues named (running, failed, pending)
+_archci_jobs() {
+	local home q f
+	home=$(_archci_home)
+	for q in "$@"; do
+		for f in "$home/queue/$q"/*.job; do
+			[[ -e $f ]] || continue
+			f=${f##*/}; printf '%s\n' "${f%.job}"
+		done
+	done
+}
+
+_archci() {
+	local cur prev sub words
+	if declare -F _init_completion >/dev/null; then
+		local cword
+		_init_completion -n : || return
+	else
+		words=("${COMP_WORDS[@]}") cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
+	fi
+	COMPREPLY=()
+	if (( COMP_CWORD == 1 )); then
+		mapfile -t COMPREPLY < <(compgen -W "$(archci help 2>/dev/null | awk '/^  [a-z]/ { print $1 }') help version" -- "$cur")
+		return
+	fi
+	sub=${words[1]}
+	case $sub in
+		job)
+			if (( COMP_CWORD == 2 )); then
+				mapfile -t COMPREPLY < <(compgen -W 'enqueue retry requeue report claim heartbeat' -- "$cur")
+				return
+			fi
+			case ${words[2]} in
+				retry)   mapfile -t COMPREPLY < <(compgen -W "--all -a $(_archci_jobs failed running)" -- "$cur") ;;
+				requeue) mapfile -t COMPREPLY < <(compgen -W "$(_archci_jobs running failed)" -- "$cur") ;;
+				report)  (( COMP_CWORD == 3 )) && mapfile -t COMPREPLY < <(compgen -W "$(_archci_jobs running)" -- "$cur")
+				         (( COMP_CWORD == 4 )) && mapfile -t COMPREPLY < <(compgen -W 'success failure abandoned' -- "$cur") ;;
+				enqueue) (( COMP_CWORD == 3 )) && mapfile -t COMPREPLY < <(compgen -W "$(archci pkgs 2>/dev/null | awk '{ print $1 }')" -- "$cur")
+				         (( COMP_CWORD == 5 )) && mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches) any" -- "$cur") ;;
+			esac
+			;;
+		top)      mapfile -t COMPREPLY < <(compgen -W '-n --once --no-journal' -- "$cur") ;;
+		status)   mapfile -t COMPREPLY < <(compgen -W '--json' -- "$cur") ;;
+		sign)     mapfile -t COMPREPLY < <(compgen -W '--unlock' -- "$cur") ;;
+		stage)    mapfile -t COMPREPLY < <(compgen -W '--force' -- "$cur") ;;
+		next)     mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches)" -- "$cur") ;;
+		pkgs)     mapfile -t COMPREPLY < <(compgen -W "$(archci pkgs 2>/dev/null | awk '{ print $1 }')" -- "$cur") ;;
+		qemu-setup) mapfile -t COMPREPLY < <(compgen -W "--remove $(_archci_arches)" -- "$cur") ;;
+		authorize)
+			if [[ $cur == -* ]]; then mapfile -t COMPREPLY < <(compgen -W '--revoke' -- "$cur")
+			else mapfile -t COMPREPLY < <(compgen -f -- "$cur"); fi
+			;;
+		authorize-builder) mapfile -t COMPREPLY < <(compgen -f -- "$cur") ;;
+	esac
+	# job ids hold colons (epochs); keep the part bash has not split off
+	declare -F __ltrim_colon_completions >/dev/null && __ltrim_colon_completions "$cur"
+}
+
+complete -F _archci archci
