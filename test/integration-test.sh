@@ -435,6 +435,15 @@ ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep
 touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^idle-host " && fail "a worker that stopped polling must drop out of the hosts table"
 
+echo "--- a claim from a worker whose job is still running hands that job back"
+id=$(sed -n 's/^id=//p' < <("$job" claim dup-1 x86_64))
+[[ -n $id ]] || fail "dup-1 should have got a pending job"
+out=$("$job" claim dup-1 x86_64 2>&1)   # captured: grep -q on a pipe would SIGPIPE the writer
+grep -q "still running for dup-1, which asks for new work; requeued" <<<"$out" || fail "the second claim must hand the running job back first: $out"
+(( $(grep -l '^worker=dup-1$' "$ARCHCI_HOME"/queue/running/*.job | wc -l) == 1 )) || fail "dup-1 must hold exactly one running job"
+# the job handed back is first in pending, so the same worker gets it again: attempt 1, not 2
+grep -q '^attempt=1$' "$ARCHCI_HOME/queue/running/$id.job" || fail "the orphaned attempt must not count: $(grep ^attempt= "$ARCHCI_HOME/queue/running/$id.job")"
+
 echo "--- archci <name> runs archci-<name> of an installed role"
 archci=$here/../bin/archci
 help=$("$archci" help)   # grep -q on a pipe would SIGPIPE the writer under pipefail

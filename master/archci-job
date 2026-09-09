@@ -48,6 +48,20 @@ cmd_claim() {
 		mv "$ARCHCI_HOME/hosts/$worker.tmp" "$ARCHCI_HOME/hosts/$worker"
 	fi
 	lock_queue
+	# A worker runs one job at a time, so a claim while one of its jobs is
+	# still running means that job died with the worker's previous process
+	# (a restart between this master's answer and the worker reading it).
+	# Hand it back without counting the attempt, as for an abandoned job.
+	local orphan
+	shopt -s nullglob
+	for orphan in "$Q_RUNNING"/*.job; do
+		archci_read_job "$orphan" || continue
+		[[ $job_worker == "$worker" ]] || continue
+		archci_log "$job_id: still running for $worker, which asks for new work; requeued"
+		set_attempt "$orphan" $((job_attempt - 1))
+		requeue_file "$orphan"
+	done
+	shopt -u nullglob
 	local name='' pend p
 	local LC_ALL=C                       # deterministic, ASCII filename order
 	shopt -s nullglob; pend=("$Q_PENDING"/*.job); shopt -u nullglob
