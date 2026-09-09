@@ -46,7 +46,7 @@ if json
 end
 
 if once
-  puts frame(journal)
+  puts frame(journal, hint: false)
   exit
 end
 

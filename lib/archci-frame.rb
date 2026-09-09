@@ -122,8 +122,9 @@ STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
 # journal: the remote journal directory for PHASE and the last output line,
-# nil for none; snap: a snapshot already taken
-def frame(journal, snap = nil)
+# nil for none; snap: a snapshot already taken; hint: the quit hint in the
+# title (not when the frame is printed once)
+def frame(journal, snap = nil, hint: true)
   now = Time.now
   width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
   snap ||= Archci.snapshot(now)
@@ -133,8 +134,8 @@ def frame(journal, snap = nil)
   failed = snap['failed'].first(5)
 
   out = []
-  out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s   (q or Esc quits)', now.strftime('%H:%M:%S'), repo,
-                snap['arches'].join(' '))
+  out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s%s', now.strftime('%H:%M:%S'), repo,
+                snap['arches'].join(' '), hint ? '   (q or Esc quits)' : '')
   out << format('queue: pending %s  running %s  failed %s  done %s (%s in the last hour)    outstanding: %s update(s), %s unbuilt',
                 *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                   snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })
