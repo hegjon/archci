@@ -1,4 +1,4 @@
-# config/archci.conf, installed as /etc/archci/archci.conf -- every role. Plain KEY=value,
+# config/archci.conf.example -- every setting, annotated, with its default. Plain KEY=value,
 # read by bash (sourced) and by the ruby scripts. Keep comments on their own line.
 
 ## Common ---------------------------------------------------------------------

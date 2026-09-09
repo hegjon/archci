@@ -232,7 +232,8 @@ worker/   archci-worker, archci-build, archci-worker-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
 arch/     chroot configs for arches devtools ships none for (aarch64/makepkg.conf.sed, qemu/)
 config/   what the packages install outside /usr/lib/archci:
-  archci.conf  the configuration, installed as /etc/archci/archci.conf
+  archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
+  archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
   systemd/  units and timers per role, the worker's journal tunnel and
             namespace, tmpfiles and sysusers, journal-remote drop-ins (master)
   ssh/      sshd_config.d/archci.conf: worker keys from /etc/archci/authorized_keys

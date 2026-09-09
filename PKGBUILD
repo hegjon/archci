@@ -64,10 +64,14 @@ package_archci-git() {
   install -Dm755 bin/archci "$pkgdir$_libdir/bin/archci"
   install -d "$pkgdir/usr/bin"
   ln -s "$_libdir/bin/archci" "$pkgdir/usr/bin/archci"
+  # the live config is a stub (only what differs from the defaults goes in),
+  # so an upgrade rarely has a .pacnew to offer; the annotated full sample
+  # is documentation
   install -Dm644 config/archci.conf "$pkgdir/etc/archci/archci.conf"
+  install -Dm644 config/archci.conf.example "$pkgdir/usr/share/doc/archci/archci.conf.example"
   install -Dm644 config/systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
-  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgbase/README.md"
-  install -Dm644 docs/*.md -t "$pkgdir/usr/share/doc/$pkgbase/docs"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/archci/README.md"
+  install -Dm644 docs/*.md -t "$pkgdir/usr/share/doc/archci/docs"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgbase/LICENSE"
 }
 
