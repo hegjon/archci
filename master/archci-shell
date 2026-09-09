@@ -12,6 +12,9 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 read -ra argv <<<"${SSH_ORIGINAL_COMMAND:-}"
 case ${argv[0]:-} in
 	claim|heartbeat|report) exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
-	rsync) exec rrsync -wo -no-del "$ARCHCI_HOME/incoming" ;;
+	# -no-lock: rrsync 3.5 otherwise holds a lock on incoming/ for the whole
+	# transfer, and every other worker's upload fails while one is running
+	# (a debug package can take minutes to arrive).
+	rsync) exec rrsync -wo -no-del -no-lock "$ARCHCI_HOME/incoming" ;;
 	*) archci_log "refused: ${SSH_ORIGINAL_COMMAND:-<none>}"; exit 2 ;;
 esac
