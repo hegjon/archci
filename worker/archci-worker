@@ -18,6 +18,15 @@
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
+# A package upgrade replaces this script and the library under a running
+# worker; the loop notices (the files' inode, mtime and size against what it
+# started with) and re-executes itself between jobs, so a release takes
+# effect at the next job boundary with no restart.
+self=$(readlink -f "${BASH_SOURCE[0]}")
+code_files=("$self" "$ARCHCI_ROOT/lib/archci-common.sh")
+code_sig=$(stat -c '%i %Y %s' "${code_files[@]}" | tr '\n' ' ')
+orig_args=("$@")
+
 instance=${1:-1}
 if [[ -n ${2:-} ]]; then
 	archci_valid_arch "$2" || archci_die "invalid arch: $2"
@@ -56,6 +65,10 @@ archci_valid_arch "$ARCHCI_ARCH" || archci_die "invalid ARCHCI_ARCH: $ARCHCI_ARC
 archci_log "worker $worker ($ARCHCI_ARCH) started, master $ARCHCI_MASTER"
 down=0
 while true; do
+	if [[ $(stat -c '%i %Y %s' "${code_files[@]}" 2>/dev/null | tr '\n' ' ') != "$code_sig" ]]; then
+		archci_log "archci-worker or its library changed on disk; restarting on the new code"
+		exec "$self" "${orig_args[@]}"
+	fi
 	# the poll carries the host's stats, so the master's hosts table stays
 	# current while this worker is idle (heartbeats only flow during a build)
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
