@@ -50,6 +50,13 @@ def hms(seconds)
   format('%02d:%02d:%02d', s / 3600, s % 3600 / 60, s % 60)
 end
 
+# A worker id with an emulated arch in it, host-aarch64-2, shown as host-a2:
+# the ARCH column says which arch; the letter keeps it apart from host-2.
+def short_worker(worker)
+  host, port = Archci.worker_host(worker.to_s)
+  port ? "#{host}-#{port[0]}#{worker[/(\d+)\z/, 1]}" : worker
+end
+
 # The build unit's name on the worker (archci-worker's rule) and, from its
 # journal streamed to the master, the makepkg phase and last output line.
 def unit_name(j)
@@ -186,7 +193,7 @@ def frame(journal)
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = tails[unit_name(j)] || ['', '']
-    line = format('%8s %-22s %-7s %3d %4s %5s %5s %5s %6s  %-9s %s %s', hms(since), j['worker'], j['arch'], j['attempt'], hb,
+    line = format('%8s %-22s %-7s %3d %4s %5s %5s %5s %6s  %-9s %s %s', hms(since), short_worker(j['worker']), j['arch'], j['attempt'], hb,
                   j['cpu'] ? (j['cpu'].to_f * 100).round.to_s : '-', mem[j['rss']], mem[j['peak']], j['build'] || '-',
                   phase.empty? ? '-' : phase[0, 9], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
