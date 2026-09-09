@@ -82,7 +82,7 @@ ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "archci-top must show the signer status from signer.status"
 "$here/../master/archci-status" | grep -q "^  signer: 2 in staging (oldest 2 min)   release: x86_64 63 pkg  aarch64 unreachable" || fail "archci-status must show the signer status"
-COLUMNS=200 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "  370  1.8G  2.1G  5.0G  -        acl 1:2.3.2-1 | -" || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
+COLUMNS=200 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "  370  5.0G  1.8G  2.1G  -        acl 1:2.3.2-1 | -" || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
@@ -433,7 +433,7 @@ echo "--- a claim carries the host's stats; an idle worker's host still shows"
 ARCHCI_ARCHES="x86_64 riscv64" ARCHCI_PKG_SOURCES=nothing "$job" claim idle-host-1 riscv64 load=0.50 mem=10 disk=20 cpus=2 vendor=DigitalOcean | grep -q . && fail "an idle poll must get no job here"
 grep -q '^vendor=DigitalOcean$' "$ARCHCI_HOME/hosts/idle-host-1" || fail "the claim's host stats must be kept in hosts/"
 grep -q '^seen=20' "$ARCHCI_HOME/hosts/idle-host-1" || fail "hosts/ entry must say when the worker polled"
-ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^idle-host  *DigitalOcean  *riscv64  *0.50  *10  *20  *2  *1  *0$" || fail "archci-top must show an idle host from its poll: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep idle-host)"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^idle-host  *DigitalOcean  *riscv64  *0.50  *20  *10  *2  *1  *0$" || fail "archci-top must show an idle host from its poll: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep idle-host)"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! ARCHCI_ARCHES="x86_64 riscv64" "$job" claim idle-host-1 riscv64 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
 touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
