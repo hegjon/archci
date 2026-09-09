@@ -431,7 +431,7 @@ release public key for clients, and:
 
 ```
 archci sign --unlock                      # enter the passphrase once per session
-systemctl start archci-sign.timer        # sign new packages every 2 minutes
+systemctl start archci-sign.timer        # sign new packages every minute
 systemctl start archci-sign-health.timer # warn if signing stalls
 journalctl -u archci-sign -f
 ```

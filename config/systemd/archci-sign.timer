@@ -1,9 +1,9 @@
 [Unit]
-Description=archci signer: sign every 2 minutes
+Description=archci signer: sign every minute
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=2min
+OnBootSec=1min
+OnUnitActiveSec=1min
 
 [Install]
 WantedBy=timers.target
