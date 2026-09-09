@@ -1,43 +1,35 @@
 # Operating it
 
-`archci status` is the at-a-glance view of the farm. A live example from the
-prototype, part way through building `core`:
+`archci top` is the live view of the farm, redrawn every few seconds:
+the queue, what each host and worker is doing, and the newest failures.
+`archci status` prints the same frame once (plus the last packages built),
+and `archci status --json` is the same data for scripts. A frame from the
+test instance, four emulated builds running on the desktop and the x86_64
+workers idle:
 
 ```
-archci master status  (2026-09-06T08:34:59Z)
+archci-top  21:09:10   pkgbuilds -> [hegjon-test]   arches: x86_64 aarch64 riscv64   (q or Esc quits)
+queue: pending 9  running 4  failed 55  done 590 (3 in the last hour)    outstanding: 0 update(s), 850 unbuilt
+built: x86_64 428/569  aarch64 29/569  riscv64 16/569  any 85/119
+signer: staging 0 pkg   release x86_64 366 pkg  aarch64 152 pkg  riscv64 139 pkg
 
-  queue: pending=0  running=2  done=94  failed=11
-  outstanding: 0 update(s), 8158 unbuilt
-  built: core 51/177  extra 0/8045
+HOST                   VENDOR        ARCH     LOAD %DISK  %MEM THREADS WORKERS ACTIVE
+jonny-ryzen9           AsrockRack    x86_64  12.35    46    18      32       8      4
+worker1                DigitalOcean  x86_64   0.57  63.7  32.4       1       1      0
+worker2                DigitalOcean  x86_64   0.06  57.6  31.9       1       1      0
 
-  running:
-    core/guile 3.0.11-1                      worker1-1            attempt 1  heartbeat 2m ago
-    core/kmod 34.2-1                         worker2-1            attempt 1  heartbeat 2m ago
+ELAPSED  WORKER                 ARCH    ATT   HB  %CPU  DISK   MEM  PEAK  PHASE    PACKAGE  | last output
+03:12:00 jonny-ryzen9-a1        aarch64   1  23s   100  1.9G  2.5G  2.6G  check    glibc 2.44+r24+g16be1518495f-1 | gc
+00:17:05 jonny-ryzen9-a2        aarch64   2  42s   150  271M  632M  714M  prepare  coreutils 9.11-2.1 | Creating lib/g
+01:04:31 jonny-ryzen9-r1        riscv64   1  57s   100  451M  1.0G  2.9G  check    elfutils 0.196-1 | /usr/bin/ld: war
+05:31:44 jonny-ryzen9-r2        riscv64   1  49s   100  1.4G  2.0G  9.4G  build    binutils 2.47-4 | libtool: compile:
 
-  failed (11, newest first):
-    core/grub 2:2.14-1                       worker2-1            attempt 1
-    core/gnutls 3.8.13-2                     worker1-1            attempt 1
-    core/gpm 1.20.7.r38.ge82d1a6-6           worker2-1            attempt 1
-    core/gcc 16.2.1+r23+gd564253eb6c8-1      worker2-1            attempt 3  GAVE UP
-    core/glibc 2.44+r24+g16be1518495f-1      worker1-1            attempt 1
-    core/gettext 1.0-2                       worker2-1            attempt 1
-    core/elfutils 0.196-1                    worker1-1            attempt 3  GAVE UP
-    core/dmraid 1.0.0.rc16.3-15              worker1-1            attempt 3  GAVE UP
-    core/curl 8.22.0-1                       worker1-1            attempt 3  GAVE UP
-    core/coreutils 9.11-2                    worker1-1            attempt 3  GAVE UP
-    core/bison 3.8.2-8                       worker1-1            attempt 3  GAVE UP
-
-  recently built:
-    core/keyutils 1.6.3-4                    worker2-1            2026-09-06T08:33:00Z
-    core/kbd 2.10.0-1                        worker2-1            2026-09-06T08:32:31Z
-    core/json-c 0.19-1                       worker2-1            2026-09-06T08:30:18Z
-    core/jfsutils 1.1.15-9                   worker2-1            2026-09-06T08:28:59Z
-    core/jansson 2.15.1-1                    worker2-1            2026-09-06T08:28:01Z
-    core/iw 6.17-1                           worker2-1            2026-09-06T08:27:14Z
-    core/iputils 20250605-1                  worker2-1            2026-09-06T08:26:38Z
-    core/iptables 1:1.8.13-1                 worker2-1            2026-09-06T08:25:58Z
-    core/iproute2 7.2.0-1                    worker2-1            2026-09-06T08:22:47Z
-    core/inetutils 2.8-1                     worker2-1            2026-09-06T08:18:52Z
+FAILED (newest first)              ARCH     WORKER            FAILURES  GAVE UP  LAST FAILURE
+grub 2:2.14-1                      x86_64   worker1-1                3      yes  2026-09-09T21:07:10Z
+python-sphinx 9.1.0-1              any      jonny-ryzen9-4           3      yes  2026-09-09T21:06:07Z
+brltty 6.9.1-3                     x86_64   jonny-ryzen9-1           3      yes  2026-09-09T21:06:06Z
+libadwaita 1:1.9.3-1               x86_64   jonny-ryzen9-2           3      yes  2026-09-09T21:05:34Z
+dtc 1:1.8.1-1                      x86_64   worker2-1                3      yes  2026-09-09T21:04:35Z
 ```
 
 Every command is a subcommand of `archci` (`archci job`, `archci top`, ...;
