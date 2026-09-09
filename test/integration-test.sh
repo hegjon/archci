@@ -422,6 +422,18 @@ done
 ! "$job" retry 2>/dev/null || fail "retry needs a job id or --all"
 "$job" retry -a   # nothing failed: fine, retries 0
 
+echo "--- a claim carries the host's stats; an idle worker's host still shows"
+# a riscv64 poll: the pending x86_64 jobs are not its to take, and with no
+# package source enabled nothing is outstanding, so it gets no job
+ARCHCI_ARCHES="x86_64 riscv64" ARCHCI_PKG_SOURCES=nothing "$job" claim idle-host-1 riscv64 load=0.50 mem=10 disk=20 cpus=2 vendor=DigitalOcean | grep -q . && fail "an idle poll must get no job here"
+grep -q '^vendor=DigitalOcean$' "$ARCHCI_HOME/hosts/idle-host-1" || fail "the claim's host stats must be kept in hosts/"
+grep -q '^seen=20' "$ARCHCI_HOME/hosts/idle-host-1" || fail "hosts/ entry must say when the worker polled"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^idle-host  *DigitalOcean  *riscv64  *0.50  *10  *20  *2  *1  *0$" || fail "archci-top must show an idle host from its poll: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep idle-host)"
+# shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
+! ARCHCI_ARCHES="x86_64 riscv64" "$job" claim idle-host-1 riscv64 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
+touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^idle-host " && fail "a worker that stopped polling must drop out of the hosts table"
+
 echo "--- archci <name> runs archci-<name> of an installed role"
 archci=$here/../bin/archci
 help=$("$archci" help)   # grep -q on a pipe would SIGPIPE the writer under pipefail

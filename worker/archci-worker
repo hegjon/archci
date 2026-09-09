@@ -55,7 +55,10 @@ trap on_term TERM INT
 archci_valid_arch "$ARCHCI_ARCH" || archci_die "invalid ARCHCI_ARCH: $ARCHCI_ARCH"
 archci_log "worker $worker ($ARCHCI_ARCH) started, master $ARCHCI_MASTER"
 while true; do
-	if ! master claim "$worker" "$ARCHCI_ARCH" >"$claim"; then
+	# the poll carries the host's stats, so the master's hosts table stays
+	# current while this worker is idle (heartbeats only flow during a build)
+	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
+	if ! master claim "$worker" "$ARCHCI_ARCH" $(archci_worker_stats) >"$claim"; then
 		archci_log "master unreachable, retrying in ${ARCHCI_IDLE_SLEEP}s"
 		rm -f "$claim"
 		sleep "$ARCHCI_IDLE_SLEEP"

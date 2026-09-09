@@ -1,10 +1,14 @@
 #!/bin/bash
 # archci-job -- master-side queue operations (runs as the archci user).
 #
-#   claim WORKER ARCH         hand the next job to WORKER (building ARCH) and
+#   claim WORKER ARCH [K=V...]
+#                             hand the next job to WORKER (building ARCH) and
 #                             print it: the first pending file
 #                             the worker can build, else the next outstanding
-#                             package (archci-next ARCH), chosen just in time
+#                             package (archci-next ARCH), chosen just in time.
+#                             The host stats sent along (ARCHCI_HOST_STATS) are
+#                             kept in hosts/WORKER: the host as last polled,
+#                             for the UIs while the worker is idle
 #   heartbeat ID [K=V...]     mark a running job as still alive; the worker's
 #                             host stats (ARCHCI_HOST_STATS) and the job's
 #                             (ARCHCI_JOB_STATS) are kept with the job
@@ -94,10 +98,20 @@ find_job() {  # find_job ID DIR... -> path
 
 # ---------------------------------------------------------------------------
 cmd_claim() {
-	local worker=$1 warch=$2
+	local worker=$1 warch=$2 stat hostre
+	shift 2
 	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
 	archci_valid_arch "$warch" || archci_die "invalid arch: $warch"
 	archci_enabled_arch "$warch" || archci_die "arch $warch is not enabled on this master (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
+	if (( $# )); then
+		hostre=${ARCHCI_HOST_STATS// /|}
+		for stat in "$@"; do
+			[[ $stat =~ ^($hostre)=[A-Za-z0-9./-]{1,32}$ ]] || archci_die "bad host stat: $stat"
+		done
+		mkdir -p "$ARCHCI_HOME/hosts"
+		{ printf 'worker=%s\narch=%s\nseen=%s\n' "$worker" "$warch" "$(archci_now)"; printf '%s\n' "$@"; } >"$ARCHCI_HOME/hosts/$worker.tmp"
+		mv "$ARCHCI_HOME/hosts/$worker.tmp" "$ARCHCI_HOME/hosts/$worker"
+	fi
 	lock_queue
 	local name='' pend p
 	local LC_ALL=C                       # deterministic, ASCII filename order
@@ -301,7 +315,7 @@ cmd_reap() {
 cmd=${1:-}
 shift || true
 case $cmd in
-	claim)     (( $# == 2 )) || archci_die "usage: archci-job claim WORKER ARCH"; cmd_claim "$@" ;;
+	claim)     (( $# >= 2 )) || archci_die "usage: archci-job claim WORKER ARCH [K=V...]"; cmd_claim "$@" ;;
 	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; cmd_heartbeat "$@" ;;
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;

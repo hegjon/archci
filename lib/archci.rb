@@ -102,14 +102,19 @@ module Archci
     end
   end
 
-  # One entry per host seen among RUNNING and RECENT jobs, from the newest
-  # heartbeat any of its workers sent: a running job's, or for an idle host
-  # the last beat a finished job kept. The native arch is what a worker
-  # without an arch in its name builds ("any" jobs are the any arch's).
-  def self.hosts(running, recent, now)
+  # One entry per host seen among RUNNING and RECENT jobs and the workers'
+  # POLLS (hosts/<worker>, written by every claim), from the newest stats any
+  # of its workers sent: a running job's heartbeat, an idle worker's poll, or
+  # the last beat a finished job kept. A worker whose last poll is older than
+  # POLL_TTL is gone. The native arch is what a worker without an arch in its
+  # name builds ("any" jobs are the any arch's).
+  POLL_TTL = 600
+
+  def self.hosts(running, recent, polls, now)
     hosts = {}
     seen = running.map { |j| [j, now - j['heartbeat_age_s'], true] } +
-           recent.map { |j| [j, (j['heartbeat'] && Time.iso8601(j['heartbeat'])), false] }
+           recent.map { |j| [j, (j['heartbeat'] && Time.iso8601(j['heartbeat'])), false] } +
+           polls.map { |p| [p, (p['seen'] && Time.iso8601(p['seen'])), false] }.reject { |_, t, _| t.nil? || now - t > POLL_TTL }
     seen.each do |j, beat, running_now|
       next unless j['worker']
 
@@ -257,7 +262,7 @@ module Archci
       'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
       'tracked' => sets.to_h,
       'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
-      'hosts' => hosts(running, recent, now),
+      'hosts' => hosts(running, recent, Dir.glob(File.join(home, 'hosts', '*')).filter_map { |p| read_job(p) }, now),
       'signer' => signer,
       'running' => running,
       'failed' => failed,

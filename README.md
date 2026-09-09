@@ -94,7 +94,9 @@ other package is offered to every enabled arch: a port arch builds PKGBUILDs
 that only list x86_64 with `--ignorearch` (see [docs/ports.md](docs/ports.md)),
 unless `ARCHCI_IGNOREARCH=0` limits it to packages that list the arch.
 
-**Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>`. The
+**Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>` once a
+minute, with the host's load, memory, disk and vendor, which the master keeps
+per worker for `archci top` while the worker is idle. The
 master's forced command (`archci-shell`) takes the first file in
 `queue/pending/` (manual enqueues and retries) the worker's arch can build,
 or else asks `archci next` for the next outstanding package and writes a job
