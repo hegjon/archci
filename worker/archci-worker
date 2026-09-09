@@ -54,16 +54,20 @@ trap on_term TERM INT
 
 archci_valid_arch "$ARCHCI_ARCH" || archci_die "invalid ARCHCI_ARCH: $ARCHCI_ARCH"
 archci_log "worker $worker ($ARCHCI_ARCH) started, master $ARCHCI_MASTER"
+down=0
 while true; do
 	# the poll carries the host's stats, so the master's hosts table stays
 	# current while this worker is idle (heartbeats only flow during a build)
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
 	if ! master claim "$worker" "$ARCHCI_ARCH" $(archci_worker_stats) >"$claim"; then
-		archci_log "master unreachable, retrying in ${ARCHCI_IDLE_SLEEP}s"
+		(( down )) || archci_log "master unreachable, retrying every ${ARCHCI_IDLE_SLEEP}s"   # once, not once a minute all weekend
+		down=1
 		rm -f "$claim"
 		sleep "$ARCHCI_IDLE_SLEEP"
 		continue
 	fi
+	(( down )) && archci_log "master reachable again"
+	down=0
 	if [[ ! -s $claim ]]; then
 		rm -f "$claim"
 		sleep "$ARCHCI_IDLE_SLEEP"
@@ -93,9 +97,16 @@ while true; do
 	# master keeps with the job for archci-top and archci-status.
 	(
 		trap - TERM INT
+		hb_down=0
 		while sleep "$ARCHCI_HEARTBEAT_SECONDS"; do
 			# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-			master heartbeat "$job_id" $(archci_worker_stats) $(archci_job_stats "$jobdir" "$unit") || archci_log "heartbeat for $job_id failed"
+			if master heartbeat "$job_id" $(archci_worker_stats) $(archci_job_stats "$jobdir" "$unit"); then
+				(( hb_down )) && archci_log "heartbeat for $job_id reaches the master again"
+				hb_down=0
+			else
+				(( hb_down )) || archci_log "heartbeat for $job_id failed; the build goes on"
+				hb_down=1
+			fi
 		done
 	) &
 	heartbeat=$!
@@ -114,19 +125,18 @@ while true; do
 	unit=
 
 	# Upload the results, then report. While the master is unreachable (a
-	# reboot, a longer outage) the finished build is kept and retried every
-	# 30 s for ARCHCI_UPLOAD_MINUTES; a heartbeat first keeps the master's
+	# reboot, a night, a weekend) the finished build is kept and retried every
+	# 30 s for as long as it takes; a heartbeat first keeps the master's
 	# reaper from requeueing the job as stale when it comes back. Only ssh
 	# failures (exit 255) mean "unreachable": a heartbeat or report the master
 	# itself refuses says the job is no longer ours (reaped, or re-claimed by
-	# another worker), and the results are dropped.
-	deadline=$(( $(date +%s) + ARCHCI_UPLOAD_MINUTES * 60 ))
+	# another worker), and only then are the results dropped.
 	uploaded=0 try=0 dropped=0
-	while (( $(date +%s) < deadline )); do
+	while true; do
 		(( ++try ))
 		rc=0; master heartbeat "$job_id" || rc=$?
 		if (( rc == 255 )); then
-			archci_log "master unreachable, keeping $job_id's results (try $try)"
+			(( try == 1 )) && archci_log "master unreachable, keeping $job_id's results until it is back"
 			sleep 30; continue
 		elif (( rc )); then
 			archci_log "$job_id is no longer ours; dropping its results"; dropped=1; break
@@ -145,7 +155,7 @@ while true; do
 		archci_log "could not report $job_id (try $try)"
 		sleep 30
 	done
-	(( reported || dropped )) || archci_log "giving up on $job_id after $try tries; the master will requeue it"
+	(( reported && try > 1 )) && archci_log "$job_id delivered after $try tries"
 	rm -rf "$jobdir"
 	job_id=
 done
