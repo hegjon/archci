@@ -110,7 +110,7 @@ start_worker
 wait_for 10 'worker testbox-1 (x86_64) started' "$tmp/worker.log" || fail "worker did not start"
 sleep 1; install -m 755 "$here/../worker/archci-worker" "$tree/worker/archci-worker"   # a new inode, as pacman leaves
 wait_for 10 'changed on disk; restarting on the new code' "$tmp/worker.log" || fail "the worker did not notice its new code: $(<"$tmp/worker.log")"
-wait_for 10 'started, master' "$tmp/worker.log" || fail "the worker did not come back after the restart"
-(( $(grep -c 'started, master' "$tmp/worker.log") == 2 )) || fail "expected exactly two starts: $(<"$tmp/worker.log")"
+for ((i = 0; i < 100; i++)); do (( $(grep -c 'started, master' "$tmp/worker.log") == 2 )) && break; sleep 0.1; done
+(( $(grep -c 'started, master' "$tmp/worker.log") == 2 )) || fail "the worker did not come back after the restart: $(<"$tmp/worker.log")"
 kill "$worker_pid"; wait "$worker_pid" 2>/dev/null || true; worker_pid=''
 echo "ALL OK"
