@@ -5,9 +5,9 @@
 # master's queue, the workers' heartbeats and their streamed journals.
 #
 #   header   queue depth, outstanding work, built per arch, done in the last hour
-#   hosts    one row per host seen recently, its workers grouped: load, memory,
-#            chroot disk and cores from the newest heartbeat any of them sent,
-#            how many workers it runs, its native arch, idle or building
+#   hosts    one row per host seen recently, its workers grouped: native arch,
+#            load, memory, chroot disk and threads from the newest heartbeat
+#            any of them sent, how many workers it runs and how many are busy
 #   jobs     one row per running job: elapsed, worker, attempt, heartbeat age,
 #            the job's CPU (cores), memory (current and peak) and build-tree
 #            size from its cgroup, the makepkg phase and the last output line
@@ -78,10 +78,10 @@ def frame(journal)
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
-  out << format('%-22s %6s %5s %5s %5s %8s  %-8s %s', 'HOST', 'LOAD', 'MEM%', 'DISK%', 'CPUS', 'WORKERS', 'ARCH', 'STATUS')
+  out << format('%-22s %-8s %6s %5s %5s %7s %7s %6s', 'HOST', 'ARCH', 'LOAD', 'MEM%', 'DISK%', 'THREADS', 'WORKERS', 'ACTIVE')
   snap['hosts'].each do |h|
-    out << format('%-22s %6s %5s %5s %5s %8d  %-8s %s', h['host'], h['load'] || '-', h['mem'] || '-', h['disk'] || '-',
-                  h['cpus'] || '-', h['workers'].size, h['arch'] || '-', h['status'])
+    out << format('%-22s %-8s %6s %5s %5s %7s %7d %6d', h['host'], h['arch'] || '-', h['load'] || '-', h['mem'] || '-',
+                  h['disk'] || '-', h['cpus'] || '-', h['workers'].size, h['building'])
   end
   out << ''
 

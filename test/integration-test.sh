@@ -77,7 +77,7 @@ grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
-ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker .* 0.10 .* 1  x86_64 *building" || fail "archci-top must show the host's stats, worker count, native arch and status"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *x86_64  *0.10 .* 4  *1  *1$" || fail "archci-top must show the host's arch, stats, threads, worker count and active workers"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q " 3.7  1840M  2100M   5.0G " || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
@@ -90,7 +90,7 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
 grep -q '^heartbeat=20[0-9][0-9]-.*Z$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep when its last heartbeat arrived"
-ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker .* 0.10 .* 1  x86_64 *idle" || fail "archci-top must show an idle host with its last heartbeat"
+ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *x86_64  *0.10 .* 4  *1  *0$" || fail "archci-top must show an idle host with its last heartbeat and no active workers"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"

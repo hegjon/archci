@@ -120,10 +120,7 @@ module Archci
       h.merge!('heartbeat_age_s' => (now - beat).to_i, 'load' => j['load'], 'mem' => j['mem'],
                'disk' => j['disk'], 'cpus' => j['cpus'])
     end
-    hosts.values.sort_by { |h| h['host'] }.each do |h|
-      h['workers'].sort!
-      h['status'] = h['building'].positive? ? 'building' : 'idle'
-    end
+    hosts.values.sort_by { |h| h['host'] }.each { |h| h['workers'].sort! }
   end
 
   # The packages in the PKGBUILD repository clone, from archci-pkgs (which
