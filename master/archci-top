@@ -5,8 +5,9 @@
 # master's queue, the workers' heartbeats and their streamed journals.
 #
 #   header   queue depth, outstanding work, built per arch, done in the last hour
-#   workers  one row per worker seen recently: load, memory, chroot disk, cores,
-#            what it is building (from the heartbeat stats kept in the job file)
+#   hosts    one row per host seen recently, its workers grouped: load, memory,
+#            chroot disk and cores from the newest heartbeat any of them sent,
+#            how many workers it runs, its native arch, idle or building
 #   jobs     one row per running job: elapsed, worker, attempt, heartbeat age,
 #            the job's CPU (cores), memory (current and peak) and build-tree
 #            size from its cgroup, the makepkg phase and the last output line
@@ -75,18 +76,12 @@ def frame(journal)
   out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{n}/#{snap['tracked'][k]}" }.join('  '))
   out << ''
 
-  # workers: everyone with a running job, plus those seen finishing recently
-  workers = {}
-  running.each { |j| workers[j['worker']] = j }
-  snap['recent'].first(20).each { |j| workers[j['worker']] ||= nil }
-  out << format('%-22s %6s %5s %5s %5s  %-8s %s', 'WORKER', 'LOAD', 'MEM%', 'DISK%', 'CPUS', 'ARCH', 'BUILDING')
-  workers.sort.each do |w, j|
-    if j
-      out << format('%-22s %6s %5s %5s %5s  %-8s %s', w, j['load'] || '-', j['mem'] || '-', j['disk'] || '-', j['cpus'] || '-',
-                    j['arch'], j['pkgbase'])
-    else
-      out << format('%-22s %6s %5s %5s %5s  %-8s %s', w, '-', '-', '-', '-', '-', 'idle')
-    end
+  # hosts: one row each, its workers grouped, from the newest heartbeat any
+  # of them sent (an idle host shows the last beat its finished jobs kept)
+  out << format('%-22s %6s %5s %5s %5s %8s  %-8s %s', 'HOST', 'LOAD', 'MEM%', 'DISK%', 'CPUS', 'WORKERS', 'ARCH', 'STATUS')
+  snap['hosts'].each do |h|
+    out << format('%-22s %6s %5s %5s %5s %8d  %-8s %s', h['host'], h['load'] || '-', h['mem'] || '-', h['disk'] || '-',
+                  h['cpus'] || '-', h['workers'].size, h['arch'] || '-', h['status'])
   end
   out << ''
 

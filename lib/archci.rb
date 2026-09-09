@@ -85,6 +85,47 @@ module Archci
     config['ARCHCI_ANY_ARCH'] || arches.first
   end
 
+  # A worker id is <host>-<n> for a worker building the host's native arch
+  # and <host>-<arch>-<n> for one emulating a port arch (archci-worker's
+  # rule): the host and the port arch, nil for native.
+  def self.worker_host(worker)
+    if (m = worker.match(/\A(.+)-(#{Regexp.union(arches)})-\d+\z/))
+      [m[1], m[2]]
+    elsif (m = worker.match(/\A(.+)-\d+\z/))
+      [m[1], nil]
+    else
+      [worker, nil]
+    end
+  end
+
+  # One entry per host seen among RUNNING and RECENT jobs, from the newest
+  # heartbeat any of its workers sent: a running job's, or for an idle host
+  # the last beat a finished job kept. The native arch is what a worker
+  # without an arch in its name builds ("any" jobs are the any arch's).
+  def self.hosts(running, recent, now)
+    hosts = {}
+    seen = running.map { |j| [j, now - j['heartbeat_age_s'], true] } +
+           recent.map { |j| [j, (j['heartbeat'] && Time.iso8601(j['heartbeat'])), false] }
+    seen.each do |j, beat, running_now|
+      next unless j['worker']
+
+      host, port = worker_host(j['worker'])
+      h = hosts[host] ||= { 'host' => host, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
+                            'load' => nil, 'mem' => nil, 'disk' => nil, 'cpus' => nil }
+      h['workers'] |= [j['worker']]
+      h['building'] += 1 if running_now
+      h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
+      next unless beat && j['load'] && (h['heartbeat_age_s'].nil? || now - beat < h['heartbeat_age_s'])
+
+      h.merge!('heartbeat_age_s' => (now - beat).to_i, 'load' => j['load'], 'mem' => j['mem'],
+               'disk' => j['disk'], 'cpus' => j['cpus'])
+    end
+    hosts.values.sort_by { |h| h['host'] }.each do |h|
+      h['workers'].sort!
+      h['status'] = h['building'].positive? ? 'building' : 'idle'
+    end
+  end
+
   # The packages in the PKGBUILD repository clone, from archci-pkgs (which
   # caches them per clone HEAD): name (the job's pkgbase), version, commit,
   # arches, profile, source and whether package.json skips the build. Empty
@@ -195,7 +236,10 @@ module Archci
                    'log' => "logs/#{j['repo']}/#{j['pkgbase']}/#{j['version']}/#{j['arch']}/attempt-#{j['attempt']}.log")
     end
     done = jobs('done').sort_by { |j| -j['mtime'].to_i }
-    recent = done.first(50).map { |j| job[j].merge('finished' => j['finished']) }
+    recent = done.first(50).map do |j|
+      job[j].merge('finished' => j['finished'], 'heartbeat' => j['heartbeat'],
+                   'load' => j['load'], 'mem' => j['mem'], 'disk' => j['disk'], 'cpus' => j['cpus'])
+    end
     {
       'generated' => now.utc.iso8601,
       'pkgbuilds' => { 'url' => cfg['ARCHCI_PKGBUILDS_URL'], 'branch' => cfg['ARCHCI_PKGBUILDS_BRANCH'],
@@ -209,6 +253,7 @@ module Archci
       'tracked' => sets.to_h,
       'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
       'workers' => (running + recent).filter_map { |j| j['worker'] }.tally,
+      'hosts' => hosts(running, recent, now),
       'running' => running,
       'failed' => failed,
       'recent' => recent

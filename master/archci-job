@@ -30,14 +30,20 @@ lock_queue() {
 	flock 9
 }
 
-# Move FILE to DIR, dropping bookkeeping fields and appending EXTRA lines.
+# Move FILE to DIR, dropping bookkeeping fields and appending EXTRA lines. A
+# job that ends (done/, failed/) keeps its last heartbeat stats and when that
+# beat arrived (the file's mtime): the host's last known state for the UIs.
 rewrite_job() {
-	local file=$1 dest=$2 tmp
+	local file=$1 dest=$2 tmp beat=() drop='worker|claimed|status|finished|final|heartbeat|load|mem|disk|cpus|cpu|rss|peak|build'
 	shift 2
+	if [[ $dest == "$Q_DONE"/* || $dest == "$Q_FAILED"/* ]]; then
+		drop='worker|claimed|status|finished|final|heartbeat'
+		grep -q '^load=' "$file" && beat=("heartbeat=$(date -u -r "$file" +%FT%TZ)")
+	fi
 	tmp=$dest.tmp
 	{
-		grep -Ev '^(worker|claimed|status|finished|final|load|mem|disk|cpus|cpu|rss|peak|build)=' "$file"
-		printf '%s\n' "$@"
+		grep -Ev "^($drop)=" "$file"
+		printf '%s\n' "$@" "${beat[@]}"
 	} >"$tmp"
 	mv "$tmp" "$dest"
 	[[ $file == "$dest" ]] || rm -f "$file"
