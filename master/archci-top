@@ -167,7 +167,7 @@ def frame(journal)
     phase, last = tails[unit_name(j)] || ['', '']
     line = format('%-8s %-22s %-8s %-3d %4s %5s %6s %6s %6s  %-9s %s %s', elapsed(since), j['worker'], j['arch'], j['attempt'], hb,
                   j['cpu'] || '-', mib[j['rss_mib']], mib[j['peak_mib']], j['build'] || '-',
-                  phase[0, 9], "#{j['pkgbase']} #{j['version']}", last.empty? ? '' : "| #{last}")
+                  phase.empty? ? '-' : phase[0, 9], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
   end
   out << '(nothing running)' if running.empty?
@@ -204,14 +204,16 @@ print "\e[?25l"
 first = true
 loop do
   lines = frame(first ? nil : journal)
+  # the second frame, with the journal columns, comes early
+  wait = first ? [2, interval].min : interval
   first = false
   print "\e[H\e[2J"
   puts lines.map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
-  if tty && IO.select([$stdin], nil, nil, interval)
+  if tty && IO.select([$stdin], nil, nil, wait)
     key = $stdin.read_nonblock(1, exception: false)
     break if key.is_a?(String) && (key.downcase == 'q' || key == "\e" || key == "\u0003")
   elsif !tty
-    sleep interval
+    sleep wait
   end
 end
 restore.call
