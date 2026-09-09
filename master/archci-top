@@ -145,10 +145,9 @@ rescue StandardError
   {}
 end
 
-# top's looks on a terminal: inverse column headers, bold figures. Plain when
-# the output is not a terminal (--once into a pipe, the tests).
+# top's looks on a terminal: bold headers and figures. Plain when the output
+# is not a terminal (--once into a pipe, the tests).
 STYLE = $stdout.tty?
-def inv(s)  = STYLE ? "\e[7m#{s}\e[0m" : s
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
 def frame(journal)
@@ -189,7 +188,7 @@ def frame(journal)
   end
   out << ''
 
-  out << inv(format('%8s %-22s %-7s %3s %4s %5s %5s %5s %6s  %-8s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', '%CPU', 'MEM', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output').ljust(width)[0, width])
+  out << bold(format('%8s %-22s %-7s %3s %4s %5s %5s %5s %6s  %-8s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', '%CPU', 'MEM', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output')[0, width])
   # a MiB count in five characters: 458M up to 999M, then 1.2G
   mem = ->(v) { v.nil? ? '-' : (v.to_i > 999 ? format('%.1fG', v.to_i / 1024.0) : "#{v}M") }
   # PHASE and the last output line from the journal (journal_tails), '-'
@@ -213,7 +212,7 @@ def frame(journal)
   out << '(nothing running)' if running.empty?
   out << ''
   unless failed.empty?
-    out << 'FAILED (newest first)'
+    out << bold('FAILED (newest first)')
     failed.each do |j|
       out << format('  %-40s %-20s attempt %d%s  %s', "#{j['pkgbase']} #{j['version']} #{j['arch']}", j['worker'],
                     j['attempt'], j['final'] ? ' GAVE UP' : '', j['finished'])[0, width]
