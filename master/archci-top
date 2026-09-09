@@ -199,17 +199,10 @@ trap('INT') { restore.call; exit }
 trap('TERM') { restore.call; exit }
 $stdin.raw! if tty
 print "\e[?25l"
-# The first frame skips the journal so the screen comes up at once; the
-# journal columns fill in with the next frame, drawn right after it.
-first = true
 loop do
-  lines = frame(first ? nil : journal)
+  lines = frame(journal)
   print "\e[H\e[2J"
   puts lines.map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
-  if first && journal
-    first = false
-    next
-  end
   if tty && IO.select([$stdin], nil, nil, interval)
     key = $stdin.read_nonblock(1, exception: false)
     break if key.is_a?(String) && (key.downcase == 'q' || key == "\e" || key == "\u0003")
