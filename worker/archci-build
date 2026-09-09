@@ -153,6 +153,25 @@ if compgen -G "$srcdir/keys/pgp/*.asc" >/dev/null; then
 		echo "==> WARNING: importing keys/pgp/*.asc failed; the signature check will say"
 	say "Imported %s upstream signing key(s) from keys/pgp" "$(find "$srcdir/keys/pgp" -name '*.asc' | wc -l)"
 fi
+# keys/pgp/ lags upstream: a maintainer's new signing subkey or extended
+# expiry is not in the copy Arch's repository carries until someone updates
+# it, and a PKGBUILD may name a key it ships no file for. Refresh every
+# fingerprint validpgpkeys names from the keyservers (a key already there
+# gains what it lacks); a lookup that fails leaves what keys/pgp gave.
+if [[ -n $ARCHCI_KEYSERVERS ]]; then
+	# (--printsrcinfo insists on a writable BUILDDIR, though it builds nothing)
+	mapfile -t fingerprints < <(runuser -u "$ARCHCI_BUILD_USER" -- env BUILDDIR="$ARCHCI_WORKER_HOME/srcdest" makepkg --printsrcinfo 2>/dev/null | sed -n 's/^\tvalidpgpkeys = //p')
+	if (( ${#fingerprints[@]} )); then
+		for keyserver in $ARCHCI_KEYSERVERS; do
+			if runuser -u "$ARCHCI_BUILD_USER" -- env GNUPGHOME="$GNUPGHOME" timeout 120 \
+				gpg --batch --quiet --keyserver "$keyserver" --recv-keys "${fingerprints[@]}" 2>/dev/null; then
+				say "Refreshed %s signing key(s) from %s" "${#fingerprints[@]}" "$keyserver"
+			else
+				echo "==> WARNING: could not refresh all of ${#fingerprints[@]} signing key(s) from $keyserver"
+			fi
+		done
+	fi
+fi
 mcp_args=(-c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
 # ARCHCI_MAKEPKG_ARGS is passed to makepkg after -- (default: none).
 extra_makepkg_args=()
@@ -162,6 +181,12 @@ extra_makepkg_args=()
 # Linux Ports RFC keeps the arch array as is and has the tooling ignore it).
 if [[ $job_arch != any && $job_arch != x86_64 && $ARCHCI_IGNOREARCH == 1 ]]; then
 	extra_makepkg_args+=(--ignorearch)
+fi
+# Another arch than the machine's means qemu user-mode emulation, where test
+# suites fail on the emulation more than on the package.
+if [[ $arch != "$(uname -m)" && $ARCHCI_EMULATED_NOCHECK == 1 ]]; then
+	extra_makepkg_args+=(--nocheck)
+	say "Building %s under emulation: check() skipped (ARCHCI_EMULATED_NOCHECK)" "$arch"
 fi
 (( ${#extra_makepkg_args[@]} )) && mcp_args+=(-- "${extra_makepkg_args[@]}")
 # Through archci_watchdog's pipe on purpose: systemd-nspawn (arch-nspawn's

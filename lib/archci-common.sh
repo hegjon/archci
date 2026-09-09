@@ -89,6 +89,12 @@ archci_load_conf
 : "${ARCHCI_BUILD_USER:=archci}"
 : "${ARCHCI_CHROOTS:=/var/lib/archbuild}"
 : "${ARCHCI_MAKEPKG_ARGS=}"
+# Keyservers the fingerprints a PKGBUILD names (validpgpkeys) are refreshed
+# from before its sources are verified; empty for none.
+: "${ARCHCI_KEYSERVERS:=hkps://keys.openpgp.org hkps://keyserver.ubuntu.com}"
+# Skip check() when building another arch than the machine's (qemu user-mode
+# emulation), where test suites fail on the emulation more than on the package.
+: "${ARCHCI_EMULATED_NOCHECK:=1}"
 # Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
