@@ -150,8 +150,10 @@ def frame(journal)
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
   out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', 'MEM%', 'DISK%', 'THREADS', 'WORKERS', 'ACTIVE')
+  # a load of 100 or more (a busy build host) loses its decimals to fit the column
+  load = ->(l) { l.nil? ? '-' : (l.to_f >= 100 ? l.to_f.round.to_s : l) }
   snap['hosts'].each do |h|
-    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7d %6d', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', h['load'] || '-',
+    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7d %6d', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', load[h['load']],
                   h['mem'] || '-', h['disk'] || '-', h['cpus'] || '-', h['workers'].size, h['building'])
   end
   out << ''
