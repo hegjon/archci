@@ -209,15 +209,15 @@ archci_job_stats() {
 		cpu=''
 		if [[ -f $jobdir/cpu.prev ]]; then
 			read -r prev_usage prev_now <"$jobdir/cpu.prev"
-			(( now > prev_now )) && cpu=$(awk -v u="$((usage - prev_usage))" -v t="$((now - prev_now))" 'BEGIN { printf "%.1f", u / t }')
+			(( now > prev_now )) && cpu=$(awk -v u="$((usage - prev_usage))" -v t="$((now - prev_now))" 'BEGIN { printf "%.2f", u / t }')
 		else
 			local started up
 			started=$(systemctl show -p ActiveEnterTimestampMonotonic --value "${cg##*/}" 2>/dev/null || true)
 			up=$(awk '{ printf "%d", $1 * 1000000 }' /proc/uptime)
 			if [[ $started =~ ^[1-9][0-9]*$ ]] && (( up > started )); then
-				cpu=$(awk -v u="$usage" -v t="$((up - started))" 'BEGIN { printf "%.1f", u / t }')
+				cpu=$(awk -v u="$usage" -v t="$((up - started))" 'BEGIN { printf "%.2f", u / t }')
 			elif [[ -f $jobdir/started ]] && started=$(<"$jobdir/started") && [[ $started =~ ^[0-9]+$ ]] && (( now > started )); then
-				cpu=$(awk -v u="$usage" -v t="$((now - started))" 'BEGIN { printf "%.1f", u / t }')
+				cpu=$(awk -v u="$usage" -v t="$((now - started))" 'BEGIN { printf "%.2f", u / t }')
 			fi
 		fi
 		printf '%s %s\n' "$usage" "$now" >"$jobdir/cpu.prev"
