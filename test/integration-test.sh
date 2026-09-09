@@ -14,7 +14,7 @@ job=$here/../master/archci-job
 scan=$here/../master/archci-scan
 next=$here/../master/archci-next
 housekeeping=$here/../master/internal/archci-housekeeping
-status=$here/../master/archci-status
+top=$here/../master/archci-top
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # mkpkg DIR NAME VERSION [ARCH] -- smallest thing repo-add accepts as a package
 mkpkg() {
@@ -56,7 +56,7 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 [[ $("$next" | wc -l) == 1 ]] || fail "next prints one line"
 ! ARCHCI_PKG_SOURCES=local "$next" | grep -q . || fail "ARCHCI_PKG_SOURCES must filter by package.json source"
 [[ $(ARCHCI_PKG_SOURCES=local ARCHCI_PKG_ALSO=acl "$next") == "5 omarchy x86_64 acl "* ]] || fail "ARCHCI_PKG_ALSO must build a named package regardless of source"
-"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding" unless j["outstanding"] == {"updates"=>0, "backlog"=>3}'
+"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding" unless j["outstanding"] == {"updates"=>0, "backlog"=>3}'
 
 echo "--- claim picks the next outstanding package just in time"
 out=$("$job" claim worker-1 x86_64)
@@ -81,8 +81,7 @@ grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1$" || fail "archci-top must show the host's arch, vendor, stats, threads, worker count and active workers"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "archci-top must show the signer status from signer.status"
-"$here/../master/archci-status" | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "archci-status must show the same frame as archci-top"
-"$here/../master/archci-status" | grep -q "^archci status " || fail "archci-status must title its frame as status"
+"$top" --once --no-journal | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "the signer line must show the staging backlog and the released databases"
 COLUMNS=200 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "  370  5.0G  1.8G  2.1G  -        acl 1:2.3.2-1 | -" || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
@@ -320,9 +319,9 @@ out=$(ARCHCI_R2_STAGING=$pg/staging ARCHCI_R2_RELEASE=$pg/release ARCHCI_RCLONE_
 [[ -f $pg/release/core/os/x86_64/survivor-1-1-x86_64.pkg.tar.zst ]] || fail "prune guard must not delete the survivor"
 [[ -f $pg/release/core/os/x86_64/newpkg-1-1-x86_64.pkg.tar.zst ]] || fail "the new package should still be released"
 
-echo "--- status"
-"$status" | head -5
-"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 0 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["omarchy-x86_64"] == 1 && j["arches"] == ["x86_64"] && j["repo"] == "omarchy" && j["pkgbuilds"]["packages"] == 3'
+echo "--- top --once and --json"
+"$top" --once --no-journal | head -5
+"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json" unless j["queue"]["pending"] == 0 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["omarchy-x86_64"] == 1 && j["arches"] == ["x86_64"] && j["repo"] == "omarchy" && j["pkgbuilds"]["packages"] == 3'
 
 echo "--- multi-arch: workers claim by arch, any packages are pooled for every arch"
 export ARCHCI_ARCHES="x86_64 aarch64"   # any packages default to the first: x86_64
@@ -330,7 +329,7 @@ mkpkgbuild archlinux-keyring 20260901-1 any
 commit_pkgs any
 "$scan"
 # x86_64: linux, libsigc++ (acl built); any: archlinux-keyring; aarch64: acl, linux, libsigc++
-"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding #{j["outstanding"]}" unless j["outstanding"] == {"updates"=>0, "backlog"=>6}; abort "tracked #{j["tracked"]}" unless j["tracked"]["omarchy-aarch64"] == 3 && j["tracked"]["omarchy-any"] == 1 && j["any_arch"] == "x86_64"'
+"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding #{j["outstanding"]}" unless j["outstanding"] == {"updates"=>0, "backlog"=>6}; abort "tracked #{j["tracked"]}" unless j["tracked"]["omarchy-aarch64"] == 3 && j["tracked"]["omarchy-any"] == 1 && j["any_arch"] == "x86_64"'
 ! "$job" claim worker-6 riscv64 2>/dev/null || fail "claim for an arch not in ARCHCI_ARCHES must fail"
 [[ $("$next" aarch64) == "5 omarchy aarch64 acl "* ]] || fail "aarch64 backlog should start at acl: $("$next" aarch64)"
 [[ $(ARCHCI_IGNOREARCH=0 "$next" aarch64) == "" ]] || fail "with ARCHCI_IGNOREARCH=0 only packages listing aarch64 are offered"
@@ -379,7 +378,7 @@ done
 [[ $("$next" x86_64) != *archlinux-keyring* ]] || fail "built any package must not be outstanding"
 # enabling another arch makes every any package outstanding again, so the new arch gets them
 [[ $(ARCHCI_ARCHES="x86_64 aarch64 riscv64" "$next" x86_64) == *" any archlinux-keyring "* ]] || fail "an any package must be rebuilt for an arch enabled later: $(ARCHCI_ARCHES="x86_64 aarch64 riscv64" "$next" x86_64)"
-"$status" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "built #{j["built"]}" unless j["built"]["omarchy-any"] == 1 && j["built"]["omarchy-aarch64"] == 1 && j["built"]["omarchy-x86_64"] == 1'
+"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "built #{j["built"]}" unless j["built"]["omarchy-any"] == 1 && j["built"]["omarchy-aarch64"] == 1 && j["built"]["omarchy-x86_64"] == 1'
 
 echo "--- the PKGBUILD repository URL is config: a scan follows a changed one"
 pkgs2=$tmp/pkgs2

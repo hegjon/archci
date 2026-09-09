@@ -23,7 +23,7 @@ one fork to another, say to `omacom/omarchy-pkgs`, is a config change.
 > key, bigger workers, a custom domain for the repo, and so on).
 
 Everything is plain bash and a few small ruby scripts (the scanner, the
-next-package picker, and status, sharing one library), plus `ssh`, `git`, `rsync`,
+next-package picker, and top, sharing one library), plus `ssh`, `git`, `rsync`,
 `btrfs`, `systemd` timers and `journald`. There is no daemon: the queue is a directory of
 files, and moving a file between `pending/`, `running/`, `done/` and `failed/`
 is the whole state machine.
@@ -136,8 +136,7 @@ and is printed. The worker then:
 While building, a background loop sends a heartbeat every minute
 (`ARCHCI_HEARTBEAT_SECONDS`), carrying the machine's load, memory, chroot
 disk use and core count, and the job's own CPU, memory and build-tree size
-read from its cgroup; the master keeps them with the job for `archci-top`
-and `archci-status`. A job
+read from its cgroup; the master keeps them with the job for `archci-top`. A job
 without a heartbeat for 30 minutes is put back in `pending/` by housekeeping (a 5-minute timer), so
 a worker can be destroyed at any time. On `systemctl stop` the worker reports
 `abandoned`, which requeues without counting an attempt.
@@ -233,7 +232,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 bin/      archci: the entry point, `archci <name>` runs archci-<name> of an installed role
 tools/    release-pkgbuild: writes the fork's release PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh, archci-queue.sh (bash) and archci.rb (ruby): config, the job queue, paths
-master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
+master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-top
           internal/archci-housekeeping: the queue's timer pass, not a command
 worker/   archci-worker, archci-build, archci-worker-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder

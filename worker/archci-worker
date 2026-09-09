@@ -108,7 +108,7 @@ while true; do
 	# Keep the master's housekeeping from calling the job stale while the build runs. Each beat
 	# carries this machine's load, memory, chroot disk use and core count, and
 	# the job's own CPU, memory and build-tree size from its cgroup, which the
-	# master keeps with the job for archci-top and archci-status.
+	# master keeps with the job for archci-top.
 	(
 		trap - TERM INT
 		# The first beat goes soon after the start, and beats come every 10 s

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# archci.rb -- shared helpers for the ruby parts of archci (scan, status).
+# archci.rb -- shared helpers for the ruby parts of archci (scan, top).
 # Mirrors archci-common.sh: same config file, same job file format.
 require 'etc'
 require 'json'
@@ -213,9 +213,9 @@ module Archci
     limit ? ordered.first(limit) : ordered
   end
 
-  # Everything archci-status prints and archci-top draws, computed once from
-  # the queue, the built records and the package index. JSON-serialisable:
-  # archci-status --json emits it as is.
+  # Everything archci-top draws, computed once from the queue, the built
+  # records and the package index. JSON-serialisable: archci-top --json emits
+  # it as is.
   def self.snapshot(now = Time.now)
     cfg = config
     repo = cfg['ARCHCI_REPO']

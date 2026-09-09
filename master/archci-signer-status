@@ -7,8 +7,8 @@
 # for how long (rclone, with the master's staging token), and per arch when
 # the released database was last updated and how many packages it lists
 # (over ARCHCI_RELEASE_URL, the clients' repo URL; the master's token cannot
-# read RELEASE). Writes $ARCHCI_HOME/signer.status (JSON) for archci-top and
-# archci-status. Run by archci-signer-status.timer every 2 minutes.
+# read RELEASE). Writes $ARCHCI_HOME/signer.status (JSON) for archci-top.
+# Run by archci-signer-status.timer every 2 minutes.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 

@@ -47,7 +47,7 @@ today; the sections below say where each takes its base system from.
    `/etc/archci/aarch64/extra.conf` there if the chroot should use a
    different pacman config than the host, for example this repo's own
    aarch64 output.
-3. Watch `archci status`: `built` is reported per `<repo>-<arch>`, and
+3. Watch `archci top`: `built` is reported per `<repo>-<arch>`, and
    `archci job enqueue REPO PKGBASE 0 aarch64` queues one package by hand.
 
 **An emulated worker instead.** An x86_64 machine can build aarch64 through

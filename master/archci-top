@@ -1,9 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# archci-top [-n SECONDS] [--once] [--no-journal] -- top-like view of the farm,
-# redrawn from the master's queue, the workers' heartbeats and their streamed
-# journals (--no-journal leaves those out: PHASE and the last output line).
+# archci-top [-n SECONDS] [--once] [--no-journal] [--json] -- top-like view of
+# the farm, redrawn from the master's queue, the workers' heartbeats and their
+# streamed journals (--no-journal leaves those out: PHASE and the last output
+# line). --once prints one frame; --json prints the snapshot it is drawn from.
 #
 #   header   queue depth, outstanding work, built per arch, done in the last hour
 #   hosts    one row per host seen recently, its workers grouped: native arch,
@@ -20,20 +21,29 @@ require 'io/console'
 
 interval = 5
 once = false
+json = false
 with_journal = true
 ARGV.each_with_index do |a, i|
   case a
   when '-n' then interval = ARGV[i + 1].to_f
   when '--once' then once = true
+  when '--json' then json = true
   when '--no-journal' then with_journal = false
   when '-h', '--help'
-    puts 'usage: archci top [-n SECONDS] [--once] [--no-journal]'
+    puts 'usage: archci top [-n SECONDS] [--once] [--no-journal] [--json]'
+    puts '  --once        print one frame and exit'
     puts '  --no-journal  skip the workers\' streamed journals (no PHASE and last output): instant'
+    puts '  --json        print the snapshot the frame is drawn from as JSON and exit'
     exit
   end
 end
 
 journal = with_journal ? Archci.config['ARCHCI_REMOTE_JOURNAL'] : nil
+
+if json
+  puts JSON.pretty_generate(Archci.snapshot)
+  exit
+end
 
 if once
   puts frame(journal)

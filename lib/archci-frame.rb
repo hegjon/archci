@@ -2,8 +2,8 @@
 
 # archci-frame.rb -- the farm as one screen: the header (queue, built, signer),
 # the hosts table, the jobs table and the failed list, from Archci.snapshot,
-# for archci-top (redrawn on an interval, with the workers' journals) and
-# archci-status (printed once, no journal). Styled only on a terminal.
+# for archci-top (redrawn on an interval with the workers' journals, or
+# printed once). Styled only on a terminal.
 require_relative 'archci'
 require 'open3'
 
@@ -122,9 +122,8 @@ STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
 # journal: the remote journal directory for PHASE and the last output line,
-# nil for none; snap: a snapshot already taken; live: archci-top's title
-# line (with the quit hint) or archci-status's
-def frame(journal, snap = nil, live: true)
+# nil for none; snap: a snapshot already taken
+def frame(journal, snap = nil)
   now = Time.now
   width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
   snap ||= Archci.snapshot(now)
@@ -134,8 +133,8 @@ def frame(journal, snap = nil, live: true)
   failed = snap['failed'].first(5)
 
   out = []
-  out << format('%s  %s   pkgbuilds -> [%s]   arches: %s%s', live ? 'archci-top' : 'archci status', now.strftime('%H:%M:%S'), repo,
-                snap['arches'].join(' '), live ? '   (q or Esc quits)' : '')
+  out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s   (q or Esc quits)', now.strftime('%H:%M:%S'), repo,
+                snap['arches'].join(' '))
   out << format('queue: pending %s  running %s  failed %s  done %s (%s in the last hour)    outstanding: %s update(s), %s unbuilt',
                 *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                   snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })

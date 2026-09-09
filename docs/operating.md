@@ -2,8 +2,8 @@
 
 `archci top` is the live view of the farm, redrawn every few seconds:
 the queue, what each host and worker is doing, and the newest failures.
-`archci status` prints the same frame once (plus the last packages built),
-and `archci status --json` is the same data for scripts. A frame from the
+`archci top --once` prints the frame once and `archci top --json` is the
+data behind it for scripts. A frame from the
 test instance, four emulated builds running on the desktop and the x86_64
 workers idle:
 
@@ -40,8 +40,8 @@ operator commands:
 
 ```
 archci version                      the installed archci version
-archci status                       queue counts, running builds, recent failures
-archci status --json                queue/outstanding as JSON
+archci top --once --no-journal     the frame once, without the journals: instant
+archci top --json                   the frame's data as JSON
 archci next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results

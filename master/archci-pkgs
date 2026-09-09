@@ -27,7 +27,7 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 clone=$ARCHCI_PKGBUILDS_CLONE
 index=$ARCHCI_PKGBUILDS_INDEX
 # The clone, the index and its lock belong to the archci user. Run as that
-# user when invoked by root (archci-status, archci-job enqueue), so git does
+# user when invoked by root (archci-top, archci-job enqueue), so git does
 # not refuse the clone as "dubiously owned" and no root-owned file is left
 # behind for the scan timer to trip over.
 owner=$(stat -c %U "$ARCHCI_HOME" 2>/dev/null || echo root)
