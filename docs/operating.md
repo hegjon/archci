@@ -53,6 +53,7 @@ archci-job enqueue extra firefox    build the current release now (priority 0)
 archci-top                          live view: workers' load and memory, running
                                     jobs with phase and last output, failures
 archci-job retry <jobid>            reset attempts of a failed job and requeue
+archci-job retry --all              the same for every failed job (also -a)
 archci-job requeue <jobid>          put a running/failed job back, keep attempts
 archci-stage --force                move pooled packages to R2 staging now
 archci-build job.file /tmp/out      reproduce a build by hand on a worker (root)

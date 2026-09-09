@@ -390,4 +390,23 @@ order=$(ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 ARCHCI_PKG_ALS
 	ruby -e "require %q{'"$here"'/../lib/archci}; puts Archci.outstanding(arch: %q{x86_64}).map { |e| e[%q{pkgbase}] }.join(%q{ })"')
 # the clone's own arch packages (no arch_repo) sort after multilib and before local
 [[ $order =~ ^archci\ zz-core\ aa-extra\ lib32-mul\ .*\ mm-local\ bb-aur$ ]] || fail "claim order wrong: $order"
+
+echo "--- retry --all gives every failed job a fresh first attempt"
+# two jobs that gave up (final after max attempts), as report leaves them
+failed_ids=()
+for p in acl:1:2.3.2-1 libsigc++:3.6.0-1; do
+	fid="5-1700000000-omarchy,${p%%:*},${p#*:},x86_64.job"
+	printf 'id=%s\nrepo=omarchy\narch=x86_64\npkgbase=%s\nversion=%s\ncommit=%s\nprofile=extra\ncreated=2026-01-01T00:00:00Z\nattempt=3\nworker=worker-1\nstatus=failure\nfinished=2026-01-01T01:00:00Z\nfinal=1\n' \
+		"${fid%.job}" "${p%%:*}" "${p#*:}" "$(pkgcommit "${p%%:*}")" >"$ARCHCI_HOME/queue/failed/$fid"
+	failed_ids+=("$fid")
+done
+"$job" retry --all
+[[ -z $(ls -A "$ARCHCI_HOME/queue/failed") ]] || fail "retry --all must empty failed/"
+for f in "${failed_ids[@]}"; do
+	[[ -f $ARCHCI_HOME/queue/pending/$f ]] || fail "$f not requeued by retry --all"
+	grep -q '^attempt=0$' "$ARCHCI_HOME/queue/pending/$f" || fail "attempt not reset in $f"
+	grep -q '^final=' "$ARCHCI_HOME/queue/pending/$f" && fail "final flag kept in $f"
+done
+! "$job" retry 2>/dev/null || fail "retry needs a job id or --all"
+"$job" retry -a   # nothing failed: fine, retries 0
 echo "ALL OK"

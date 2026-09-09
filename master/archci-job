@@ -11,7 +11,8 @@
 #   report ID STATUS          finish a job: success | failure | abandoned
 #                             (results are expected in incoming/ID/)
 #   requeue ID                move a running/failed job back to pending
-#   retry ID                  reset the attempt counter and requeue
+#   retry ID | -a|--all       reset the attempt counter and requeue: one job,
+#                             or every failed job (final ones included)
 #   enqueue PKGBASE [P] [ARCH]
 #                             queue the package's current version (from the
 #                             PKGBUILD repository clone), priority P (default
@@ -210,7 +211,19 @@ cmd_requeue() {
 }
 
 cmd_retry() {
-	local id=$1 file
+	local id=$1 file n=0
+	if [[ $id == -a || $id == --all ]]; then
+		# every failed job, final ones included, as a fresh first attempt
+		lock_queue
+		for file in "$Q_FAILED"/*.job; do
+			[[ -f $file ]] || continue
+			set_attempt "$file" 0
+			requeue_file "$file"
+			(( ++n ))
+		done
+		archci_log "$n failed job(s) retried from scratch"
+		return 0
+	fi
 	archci_valid_id "$id" || archci_die "invalid job id"
 	lock_queue
 	file=$(find_job "$id" "$Q_RUNNING" "$Q_FAILED") || archci_die "job $id is not running or failed"
@@ -291,7 +304,7 @@ case $cmd in
 	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; cmd_heartbeat "$@" ;;
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
-	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID";            cmd_retry "$1" ;;
+	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; cmd_retry "$1" ;;
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
 	reap)      cmd_reap ;;
 	*) sed -n '2,18p' "$0" >&2; exit 2 ;;
