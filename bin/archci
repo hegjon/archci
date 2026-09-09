@@ -11,7 +11,7 @@ roles=(master worker signer)
 
 list() {
 	local role f name line desc
-	echo "usage: archci SUBCOMMAND [ARGS...]"
+	echo "usage: archci SUBCOMMAND [ARGS...]   (archci version: the installed version)"
 	for role in "${roles[@]}"; do
 		[[ -d $root/$role ]] || continue
 		echo
@@ -31,10 +31,20 @@ list() {
 	done
 }
 
+# the installed package's version: VERSION (written by the PKGBUILD from
+# this release on), else what pacman knows, else the checkout's
+version() {
+	if [[ -r $root/VERSION ]]; then cat "$root/VERSION"
+	elif [[ ! -d $root/.git ]] && v=$(pacman -Q archci 2>/dev/null); then echo "${v#* }"
+	else git -C "$root" describe --tags --always --dirty 2>/dev/null || echo unknown
+	fi
+}
+
 sub=${1:-help}
 shift || true
 case $sub in
 	help|-h|--help) list; exit 0 ;;
+	version|-V|--version) echo "archci $(version)"; exit 0 ;;
 	shell) echo "archci: 'shell' is the ssh forced command for worker keys, not a subcommand" >&2; exit 2 ;;
 esac
 for role in "${roles[@]}"; do

@@ -60,6 +60,7 @@ package_archci-git() {
   (cd lib && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/lib/{}" \;)
   # the entry point: `archci <name>` runs archci-<name> of whichever role is installed
   install -Dm755 bin/archci "$pkgdir$_libdir/bin/archci"
+  printf '%s\n' "$pkgver-$pkgrel" >"$pkgdir$_libdir/VERSION"   # what `archci version` prints
   install -d "$pkgdir/usr/bin"
   ln -s "$_libdir/bin/archci" "$pkgdir/usr/bin/archci"
   # the live config is a stub (only what differs from the defaults goes in),

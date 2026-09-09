@@ -46,6 +46,7 @@ live under `/usr/lib/archci/<role>/`, where the units run them. The other
 operator commands:
 
 ```
+archci version                      the installed archci version
 archci status                       queue counts, running builds, recent failures
 archci status --json                queue/outstanding as JSON
 archci next                         what the next claim would build
