@@ -161,7 +161,8 @@ def frame(journal)
   # PHASE and the last output line from the journal (journal_tails), '-'
   # while it has not been read: the first frame, or --no-journal
   tails = journal_tails(journal, running.map { |j| [unit_name(j), j['claimed']] })
-  running.each do |j|
+  # by worker id, digits compared as numbers (worker-2 before worker-10)
+  running.sort_by { |j| j['worker'].to_s.gsub(/\d+/) { |d| d.rjust(6, '0') } }.each do |j|
     since = j['claimed'] ? now - Time.iso8601(j['claimed']) : j['heartbeat_age_s']
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
