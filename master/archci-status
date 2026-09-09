@@ -3,7 +3,7 @@
 
 # archci-status [--json] -- what the master is doing right now (Archci.snapshot,
 # which archci-top draws from as well).
-require_relative '../lib/archci'
+require_relative '../lib/archci-frame'
 
 report = Archci.snapshot
 
@@ -12,46 +12,12 @@ if ARGV.include?('--json')
   exit
 end
 
-running = report['running']
-failed = report['failed']
-recent = report['recent']
-out = report['outstanding']
-
-puts "archci master status  (#{report['generated']})"
-puts
-puts format('  pkgbuilds: %s (%s), %d package(s) -> repo [%s]',
-            report['pkgbuilds']['url'], report['pkgbuilds']['branch'], report['pkgbuilds']['packages'], report['repo'])
-puts format('  queue: %s', report['queue'].map { |q, n| "#{q}=#{n}" }.join('  '))
-puts format('  outstanding: %d update(s), %d unbuilt', out['updates'], out['backlog'])
-puts format('  built: %s', report['built'].map { |r, n| "#{r} #{n}/#{report['tracked'][r]}" }.join('  '))
-if (s = report['signer'])
-  st = s['staging'] || {}
-  rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{r['packages']} pkg" : "#{a} unreachable" }
-  puts format('  signer: %d in staging%s%s', st['waiting'].to_i,
-              st['oldest_s'] ? " (oldest #{(st['oldest_s'] / 60.0).round} min)" : '',
-              rel.empty? ? '' : "   release: #{rel.join('  ')}")
-end
-puts format('  arches: %s (any packages built on %s)', report['arches'].join(' '), report['any_arch'])
-puts
-unless running.empty?
-  puts '  running:'
-  running.each do |j|
-    puts format('    %-48s %-20s attempt %d  heartbeat %dm ago', "#{j['repo']}/#{j['pkgbase']} #{j['version']} #{j['arch']}",
-                j['worker'], j['attempt'], j['heartbeat_age_min'])
-  end
-  puts
-end
-unless failed.empty?
-  puts "  failed (#{failed.size}, newest first):"
-  failed.first(20).each do |j|
-    puts format('    %-48s %-20s attempt %d%s', "#{j['repo']}/#{j['pkgbase']} #{j['version']} #{j['arch']}",
-                j['worker'], j['attempt'], j['final'] ? '  GAVE UP' : '')
-  end
-  puts
-end
+puts frame(nil, report, live: false)
+recent = report['recent'].first(10)
 unless recent.empty?
-  puts '  recently built:'
-  recent.first(10).each do |j|
-    puts format('    %-48s %-20s %s', "#{j['repo']}/#{j['pkgbase']} #{j['version']} #{j['arch']}", j['worker'], j['finished'])
+  puts
+  puts bold(format('%-34s %-7s  %-17s  %s', 'DONE (newest first)', 'ARCH', 'WORKER', 'FINISHED'))
+  recent.each do |j|
+    puts format('%-34s %-7s  %-17s  %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], short_worker(j['worker']), j['finished'])
   end
 end

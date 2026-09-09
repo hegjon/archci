@@ -81,7 +81,8 @@ grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1$" || fail "archci-top must show the host's arch, vendor, stats, threads, worker count and active workers"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "archci-top must show the signer status from signer.status"
-"$here/../master/archci-status" | grep -q "^  signer: 2 in staging (oldest 2 min)   release: x86_64 63 pkg  aarch64 unreachable" || fail "archci-status must show the signer status"
+"$here/../master/archci-status" | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "archci-status must show the same frame as archci-top"
+"$here/../master/archci-status" | grep -q "^archci status " || fail "archci-status must title its frame as status"
 COLUMNS=200 ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep -q "  370  5.0G  1.8G  2.1G  -        acl 1:2.3.2-1 | -" || fail "archci-top must show the job's cpu, memory and build size: $(ARCHCI_REMOTE_JOURNAL=$tmp/no-journal "$here/../master/archci-top" --once | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
