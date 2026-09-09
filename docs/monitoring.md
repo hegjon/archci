@@ -40,7 +40,7 @@ publishes the released repo, both on R2. What the master can see is the
 release pipeline as a client sees it. `archci-signer-status.timer` (every 2
 minutes) lists staging with the master's rclone token and fetches each
 arch's released database over `ARCHCI_RELEASE_URL`, the clients' repo URL,
-then writes `/var/lib/archci/signer.status`. `archci-top` and `archci-status`
+then writes `/var/lib/archci/signer.status`. `archci top` and `archci status`
 show it as
 
 ```

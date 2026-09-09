@@ -1,0 +1,44 @@
+#!/bin/bash
+# archci SUBCOMMAND [ARGS...] -- the one entry point. Every archci-<name>
+# script of the roles installed on this host (master/, worker/, signer/ next
+# to lib/) is `archci <name>`: `archci job retry --all`, `archci top`,
+# `archci sign --unlock`. `archci` alone, or `archci help`, lists the ones
+# installed here with what they do. The archci-<name> commands stay as
+# aliases, for the units and old habits.
+set -euo pipefail
+root=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
+roles=(master worker signer)
+
+list() {
+	local role f name line desc
+	echo "usage: archci SUBCOMMAND [ARGS...]"
+	for role in "${roles[@]}"; do
+		[[ -d $root/$role ]] || continue
+		echo
+		echo "$role:"
+		for f in "$root/$role"/archci-*; do
+			name=${f##*/archci-}
+			[[ $name == shell ]] && continue   # sshd's forced command, not a command
+			# the script's header, "# archci-<name> [ARGS] -- what it does",
+			# up to the end of its first sentence
+			line=$(awk -v n="archci-$name" '
+				!on && $1 == "#" && $2 == n { on = 1 }
+				on { sub(/^# ?/, ""); s = s (s ? " " : "") $0; if ($0 ~ /\.$/ || $0 == "") exit }
+				END { print s }' "$f")
+			if [[ $line == *' -- '* ]]; then desc=${line#* -- }; else desc=${line#"archci-$name"}; desc=${desc# }; fi
+			printf '  %-18s %s\n' "$name" "${desc%.}"
+		done
+	done
+}
+
+sub=${1:-help}
+shift || true
+case $sub in
+	help|-h|--help) list; exit 0 ;;
+	shell) echo "archci: 'shell' is the ssh forced command for worker keys, not a subcommand" >&2; exit 2 ;;
+esac
+for role in "${roles[@]}"; do
+	[[ -x $root/$role/archci-$sub ]] && exec "$root/$role/archci-$sub" "$@"
+done
+echo "archci: unknown subcommand '$sub' ('archci help' lists the ones installed here)" >&2
+exit 2

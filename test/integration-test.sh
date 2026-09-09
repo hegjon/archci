@@ -409,4 +409,15 @@ for f in "${failed_ids[@]}"; do
 done
 ! "$job" retry 2>/dev/null || fail "retry needs a job id or --all"
 "$job" retry -a   # nothing failed: fine, retries 0
+
+echo "--- archci <name> runs archci-<name> of an installed role"
+archci=$here/../bin/archci
+help=$("$archci" help)   # grep -q on a pipe would SIGPIPE the writer under pipefail
+grep -q '^  job  *master-side queue operations' <<<"$help" || fail "archci help must list job with its description"
+grep -q '^  top  *top-like view of the farm, redrawn from the master' <<<"$help" || fail "archci help must join a wrapped header line"
+grep -q '^  shell' <<<"$help" && fail "archci-shell is not a subcommand"
+[[ $("$archci" next x86_64) == "$("$next" x86_64)" ]] || fail "archci next must run archci-next"
+[[ $("$archci" job retry -a 2>&1) == *'retried from scratch'* ]] || fail "archci job must pass its arguments on"
+! "$archci" shell 2>/dev/null || fail "archci shell must be refused"
+! "$archci" nosuch 2>/dev/null || fail "an unknown subcommand must fail"
 echo "ALL OK"

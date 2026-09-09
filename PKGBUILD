@@ -60,6 +60,10 @@ package_archci-git() {
 
   cd "$pkgbase"
   (cd lib && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/lib/{}" \;)
+  # the entry point: `archci <name>` runs archci-<name> of whichever role is installed
+  install -Dm755 bin/archci "$pkgdir$_libdir/bin/archci"
+  install -d "$pkgdir/usr/bin"
+  ln -s "$_libdir/bin/archci" "$pkgdir/usr/bin/archci"
   install -Dm644 config/archci.conf "$pkgdir/etc/archci/archci.conf"
   install -Dm644 config/systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgbase/README.md"

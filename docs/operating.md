@@ -1,6 +1,6 @@
 # Operating it
 
-`archci-status` is the at-a-glance view of the farm. A live example from the
+`archci status` is the at-a-glance view of the farm. A live example from the
 prototype, part way through building `core`:
 
 ```
@@ -40,30 +40,32 @@ archci master status  (2026-09-06T08:34:59Z)
     core/inetutils 2.8-1                     worker2-1            2026-09-06T08:18:52Z
 ```
 
-The other operator commands:
+Every command is a subcommand of `archci` (`archci job`, `archci top`, ...;
+`archci help` lists the ones installed on a host). The `archci-<name>` forms
+remain as aliases. The other operator commands:
 
 ```
-archci-status                       queue counts, running builds, recent failures
-archci-status --json                queue/outstanding as JSON
-archci-next                         what the next claim would build
+archci status                       queue counts, running builds, recent failures
+archci status --json                queue/outstanding as JSON
+archci next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
 journalctl -u archci-stage          staging to R2
-archci-job enqueue extra firefox    build the current release now (priority 0)
-archci-top                          live view: workers' load and memory, running
+archci job enqueue extra firefox    build the current release now (priority 0)
+archci top                          live view: workers' load and memory, running
                                     jobs with phase and last output, failures
-archci-job retry <jobid>            reset attempts of a failed job and requeue
-archci-job retry --all              the same for every failed job (also -a)
-archci-job requeue <jobid>          put a running/failed job back, keep attempts
-archci-stage --force                move pooled packages to R2 staging now
-archci-build job.file /tmp/out      reproduce a build by hand on a worker (root)
+archci job retry <jobid>            reset attempts of a failed job and requeue
+archci job retry --all              the same for every failed job (also -a)
+archci job requeue <jobid>          put a running/failed job back, keep attempts
+archci stage --force                move pooled packages to R2 staging now
+archci build job.file /tmp/out      reproduce a build by hand on a worker (root)
 
 # on the signer
-archci-sign --unlock                cache the release passphrase for the session
-archci-sign                         sign and publish staged packages now
+archci sign --unlock                cache the release passphrase for the session
+archci sign                         sign and publish staged packages now
 journalctl -u archci-sign -f        release-signing activity
 journalctl -u archci-sign-health    stall alerts (locked key, staging backlog)
-archci-authorize-builder key.pub    trust a worker's builder key
+archci authorize-builder key.pub    trust a worker's builder key
 ```
 
 All knobs are in `config/archci.conf`, installed as `/etc/archci/archci.conf`. Environment variables override the

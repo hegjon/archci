@@ -71,7 +71,7 @@ its `arch` array, the devtools profile (`multilib` for `arch_repo: multilib`
 or a `lib32-` name, else `extra`), the package's `source`, and whether
 `skip_build` is set. The index is cached per clone HEAD, so a claim reads one
 file. The backlog is never written down: when a worker asks for work,
-`archci-next <arch>` walks the index and compares each package's version with
+`archci next <arch>` walks the index and compares each package's version with
 `built/<repo>-<arch>/<name>` (`version commit` of the last successful build;
 for an `any` package also the arches it was pooled for, so enabling an arch
 later makes those packages outstanding again),
@@ -97,7 +97,7 @@ unless `ARCHCI_IGNOREARCH=0` limits it to packages that list the arch.
 **Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>`. The
 master's forced command (`archci-shell`) takes the first file in
 `queue/pending/` (manual enqueues and retries) the worker's arch can build,
-or else asks `archci-next` for the next outstanding package and writes a job
+or else asks `archci next` for the next outstanding package and writes a job
 for it. The job goes to `running/` stamped with the worker name and attempt,
 and is printed. The worker then:
 
@@ -202,7 +202,7 @@ client-facing `<pkg>.sig` against the one release key in its keyring; the
 builder signatures stay in staging and never reach the release area, so clients
 never need per-worker keys. The release private key never leaves the signer: it
 is generated there with a passphrase and unlocked once per session into
-`gpg-agent` (`archci-sign --unlock`), so the signing timer runs unattended for
+`gpg-agent` (`archci sign --unlock`), so the signing timer runs unattended for
 the agent's cache lifetime. The database is left unsigned (pacman's default
 `DatabaseOptional`); package authenticity is fully covered by the release
 signatures. A compromise of the master cannot get a malicious package released:
@@ -225,6 +225,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ## Source layout
 
 ```
+bin/      archci: the entry point, `archci <name>` runs archci-<name> of an installed role
 lib/      archci-common.sh (bash) and archci.rb (ruby): config, job files, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-status
 worker/   archci-worker, archci-build, archci-worker-setup
@@ -343,7 +344,7 @@ filesystem allows. Then:
    `ARCHCI_PKG_SOURCES`. The master needs no release credentials; the signer
    publishes the release area.
 
-3. Authorize worker keys: `archci-authorize worker_key.pub`. This appends
+3. Authorize worker keys: `archci authorize worker_key.pub`. This appends
    `command="/usr/lib/archci/master/archci-shell",restrict <key>` to
    `/etc/archci/authorized_keys`, so a worker key can do nothing but the
    protocol. sshd reads that file for the archci user through
@@ -375,8 +376,8 @@ and logs the two public keys to authorize:
 
 ```
 journalctl -u archci-worker-setup            # the keys and the commands to run
-archci-authorize '<the ssh key line>'        # on the master
-archci-authorize-builder builder_key.pub     # on the signer
+archci authorize '<the ssh key line>'         # on the master
+archci authorize-builder builder_key.pub      # on the signer
 ```
 
 Then:
@@ -426,7 +427,7 @@ register each worker's builder key with `archci-authorize-builder`, export the
 release public key for clients, and:
 
 ```
-archci-sign --unlock                     # enter the passphrase once per session
+archci sign --unlock                      # enter the passphrase once per session
 systemctl start archci-sign.timer        # sign new packages every 2 minutes
 systemctl start archci-sign-health.timer # warn if signing stalls
 journalctl -u archci-sign -f
@@ -437,7 +438,7 @@ day, `max-cache-ttl` in the release keyring's `gpg-agent.conf`). When it lapses
 signing stops silently and packages pile up in staging, so `archci-sign-health`
 (a timer) tests the key with `gpg --pinentry-mode error` and checks the staging
 depth, and warns loudly into the journal — `ALERT: release key is LOCKED ...` or
-a backlog warning past `ARCHCI_STAGING_WARN`. Re-run `archci-sign --unlock` when
+a backlog warning past `ARCHCI_STAGING_WARN`. Re-run `archci sign --unlock` when
 you see it. The journal streams to the master, so
 `journalctl -D /var/log/journal/remote -t archci-sign-health` surfaces it there.
 
