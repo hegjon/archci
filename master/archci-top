@@ -199,8 +199,12 @@ trap('INT') { restore.call; exit }
 trap('TERM') { restore.call; exit }
 $stdin.raw! if tty
 print "\e[?25l"
+# The first frame skips the journal so the screen comes up at once; the
+# journal columns fill in from the next cycle on.
+first = true
 loop do
-  lines = frame(journal)
+  lines = frame(first ? nil : journal)
+  first = false
   print "\e[H\e[2J"
   puts lines.map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
   if tty && IO.select([$stdin], nil, nil, interval)
