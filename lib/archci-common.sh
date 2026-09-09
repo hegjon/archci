@@ -98,6 +98,9 @@ archci_load_conf
 # 0 leaves only the unit's TimeoutStartSec.
 : "${ARCHCI_BUILD_IDLE_MINUTES:=30}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
+# A finished build's upload and report are retried this long while the
+# master is unreachable (a reboot, an outage) before the results are dropped.
+: "${ARCHCI_UPLOAD_MINUTES:=120}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=60}"
 export "${!ARCHCI_@}"
 

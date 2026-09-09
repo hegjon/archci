@@ -113,16 +113,39 @@ while true; do
 	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min (journalctl --namespace=archci -u $unit)"
 	unit=
 
-	for try in 1 2 3; do
-		rsync -a --timeout=300 -e "ssh ${ssh_opts[*]}" "$outdir/" "$ARCHCI_MASTER:$job_id/" && break
-		archci_log "upload of $job_id failed (try $try)"
+	# Upload the results, then report. While the master is unreachable (a
+	# reboot, a longer outage) the finished build is kept and retried every
+	# 30 s for ARCHCI_UPLOAD_MINUTES; a heartbeat first keeps the master's
+	# reaper from requeueing the job as stale when it comes back. Only ssh
+	# failures (exit 255) mean "unreachable": a heartbeat or report the master
+	# itself refuses says the job is no longer ours (reaped, or re-claimed by
+	# another worker), and the results are dropped.
+	deadline=$(( $(date +%s) + ARCHCI_UPLOAD_MINUTES * 60 ))
+	uploaded=0 try=0 dropped=0
+	while (( $(date +%s) < deadline )); do
+		(( ++try ))
+		rc=0; master heartbeat "$job_id" || rc=$?
+		if (( rc == 255 )); then
+			archci_log "master unreachable, keeping $job_id's results (try $try)"
+			sleep 30; continue
+		elif (( rc )); then
+			archci_log "$job_id is no longer ours; dropping its results"; dropped=1; break
+		fi
+		if (( ! uploaded )); then
+			if rsync -a --timeout=300 -e "ssh ${ssh_opts[*]}" "$outdir/" "$ARCHCI_MASTER:$job_id/"; then
+				uploaded=1
+			else
+				archci_log "upload of $job_id failed (try $try)"
+				sleep 30; continue
+			fi
+		fi
+		rc=0; master report "$job_id" "$status" || rc=$?
+		(( rc == 0 )) && { reported=1; break; }
+		(( rc == 255 )) || { archci_log "the master refused the report for $job_id; dropping it"; dropped=1; break; }
+		archci_log "could not report $job_id (try $try)"
 		sleep 30
 	done
-	if master report "$job_id" "$status"; then
-		reported=1
-	else
-		archci_log "could not report $job_id; the master will requeue it"
-	fi
+	(( reported || dropped )) || archci_log "giving up on $job_id after $try tries; the master will requeue it"
 	rm -rf "$jobdir"
 	job_id=
 done

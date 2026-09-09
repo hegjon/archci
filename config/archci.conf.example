@@ -102,4 +102,7 @@ ARCHCI_IGNOREARCH=1
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
 ARCHCI_CHROOT_UPDATE_MINUTES=60
 ARCHCI_IDLE_SLEEP=60
+# A finished build's upload and report are retried this long while the master
+# is unreachable (a reboot, an outage) before the results are dropped.
+ARCHCI_UPLOAD_MINUTES=120
 ARCHCI_HEARTBEAT_SECONDS=60

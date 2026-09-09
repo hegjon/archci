@@ -124,7 +124,10 @@ and is printed. The worker then:
 5. takes the build's journal as `build.log`, and rsyncs it with the packages,
    their builder signatures and makepkg logs to `incoming/<jobid>/` on the
    master (the ssh key is jailed to that directory by `rrsync`),
-6. reports `success` or `failure`. The verdict comes from a `result` file
+6. reports `success` or `failure`; while the master is unreachable the
+   results are kept and upload and report retried every 30 s for
+   `ARCHCI_UPLOAD_MINUTES` (2 h), with a heartbeat first so the master does
+   not reap the job when it returns. The verdict comes from a `result` file
    `archci-build` writes last, not from the unit's exit status, because systemd
    counts a build killed by SIGTERM (an external stop) as a clean exit. A
    `TimeoutStartSec` timeout does fail the unit, but the result file also covers
