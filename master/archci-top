@@ -170,7 +170,7 @@ def frame(journal)
   end
   out << ''
 
-  out << inv(format('%8s %-22s %-8s %-3s %4s %5s %5s %5s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'MEM', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output').ljust(width)[0, width])
+  out << inv(format('%8s %-22s %-7s %3s %4s %5s %5s %5s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'MEM', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output').ljust(width)[0, width])
   # a MiB count in five characters: 458M up to 999M, then 1.2G
   mem = ->(v) { v.nil? ? '-' : (v.to_i > 999 ? format('%.1fG', v.to_i / 1024.0) : "#{v}M") }
   # PHASE and the last output line from the journal (journal_tails), '-'
@@ -186,7 +186,7 @@ def frame(journal)
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = tails[unit_name(j)] || ['', '']
-    line = format('%8s %-22s %-8s %-3d %4s %5s %5s %5s %6s  %-9s %s %s', hms(since), j['worker'], j['arch'], j['attempt'], hb,
+    line = format('%8s %-22s %-7s %3d %4s %5s %5s %5s %6s  %-9s %s %s', hms(since), j['worker'], j['arch'], j['attempt'], hb,
                   j['cpu'] || '-', mem[j['rss']], mem[j['peak']], j['build'] || '-',
                   phase.empty? ? '-' : phase[0, 9], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
