@@ -158,7 +158,8 @@ def frame(journal)
 
   out << format('%-8s %-22s %-8s %-3s %4s %5s %6s %6s %6s  %-9s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'CPU', 'RSS', 'PEAK', 'DISK', 'PHASE', 'PACKAGE  | last output')
   mib = ->(v) { v ? "#{v}M" : '-' }
-  # the journal reads block on journalctl, one per job: run them side by side
+  # PHASE and the last output line from the journal (journal_tails), '-'
+  # while it has not been read: the first frame, or --no-journal
   tails = journal_tails(journal, running.map { |j| [unit_name(j), j['claimed']] })
   running.each do |j|
     since = j['claimed'] ? now - Time.iso8601(j['claimed']) : j['heartbeat_age_s']

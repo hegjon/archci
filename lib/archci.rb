@@ -256,7 +256,6 @@ module Archci
       'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
       'tracked' => sets.to_h,
       'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
-      'workers' => (running + recent).filter_map { |j| j['worker'] }.tally,
       'hosts' => hosts(running, recent, now),
       'signer' => signer,
       'running' => running,
