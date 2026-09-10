@@ -66,8 +66,11 @@ mkdir -p "$tmp/home3/built/omarchy-x86_64"; echo "0-1 x" >"$tmp/home3/built/omar
 echo "0-1 x" >"$tmp/home3/built/omarchy-x86_64/aa-app"
 order=$(next3)
 [[ $order == "archci bb-lib zz-core "*" mm-local bb-aur aa-app(bb-lib)" ]] || fail "a dependency built at an older version must be waited for (its update, bb-lib, goes first), and an update waiting comes after the backlog: $order"
-# once bb-lib is built at its version, aa-app, an update, goes first after the farm's own
+# bb-lib built at its version but just now: not released yet, still waited for
 echo "1-1 x" >"$tmp/home3/built/omarchy-x86_64/bb-lib"
+order=$(ARCHCI_RELEASE_LAG_MINUTES=10 next3)
+[[ $order == *" aa-app(bb-lib)" ]] || fail "a dependency built within the release lag must be waited for: $order"
+# built long enough ago: aa-app, an update, goes first after the farm's own
 order=$(next3)
 [[ $order == "archci aa-app zz-core "* ]] || fail "an update whose dependency is built must not wait: $order"
 echo "ALL OK"

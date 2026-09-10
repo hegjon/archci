@@ -222,7 +222,11 @@ if [[ -n $ARCHCI_KEYSERVERS ]]; then
 		done
 	fi
 fi
-mcp_args=(-c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
+# -u: the copy syncs the databases and upgrades before the build, so a
+# dependency the farm released since the root's last update (up to
+# ARCHCI_CHROOT_UPDATE_MINUTES ago) is found, and no package the signer has
+# since pruned is asked for
+mcp_args=(-c -u -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
 # ARCHCI_MAKEPKG_ARGS is passed to makepkg after -- (default: none).
 extra_makepkg_args=()
 [[ -n $ARCHCI_MAKEPKG_ARGS ]] && read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
@@ -265,8 +269,10 @@ build_once
 # file the chroot cached from a mirror before the farm built that same name
 # fails its checksum once the farm's repository has it. pacman drops the
 # file (--noconfirm) but fails the install; the second try fetches the right one.
-if (( rc )) && grep -q "invalid or corrupted package" "$outdir/makechrootpkg.log"; then
-	echo "==> a cached package failed its checksum (a mirror's copy of a name the farm now builds); pacman dropped it, building again"
+# A file the release no longer has (the signer pruned the version the
+# database still named when the copy synced) is the same kind of moment.
+if (( rc )) && grep -Eq "invalid or corrupted package|failed retrieving file" "$outdir/makechrootpkg.log"; then
+	echo "==> a package failed its checksum or was gone from the release (a mirror's copy of a name the farm now builds, or a version the signer just replaced); building again"
 	build_once
 fi
 if (( rc == 124 )); then

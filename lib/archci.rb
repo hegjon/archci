@@ -27,6 +27,7 @@ module Archci
     'ARCHCI_PKG_ALSO' => '',
     'ARCHCI_IGNOREARCH' => '1',
     'ARCHCI_MAX_ATTEMPTS' => '3',
+    'ARCHCI_RELEASE_LAG_MINUTES' => '10',
     'ARCHCI_REMOTE_JOURNAL' => '/var/log/journal/remote'
   }.freeze
 
@@ -251,19 +252,23 @@ module Archci
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
     # a dependency is met once its pkgbase is built at its current version
     # for the arch, or as an any package (built at an older one, its update
-    # is waited for: the dependent's new version usually needs it); one that
-    # gave up at its current commit is not waited for (the chroot falls back
-    # on the mirrors' copy, if any). The built names come from one listing
-    # per arch, the versions from the built records (cached): the check runs
-    # for every dependency of every package on every archci top frame.
+    # is waited for: the dependent's new version usually needs it), and long
+    # enough ago for the signer to have released it (ARCHCI_RELEASE_LAG_MINUTES:
+    # the chroot installs from the release); one that gave up at its current
+    # commit is not waited for (the chroot falls back on the mirrors' copy,
+    # if any). The built names come from one listing per arch, the versions
+    # from the built records (cached): the check runs for every dependency
+    # of every package on every archci top frame.
     by_base = candidates.to_h { |p| [p['pkgbase'], p] }
     built_names = Hash.new do |h, a|
       dir = File.join(home, 'built', "#{repo}-#{a}")
       h[a] = File.directory?(dir) ? Dir.children(dir).to_set : Set.new
     end
+    released_before = Time.now - cfg['ARCHCI_RELEASE_LAG_MINUTES'].to_i * 60
     current = Hash.new do |h, (dep_base, a)|
+      path = File.join(home, 'built', "#{repo}-#{a}", dep_base)
       h[[dep_base, a]] = built_names[a].include?(dep_base) &&
-                         built_record(File.join(home, 'built', "#{repo}-#{a}", dep_base))&.first == by_base[dep_base]['version']
+                         built_record(path)&.first == by_base[dep_base]['version'] && File.mtime(path) <= released_before
     end
     dep_built = lambda do |dep_base, a|
       current[[dep_base, a]] || current[[dep_base, 'any']] ||

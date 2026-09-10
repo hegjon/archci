@@ -45,6 +45,10 @@ ARCHCI_STALE_MINUTES=30
 # this much longer.
 ARCHCI_RETRY_MINUTES=180
 ARCHCI_RETRY_HOLD_MINUTES=720
+# A dependency built this recently is taken as not yet released (the signer's
+# lag) and waited for, so its dependents are not claimed before the chroot
+# can install it.
+ARCHCI_RELEASE_LAG_MINUTES=10
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 ARCHCI_REMOTE_JOURNAL=/var/log/journal/remote
 # Finished job records are pruned from queue/done after this many days.

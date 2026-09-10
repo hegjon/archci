@@ -52,6 +52,7 @@ archci_load_conf
 : "${ARCHCI_STALE_MINUTES:=30}"
 : "${ARCHCI_RETRY_MINUTES:=180}"
 : "${ARCHCI_RETRY_HOLD_MINUTES:=720}"
+: "${ARCHCI_RELEASE_LAG_MINUTES:=10}"
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 : "${ARCHCI_REMOTE_JOURNAL:=/var/log/journal/remote}"
