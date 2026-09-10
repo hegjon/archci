@@ -15,8 +15,9 @@
 #            and the archci version the workers run
 #   jobs     one row per running job: elapsed, worker, attempt, heartbeat age,
 #            the job's load (cores in use, like a load average), memory (current and peak) and build-tree
-#            size from its cgroup, the makepkg phase and the last output line
-#            (from the worker's journal streamed to ARCHCI_REMOTE_JOURNAL)
+#            size from its cgroup and the makepkg phase, all from the worker's
+#            heartbeats, and the last output line from the worker's journal
+#            streamed to ARCHCI_REMOTE_JOURNAL
 #   failed   the newest failures
 # q, Escape or Ctrl-C quits.
 require_relative '../lib/archci-frame'

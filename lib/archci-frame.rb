@@ -35,17 +35,13 @@ def unit_name(j)
 end
 
 # The remote journal holds every worker's every build (a gigabyte or more,
-# and the master has one CPU). JournalFollow reads it once, streaming: one
-# "journalctl -f" for the session, read by a thread that keeps every build
-# unit's phase (from its markers, "==> Starting build()...", "==> Making
-# package: ...") and last line as they arrive; a frame only renders them. A
-# job seen for the first time gets one look of its own through the unit's
-# index (a long build has 100k+ lines behind it), never through the journal
-# as a whole.
-MARKER = '^==> (Starting|Making package|Installing missing|Retrieving|Validating|Verifying|Extracting|Creating|Updating|Synchronizing|archci-build finished)'
-# how far back a job's own lines are searched for its phase marker on first sight
-FIRST_LOOK = 20_000
-MARKER_RE = Regexp.new(MARKER)
+# and the master has one CPU). It is read for one thing, each running job's
+# last output line: JournalFollow keeps one "journalctl -f" for the session,
+# read by a thread that remembers the newest line per build unit as it
+# arrives; a frame only renders. A job seen for the first time gets one look
+# of its own, backwards through the unit's index (a long build has 100k+
+# lines behind it), never through the journal as a whole. The phase comes
+# with the worker's heartbeat (archci_phase_filter), not from here.
 
 # dir nil: the caller names the file(s) itself (--file)
 def journal_entries(dir, *args)
@@ -76,38 +72,20 @@ def message_of(entry)
   (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip
 end
 
-# The job's phase in eight characters, from its marker's first word: the
-# chroot's pacman, then makepkg's steps, then the worker uploading results
-# (archci-build's last line; the journal shows nothing more until the
-# worker's next claim).
-PHASES = {
-  'synchronizing' => 'sync', 'updating' => 'update', 'installing' => 'deps', 'making' => 'start',
-  'retrieving' => 'download', 'validating' => 'sums', 'verifying' => 'verify', 'extracting' => 'extract',
-  'prepare' => 'prepare', 'pkgver' => 'pkgver', 'build' => 'build', 'check' => 'check', 'package' => 'package',
-  'creating' => 'compress', 'archci-build' => 'upload'
-}.freeze
-
-def phase_of(message)
-  word = message.sub(/^==> Starting ([\w-]+)\(\).*/, '\1').sub(/^==> /, '').split(/[ :(]/).first.to_s.downcase
-  PHASES[word] || (word.start_with?('package_') ? 'package' : word[0, 8])
-end
-
-# One journalctl -f for the session; tails(jobs) answers from what it has
+# One journalctl -f for the session; last(jobs) answers from what it has
 # streamed, after a first look at any job it has not seen.
 class JournalFollow
   def initialize(dir)
     @dir = dir
     @lock = Mutex.new
-    @phase = {}
     @last = {}
     @seen = {}
     @pid = nil
     @reader = Thread.new { follow }
   end
 
-  # journalctl -f, starting with the last 100 entries (a phase marker may
-  # have just gone by); started again should it end (it survives
-  # the journal's own file rotation, but not much else)
+  # journalctl -f, starting with the last 100 entries; started again should
+  # it end (it survives the journal's own file rotation, but not much else)
   def follow
     loop do
       begin
@@ -120,10 +98,7 @@ class JournalFollow
             next unless u.start_with?('archci-build@')
 
             msg = message_of(e)
-            @lock.synchronize do
-              @last[u] = msg
-              @phase[u] = phase_of(msg) if msg.match?(MARKER_RE)
-            end
+            @lock.synchronize { @last[u] = msg }
           end
         end
       rescue StandardError
@@ -141,14 +116,11 @@ class JournalFollow
     nil
   end
 
-  # jobs: [[unit, claimed], ...] -> { unit => [phase, last line] }
-  def tails(jobs)
-    # first sight of a job: its last line and its phase so far, from the
-    # journal files written to since it was claimed, both backwards through
-    # the unit's index (-n --reverse): the last line is one entry, the phase
-    # the newest marker among the job's last FIRST_LOOK lines (a chatty test
-    # suite past that many lines shows '-' until its next marker). One job
-    # at a time; what the stream has meanwhile is not overwritten.
+  # jobs: [[unit, claimed], ...] -> { unit => last line }
+  def last(jobs)
+    # first sight of a job: its last line so far, from the journal files
+    # written to since it was claimed, one entry backwards through the
+    # unit's index; what the stream has meanwhile is not overwritten
     files = Dir.glob(File.join(@dir, '*.journal'))
     jobs.reject { |u, _| @seen[u] }.each do |u, claimed|
       since = claimed ? Time.iso8601(claimed) : Time.at(0)
@@ -157,13 +129,9 @@ class JournalFollow
       next if sel.empty?
 
       l = journal_entries(nil, *sel, '-u', u, '-n', '1', '--reverse').first
-      m = journal_entries(nil, *sel, '-u', u, '-n', FIRST_LOOK.to_s, '--reverse').find { |e| message_of(e).match?(MARKER_RE) }
-      @lock.synchronize do
-        @last[u] ||= message_of(l) if l
-        @phase[u] ||= phase_of(message_of(m)) if m
-      end
+      @lock.synchronize { @last[u] ||= message_of(l) } if l
     end
-    @lock.synchronize { jobs.to_h { |u, _| [u, [@phase[u].to_s, @last[u].to_s]] } }
+    @lock.synchronize { jobs.to_h { |u, _| [u, @last[u].to_s] } }
   rescue StandardError
     {}
   end
@@ -237,9 +205,9 @@ def frame(journal, snap = nil, hint: true)
     else load[j['cpu']]
     end
   end
-  # PHASE and the last output line from the journal follower, '-' without
-  # one: the first frame, --once, or --no-journal
-  tails = journal ? journal.tails(running.map { |j| [unit_name(j), j['claimed']] }) : {}
+  # the last output line from the journal follower, '-' without one: the
+  # first frame, --once, or --no-journal
+  lasts = journal ? journal.last(running.map { |j| [unit_name(j), j['claimed']] }) : {}
   # by host, its native workers first, then per emulated arch, instance
   # numbers as numbers: host-1, host-3, host-aarch64-1, host-riscv64-2
   running.sort_by do |j|
@@ -249,8 +217,8 @@ def frame(journal, snap = nil, hint: true)
     since = j['claimed'] ? now - Time.iso8601(j['claimed']) : j['heartbeat_age_s']
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
-    phase, last = tails[unit_name(j)] || ['', '']
-    phase = j['phase'] if j['phase']   # the worker's own word for it (heartbeat), when it sends one
+    last = lasts[unit_name(j)].to_s
+    phase = j['phase'].to_s   # from the worker's heartbeat
     line = format('%-8s %-19s %-7s %3d %4s %5s %5s %5s %5s  %-8s %-8s %s %s', hms(since), short_worker(j['worker'])[0, 19], j['arch'], j['attempt'], hb,
                   cores[j], tree[j['build']], mem[j['rss']], mem[j['peak']],
                   phase.empty? ? '-' : phase[0, 8], (j['origin'] || '-')[0, 8], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
