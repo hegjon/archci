@@ -234,8 +234,13 @@ fi
 # (its output also lands in $outdir/makechrootpkg.log, for the check below)
 build_once() {
 	local rcf; rcf=$(mktemp)
-	{ archci_watchdog "$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}"; echo $? >"$rcf"; } 2>&1 | tee "$outdir/makechrootpkg.log"
-	rc=$(<"$rcf"); rm -f "$rcf"
+	# (the group runs in a subshell under set -e: a plain failing command
+	# would end it before the status is written, so the status is taken
+	# through if/else)
+	{
+		if archci_watchdog "$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
+	} 2>&1 | tee "$outdir/makechrootpkg.log"
+	rc=$(<"$rcf"); rc=${rc:-1}; rm -f "$rcf"
 }
 rc=0
 build_once
