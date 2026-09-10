@@ -44,12 +44,20 @@ end
 # quiet, its last line; both are remembered.
 MARKER = '^==> (Starting|Making package|Installing missing|Retrieving|Validating|Verifying|Extracting|Creating|Updating|Synchronizing|archci-build finished)'
 TAIL_LINES = 1500
+# how far back a job's own lines are searched for its phase marker on first sight
+FIRST_LOOK = 20_000
+MARKER_RE = Regexp.new(MARKER)
 JSTATE = { phase: {}, last: {}, seen: {}, cursor: nil }
 
 # dir nil: the caller names the file(s) itself (--file)
 def journal_entries(dir, *args)
+  t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   out, = Open3.capture2('journalctl', *(dir ? ['-D', dir] : []), '--no-pager', '-o', 'json',
                         '--output-fields=MESSAGE,_SYSTEMD_UNIT', *args, err: File::NULL)
+  # ARCHCI_TOP_DEBUG=1: every journalctl call and what it cost, on stderr
+  if ENV['ARCHCI_TOP_DEBUG']
+    warn format('%6.2fs journalctl %s', Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, args.map { |a| a.to_s[0, 60] }.join(' ')[0, 200])
+  end
   # journalctl writes UTF-8 whatever the locale (a unit's may be none: US-ASCII)
   out.force_encoding(Encoding::UTF_8).each_line.filter_map do |l|
     JSON.parse(l.scrub)
@@ -100,17 +108,24 @@ def journal_tails(dir, jobs)
   tail = newest ? journal_entries(nil, '--file', newest, '-n', TAIL_LINES.to_s) : []
   tail.each { |e| JSTATE[:last][unit_of(e)] = message_of(e) if units.include?(unit_of(e)) }
   JSTATE[:cursor] = tail.last['__CURSOR'] if tail.last
-  # first sight of a job: its phase so far and, if the tail missed it, its last line
-  jobs.reject { |u, _| JSTATE[:seen][u] }.map do |u, claimed|
-    Thread.new do
-      since = claimed ? ['--since', claimed] : []
-      m = journal_entries(dir, '-u', u, *since, '-n', '1', '-g', MARKER).last
-      JSTATE[:phase][u] = phase_of(message_of(m)) if m
-      l = JSTATE[:last][u] || journal_entries(dir, '-u', u, *since, '-n', '1').last
-      JSTATE[:last][u] = message_of(l) if l.is_a?(Hash)
-      JSTATE[:seen][u] = true
-    end
-  end.each(&:join)
+  # first sight of a job: its last line and its phase so far, from the
+  # journal files written to since it was claimed. Both reads go through
+  # the unit's index backwards (-n --reverse), never through the journal as
+  # a whole: the last line is one entry, the phase the newest marker among
+  # the job's last FIRST_LOOK lines (a chatty test suite past that many
+  # lines shows '-' until its next marker). One job at a time.
+  files = Dir.glob(File.join(dir, '*.journal'))
+  jobs.reject { |u, _| JSTATE[:seen][u] }.each do |u, claimed|
+    since = claimed ? Time.iso8601(claimed) : Time.at(0)
+    sel = files.select { |f| File.mtime(f) >= since }.flat_map { |f| ['--file', f] }
+    next if sel.empty?
+
+    l = journal_entries(nil, *sel, '-u', u, '-n', '1', '--reverse').first
+    JSTATE[:last][u] ||= message_of(l) if l
+    m = journal_entries(nil, *sel, '-u', u, '-n', FIRST_LOOK.to_s, '--reverse').find { |e| message_of(e).match?(MARKER_RE) }
+    JSTATE[:phase][u] = phase_of(message_of(m)) if m
+    JSTATE[:seen][u] = true
+  end
   units.to_h { |u| [u, [JSTATE[:phase][u].to_s, JSTATE[:last][u].to_s]] }
 rescue StandardError
   {}
