@@ -237,7 +237,8 @@ fi
 # makes rc makechrootpkg's own status.
 # A build silent for ARCHCI_BUILD_MAX_IDLE_MINUTES is a stuck test suite: kill it
 # rather than hold the worker until the unit's TimeoutStartSec.
-# (its output also lands in $outdir/makechrootpkg.log, for the check below)
+# (its output also lands in $outdir/makechrootpkg.log, for the check below,
+# and its phase markers in JOBDIR/phase, for the worker's heartbeats)
 build_once() {
 	local rcf; rcf=$(mktemp)
 	# (the group runs in a subshell under set -e: a plain failing command
@@ -245,7 +246,7 @@ build_once() {
 	# through if/else)
 	{
 		if archci_watchdog "$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
-	} 2>&1 | tee "$outdir/makechrootpkg.log"
+	} 2>&1 | tee "$outdir/makechrootpkg.log" | archci_phase_filter "${jobfile%/*}/phase"
 	rc=$(<"$rcf"); rc=${rc:-1}; rm -f "$rcf"
 }
 rc=0

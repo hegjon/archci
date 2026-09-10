@@ -129,7 +129,7 @@ export "${!ARCHCI_@}"
 # (stat names must not be job fields: a heartbeat replaces lines of these
 # names in the job file, so a stat called version would eat the package's)
 ARCHCI_HOST_STATS='load mem disk cpus vendor archci'
-ARCHCI_JOB_STATS='cpu rss peak build'
+ARCHCI_JOB_STATS='cpu rss peak build phase'
 archci_stats_re() { local s="$ARCHCI_HOST_STATS $ARCHCI_JOB_STATS"; printf '%s' "${s// /|}"; }
 
 # Master: the PKGBUILD repository clone and the package index over it.
@@ -268,9 +268,36 @@ archci_worker_stats() {
 	printf 'load=%s mem=%s disk=%s cpus=%s%s%s\n' "$load" "$used" "${disk:-0}" "$(nproc)" "${vendor:+ vendor=$vendor}" "${version:+ archci=$version}"
 }
 
-# archci_job_stats JOBDIR UNIT -> "cpu=<cores> rss=<MiB> peak=<MiB> build=<MiB>"
-# for the build UNIT (archci-build@...) running from JOBDIR, or nothing while
-# there is none. The container's processes live in a scope of nspawn's own,
+# archci_phase_filter FILE -- pass the build's output through, and on each of
+# makepkg's and makechrootpkg's marker lines ("==> Starting build()...",
+# "==> Installing missing dependencies...") write the phase it opens, in at
+# most eight characters, to FILE (renamed into place). archci-build runs its
+# build through it; the worker sends FILE with every heartbeat, so the master
+# knows the phase without reading the build's journal (a chatty build outlives
+# the journal's memory of its own start).
+archci_phase_filter() {
+	awk -v f="$1" '
+		{ print; fflush() }
+		/^==> / {
+			p = ""
+			if ($0 ~ /^==> Starting [A-Za-z0-9_-]+\(\)/) { w = $3; sub(/\(\).*/, "", w); p = (w ~ /^package_/) ? "package" : substr(w, 1, 8) }
+			else if ($0 ~ /^==> Making package/) p = "start"
+			else if ($0 ~ /^==> Installing missing/) p = "deps"
+			else if ($0 ~ /^==> Retrieving/) p = "download"
+			else if ($0 ~ /^==> Validating/) p = "sums"
+			else if ($0 ~ /^==> Verifying/) p = "verify"
+			else if ($0 ~ /^==> Extracting/) p = "extract"
+			else if ($0 ~ /^==> Creating/) p = "compress"
+			else if ($0 ~ /^==> Updating/) p = "update"
+			else if ($0 ~ /^==> Synchronizing/) p = "sync"
+			if (p != "") { printf "%s\n", p > (f ".tmp"); close(f ".tmp"); system("mv -f \"" f ".tmp\" \"" f "\"") }
+		}'
+}
+
+# archci_job_stats JOBDIR UNIT -> "phase=<phase> cpu=<cores> rss=<MiB> peak=<MiB> build=<MiB>"
+# for the build UNIT (archci-build@...) running from JOBDIR: the phase as soon
+# as archci_phase_filter has written JOBDIR/phase, the rest once the build's
+# scope exists; nothing while there is neither. The container's processes live in a scope of nspawn's own,
 # devtools.slice/*/makechrootpkg-<pkg>.build.<pid>.scope, named after the
 # makechrootpkg process, which itself sits in the build unit's cgroup; the
 # scope's cgroup accounts CPU and memory for the whole build. cpu is the cores
@@ -278,16 +305,17 @@ archci_worker_stats() {
 # chroot copy's /build directory (archci-build writes the copy to
 # JOBDIR/copydir), where makepkg extracts and compiles.
 archci_job_stats() {
-	local jobdir=$1 unit=$2 ucg pid cg='' copydir usage now prev_usage prev_now cpu mem peak build
+	local jobdir=$1 unit=$2 ucg pid cg='' copydir usage now prev_usage prev_now cpu mem peak build phase=''
+	[[ -r $jobdir/phase ]] && phase=$(<"$jobdir/phase") && [[ $phase =~ ^[A-Za-z0-9._-]{1,8}$ ]] || phase=''
 	ucg=$(systemctl show -p ControlGroup --value "$unit" 2>/dev/null)
-	[[ -n $ucg && -f /sys/fs/cgroup$ucg/cgroup.procs ]] || return 0
+	[[ -n $ucg && -f /sys/fs/cgroup$ucg/cgroup.procs ]] || { [[ -n $phase ]] && echo "phase=$phase"; return 0; }
 	while read -r pid; do
 		for cg in /sys/fs/cgroup/devtools.slice/*/makechrootpkg-*."$pid".scope; do
 			[[ -d $cg ]] && break 2
 		done
 		cg=''
 	done <"/sys/fs/cgroup$ucg/cgroup.procs"
-	[[ -n $cg ]] || return 0
+	[[ -n $cg ]] || { [[ -n $phase ]] && echo "phase=$phase"; return 0; }
 	{
 		usage=$(awk '/^usage_usec/ { print $2 }' "$cg/cpu.stat" 2>/dev/null) || return 0
 		now=$(date +%s%6N)
@@ -315,7 +343,7 @@ archci_job_stats() {
 		# human-readable (du -h: 39M, 2.1G), shown as is
 		build=0
 		[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$(du -sh "$copydir/build" 2>/dev/null | cut -f1)
-		printf '%srss=%s peak=%s build=%s\n' "${cpu:+cpu=$cpu }" "$mem" "$peak" "${build:-0}"
+		printf '%s%srss=%s peak=%s build=%s\n' "${phase:+phase=$phase }" "${cpu:+cpu=$cpu }" "$mem" "$peak" "${build:-0}"
 	}
 }
 

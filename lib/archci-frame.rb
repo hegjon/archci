@@ -241,6 +241,7 @@ def frame(journal, snap = nil, hint: true)
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = tails[unit_name(j)] || ['', '']
+    phase = j['phase'] if j['phase']   # the worker's own word for it (heartbeat), when it sends one
     line = format('%-8s %-19s %-7s %3d %4s %5s %5s %5s %5s  %-8s %-8s %s %s', hms(since), short_worker(j['worker'])[0, 19], j['arch'], j['attempt'], hb,
                   j['cpu'] ? (j['cpu'].to_f * 100).round.to_s : '-', j['build'] || '-', mem[j['rss']], mem[j['peak']],
                   phase.empty? ? '-' : phase[0, 8], (j['origin'] || '-')[0, 8], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")

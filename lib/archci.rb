@@ -13,7 +13,7 @@ module Archci
   # The heartbeat's stats (the same two lists as archci-common.sh): the host's
   # and the job's, kept with the job file by archci-job heartbeat.
   HOST_STATS = %w[load mem disk cpus vendor archci].freeze
-  JOB_STATS = %w[cpu rss peak build].freeze
+  JOB_STATS = %w[cpu rss peak build phase].freeze
 
   DEFAULTS = {
     'ARCHCI_HOME' => '/var/lib/archci',
@@ -241,6 +241,7 @@ module Archci
         any = p['arches'] == ['any']
         job_arch = any ? 'any' : a
         next if !any && !ignorearch && !p['arches'].include?(a)
+        next if p['profile'] == 'multilib' && a != 'x86_64'   # 32-bit x86 libraries: x86_64 only, whatever --ignorearch says
 
         # built record: "version commit" and, for an any package, the arches it
         # was pooled for; an arch enabled since makes the package outstanding again

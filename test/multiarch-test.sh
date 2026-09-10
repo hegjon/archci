@@ -22,6 +22,13 @@ commit_pkgs any
 # x86_64: linux, libsigc++ (acl built); any: archlinux-keyring; aarch64: acl, linux, libsigc++
 "$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding #{j["outstanding"]}" unless j["outstanding"] == {"updates"=>0, "backlog"=>6}; abort "tracked #{j["tracked"]}" unless j["tracked"]["omarchy-aarch64"] == 3 && j["tracked"]["omarchy-any"] == 1 && j["any_arch"] == "x86_64"'
 ! "$job" claim worker-6 riscv64 2>/dev/null || fail "claim for an arch not in ARCHCI_ARCHES must fail"
+# a multilib package (lib32-*) is x86_64's alone, however --ignorearch treats the arch array
+mkpkgbuild lib32-zlib 1.3.2-1 x86_64 '{"source": "arch", "arch_repo": "multilib"}'
+commit_pkgs lib32
+"$scan" >/dev/null
+[[ $("$next" aarch64) != *lib32-zlib* ]] || fail "a multilib package must not be offered to aarch64: $("$next" aarch64)"
+[[ $("$next" x86_64 | grep -c lib32-zlib) == 1 ]] || fail "but to x86_64: $("$next" x86_64)"
+rm -rf "$pkgs/pkgbuilds/lib32-zlib"; commit_pkgs "no lib32"; "$scan" >/dev/null   # the rest of the test expects the original set
 [[ $("$next" aarch64) == "5 omarchy aarch64 acl "* ]] || fail "aarch64 backlog should start at acl: $("$next" aarch64)"
 [[ $(ARCHCI_IGNOREARCH=0 "$next" aarch64) == "" ]] || fail "with ARCHCI_IGNOREARCH=0 only packages listing aarch64 are offered"
 out=$("$job" claim arm-1 aarch64)

@@ -115,8 +115,13 @@ while true; do
 		# until one has carried the job's own stats (the build's scope only
 		# exists once makechrootpkg has set the chroot up and installed the
 		# dependencies), then every ARCHCI_HEARTBEAT_SECONDS.
-		hb_down=0 wait=5 jobstats=''
-		while sleep "$wait"; do
+		# A beat also goes as soon as the build enters a new phase (archci-build
+		# writes JOBDIR/phase), so archci top shows it without waiting a minute.
+		hb_down=0 wait=5 jobstats='' slept=0 seen_phase=''
+		while sleep 5; do
+			(( slept += 5 ))
+			(( slept >= wait )) || [[ $(stat -c %Y "$jobdir/phase" 2>/dev/null) != "$seen_phase" ]] || continue
+			slept=0; seen_phase=$(stat -c %Y "$jobdir/phase" 2>/dev/null || true)
 			jobstats=$(archci_job_stats "$jobdir" "$unit")
 			wait=$(( ${#jobstats} ? ARCHCI_HEARTBEAT_SECONDS : 10 ))
 			# shellcheck disable=SC2046,SC2086  # the stats are separate key=value words on purpose
@@ -154,7 +159,7 @@ while true; do
 	uploaded=0 try=0 dropped=0
 	while true; do
 		(( ++try ))
-		rc=0; master heartbeat "$job_id" || rc=$?
+		rc=0; master heartbeat "$job_id" phase=upload || rc=$?
 		if (( rc == 255 )); then
 			(( try == 1 )) && archci_log "master unreachable, keeping $job_id's results until it is back"
 			sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue

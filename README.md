@@ -143,7 +143,8 @@ and is printed. The worker then:
 
 While building, the worker sends heartbeats to the master, carrying the
 machine's load, memory, chroot disk use and core count, and the job's own
-CPU, memory and build-tree size read from its cgroup; the master keeps them
+phase (makepkg's step, from the build's output), CPU, memory and build-tree
+size read from its cgroup; the master keeps them
 with the job for `archci top`. A job without a heartbeat for 30 minutes is
 put back in `pending/` by housekeeping (a 5-minute timer), so a worker can
 be destroyed at any time. On `systemctl stop` the worker reports
