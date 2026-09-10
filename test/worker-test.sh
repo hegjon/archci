@@ -86,7 +86,11 @@ wait_for 10 . "$ARCHCI_HOME/built/omarchy-x86_64/acl" || fail "the master did no
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "2.4.0-1 "* ]] || fail "built record wrong: $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl")"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-2.4.0-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 (( $(find "$ARCHCI_HOME/queue/done" -type f | wc -l) == 1 )) || fail "job not in done/"
-leftover=$(find "$ARCHCI_WORKER_HOME/jobs" -mindepth 1 -maxdepth 1 -not -name 'claim*')
+# the worker removes the job directory after its report; give a slow host a moment
+for ((i = 0; i < 100; i++)); do
+	leftover=$(find "$ARCHCI_WORKER_HOME/jobs" -mindepth 1 -maxdepth 1 -not -name 'claim*')
+	[[ -z $leftover ]] && break; sleep 0.1
+done
 [[ -z $leftover ]] || fail "job directory not cleaned up: $leftover"
 grep -q 'building .* as archci-build@' "$tmp/worker.log" || fail "no build log line"
 kill "$worker_pid"; wait "$worker_pid" 2>/dev/null || true; worker_pid=''

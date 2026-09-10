@@ -27,7 +27,7 @@ complete_words() {   # complete_words WORD... -> COMPREPLY for the last (possibl
 }
 source "$here/../config/bash-completion/archci"
 PATH=$here/../bin:$PATH
-complete_words archci "" | grep -qx job || fail "completion must offer the installed subcommands"
+complete_words archci "" | grep -qx job || fail "completion must offer the installed subcommands; archci help says: $("$archci" help 2>&1 | head -5)"
 complete_words archci "" | grep -qx version || fail "completion must offer version"
 complete_words archci to | grep -qx top || fail "completion must narrow on the prefix"
 complete_words archci job "" | grep -qx retry || fail "completion must offer archci job's subcommands"
