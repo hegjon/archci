@@ -35,19 +35,17 @@ def unit_name(j)
 end
 
 # The remote journal holds every worker's every build (a gigabyte or more,
-# and the master has one CPU), so a frame costs two bounded reads whatever
-# the number of jobs: the newest lines of the newest journal file, for every
-# job's last output line, and the phase markers ("==> Starting build()...",
-# "==> Making package: ...") written since the previous frame's cursor. A job seen
-# for the first time gets one walk of its own, --since its claim, for the
-# phase it is in (a long build has 100k+ lines behind it) and, when it is
-# quiet, its last line; both are remembered.
+# and the master has one CPU). JournalFollow reads it once, streaming: one
+# "journalctl -f" for the session, read by a thread that keeps every build
+# unit's phase (from its markers, "==> Starting build()...", "==> Making
+# package: ...") and last line as they arrive; a frame only renders them. A
+# job seen for the first time gets one look of its own through the unit's
+# index (a long build has 100k+ lines behind it), never through the journal
+# as a whole.
 MARKER = '^==> (Starting|Making package|Installing missing|Retrieving|Validating|Verifying|Extracting|Creating|Updating|Synchronizing|archci-build finished)'
-TAIL_LINES = 1500
 # how far back a job's own lines are searched for its phase marker on first sight
 FIRST_LOOK = 20_000
 MARKER_RE = Regexp.new(MARKER)
-JSTATE = { phase: {}, last: {}, seen: {}, cursor: nil }
 
 # dir nil: the caller names the file(s) itself (--file)
 def journal_entries(dir, *args)
@@ -59,11 +57,13 @@ def journal_entries(dir, *args)
     warn format('%6.2fs journalctl %s', Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, args.map { |a| a.to_s[0, 60] }.join(' ')[0, 200])
   end
   # journalctl writes UTF-8 whatever the locale (a unit's may be none: US-ASCII)
-  out.force_encoding(Encoding::UTF_8).each_line.filter_map do |l|
-    JSON.parse(l.scrub)
-  rescue JSON::ParserError, EncodingError
-    nil
-  end
+  out.force_encoding(Encoding::UTF_8).each_line.filter_map { |l| parse_entry(l) }
+end
+
+def parse_entry(line)
+  JSON.parse(line.scrub)
+rescue JSON::ParserError, EncodingError
+  nil
 end
 
 # the entry's unit, as unit_name spells it (the journal appends .service)
@@ -92,43 +92,80 @@ def phase_of(message)
   PHASES[word] || (word.start_with?('package_') ? 'package' : word[0, 8])
 end
 
-# jobs: [[unit, claimed], ...] -> { unit => [phase, last line] }
-def journal_tails(dir, jobs)
-  return {} unless dir && File.directory?(dir)
+# One journalctl -f for the session; tails(jobs) answers from what it has
+# streamed, after a first look at any job it has not seen.
+class JournalFollow
+  def initialize(dir)
+    @dir = dir
+    @lock = Mutex.new
+    @phase = {}
+    @last = {}
+    @seen = {}
+    @pid = nil
+    @reader = Thread.new { follow }
+  end
 
-  units = jobs.map(&:first)
-  if JSTATE[:cursor]
-    journal_entries(dir, "--after-cursor=#{JSTATE[:cursor]}", '-g', MARKER).each do |e|
-      JSTATE[:phase][unit_of(e)] = phase_of(message_of(e)) if units.include?(unit_of(e))
+  # journalctl -f from now on; started again should it end (it survives
+  # the journal's own file rotation, but not much else)
+  def follow
+    loop do
+      begin
+        Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-o', 'json', '--output-fields=MESSAGE,_SYSTEMD_UNIT',
+                     '-f', '-n', '0', err: File::NULL) do |_stdin, out, waiter|
+          @pid = waiter.pid
+          out.each_line do |line|
+            e = parse_entry(line.force_encoding(Encoding::UTF_8)) or next
+            u = unit_of(e)
+            next unless u.start_with?('archci-build@')
+
+            msg = message_of(e)
+            @lock.synchronize do
+              @last[u] = msg
+              @phase[u] = phase_of(msg) if msg.match?(MARKER_RE)
+            end
+          end
+        end
+      rescue StandardError
+        nil
+      end
+      @pid = nil
+      sleep 2
     end
   end
-  # the newest lines live in the newest file; asking the whole directory for
-  # its tail makes journalctl open and order every file first (seconds)
-  newest = Dir.glob(File.join(dir, '*.journal')).max_by { |f| File.mtime(f) }
-  tail = newest ? journal_entries(nil, '--file', newest, '-n', TAIL_LINES.to_s) : []
-  tail.each { |e| JSTATE[:last][unit_of(e)] = message_of(e) if units.include?(unit_of(e)) }
-  JSTATE[:cursor] = tail.last['__CURSOR'] if tail.last
-  # first sight of a job: its last line and its phase so far, from the
-  # journal files written to since it was claimed. Both reads go through
-  # the unit's index backwards (-n --reverse), never through the journal as
-  # a whole: the last line is one entry, the phase the newest marker among
-  # the job's last FIRST_LOOK lines (a chatty test suite past that many
-  # lines shows '-' until its next marker). One job at a time.
-  files = Dir.glob(File.join(dir, '*.journal'))
-  jobs.reject { |u, _| JSTATE[:seen][u] }.each do |u, claimed|
-    since = claimed ? Time.iso8601(claimed) : Time.at(0)
-    sel = files.select { |f| File.mtime(f) >= since }.flat_map { |f| ['--file', f] }
-    next if sel.empty?
 
-    l = journal_entries(nil, *sel, '-u', u, '-n', '1', '--reverse').first
-    JSTATE[:last][u] ||= message_of(l) if l
-    m = journal_entries(nil, *sel, '-u', u, '-n', FIRST_LOOK.to_s, '--reverse').find { |e| message_of(e).match?(MARKER_RE) }
-    JSTATE[:phase][u] = phase_of(message_of(m)) if m
-    JSTATE[:seen][u] = true
+  def stop
+    @reader.kill
+    Process.kill('TERM', @pid) if @pid
+  rescue Errno::ESRCH, Errno::EPERM
+    nil
   end
-  units.to_h { |u| [u, [JSTATE[:phase][u].to_s, JSTATE[:last][u].to_s]] }
-rescue StandardError
-  {}
+
+  # jobs: [[unit, claimed], ...] -> { unit => [phase, last line] }
+  def tails(jobs)
+    # first sight of a job: its last line and its phase so far, from the
+    # journal files written to since it was claimed, both backwards through
+    # the unit's index (-n --reverse): the last line is one entry, the phase
+    # the newest marker among the job's last FIRST_LOOK lines (a chatty test
+    # suite past that many lines shows '-' until its next marker). One job
+    # at a time; what the stream has meanwhile is not overwritten.
+    files = Dir.glob(File.join(@dir, '*.journal'))
+    jobs.reject { |u, _| @seen[u] }.each do |u, claimed|
+      since = claimed ? Time.iso8601(claimed) : Time.at(0)
+      sel = files.select { |f| File.mtime(f) >= since }.flat_map { |f| ['--file', f] }
+      @seen[u] = true
+      next if sel.empty?
+
+      l = journal_entries(nil, *sel, '-u', u, '-n', '1', '--reverse').first
+      m = journal_entries(nil, *sel, '-u', u, '-n', FIRST_LOOK.to_s, '--reverse').find { |e| message_of(e).match?(MARKER_RE) }
+      @lock.synchronize do
+        @last[u] ||= message_of(l) if l
+        @phase[u] ||= phase_of(message_of(m)) if m
+      end
+    end
+    @lock.synchronize { jobs.to_h { |u, _| [u, [@phase[u].to_s, @last[u].to_s]] } }
+  rescue StandardError
+    {}
+  end
 end
 
 # top's looks on a terminal: bold headers and figures. Plain when the output
@@ -136,9 +173,9 @@ end
 STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
-# journal: the remote journal directory for PHASE and the last output line,
-# nil for none; snap: a snapshot already taken; hint: the quit hint in the
-# title (not when the frame is printed once)
+# journal: a JournalFollow for PHASE and the last output line, nil for
+# none; snap: a snapshot already taken; hint: the quit hint in the title
+# (not when the frame is printed once)
 def frame(journal, snap = nil, hint: true)
   now = Time.now
   width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
@@ -190,9 +227,9 @@ def frame(journal, snap = nil, hint: true)
     else format('%.0fG', g)
     end
   end
-  # PHASE and the last output line from the journal (journal_tails), '-'
-  # while it has not been read: the first frame, or --no-journal
-  tails = journal_tails(journal, running.map { |j| [unit_name(j), j['claimed']] })
+  # PHASE and the last output line from the journal follower, '-' without
+  # one: the first frame, --once, or --no-journal
+  tails = journal ? journal.tails(running.map { |j| [unit_name(j), j['claimed']] }) : {}
   # by host, its native workers first, then per emulated arch, instance
   # numbers as numbers: host-1, host-3, host-aarch64-1, host-riscv64-2
   running.sort_by do |j|

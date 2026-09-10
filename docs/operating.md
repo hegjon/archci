@@ -1,7 +1,9 @@
 # Operating it
 
 `archci top` is the live view of the farm, redrawn every few seconds:
-the queue, what each host and worker is doing, and the newest failures.
+the queue, what each host and worker is doing, and the newest failures;
+the PHASE and last-output columns follow the workers' streamed journals
+live, through one `journalctl -f` for the session.
 `archci top --once` prints the frame once and `archci top --json` is the
 data behind it for scripts. A frame from the
 test instance, four emulated builds running on the desktop and the x86_64
@@ -42,7 +44,7 @@ operator commands:
 
 ```
 archci version                      the installed archci version
-archci top --once --no-journal     the frame once, without the journals: instant
+archci top --once                  the frame once, without the journal columns: instant
 archci top --json                   the frame's data as JSON
 archci next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master

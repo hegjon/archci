@@ -3,8 +3,9 @@
 
 # archci-top [-n SECONDS] [--once] [--no-journal] [--json] -- top-like view of
 # the farm, redrawn from the master's queue, the workers' heartbeats and their
-# streamed journals (--no-journal leaves those out: PHASE and the last output
-# line). --once prints one frame; --json prints the snapshot it is drawn from.
+# streamed journals, followed live (one journalctl -f for the session;
+# --no-journal leaves PHASE and the last output line out). --once prints one
+# frame, without the journal columns; --json prints the snapshot it is drawn from.
 #
 #   header   queue depth, outstanding work, built per arch, done in the last hour
 #   hosts    the master itself first, then one row per host seen recently, its
@@ -33,14 +34,12 @@ ARGV.each_with_index do |a, i|
   when '--no-journal' then with_journal = false
   when '-h', '--help'
     puts 'usage: archci top [-n SECONDS] [--once] [--no-journal] [--json]'
-    puts '  --once        print one frame and exit'
-    puts '  --no-journal  skip the workers\' streamed journals (no PHASE and last output): instant'
+    puts '  --once        print one frame and exit (no PHASE or last output: instant)'
+    puts '  --no-journal  do not follow the workers\' streamed journals (no PHASE and last output)'
     puts '  --json        print the snapshot the frame is drawn from as JSON and exit'
     exit
   end
 end
-
-journal = with_journal ? Archci.config['ARCHCI_REMOTE_JOURNAL'] : nil
 
 if json
   puts JSON.pretty_generate(Archci.snapshot)
@@ -48,15 +47,19 @@ if json
 end
 
 if once
-  puts frame(journal, hint: false)
+  puts frame(nil, hint: false)
   exit
 end
+
+dir = with_journal ? Archci.config['ARCHCI_REMOTE_JOURNAL'] : nil
+journal = dir && File.directory?(dir) ? JournalFollow.new(dir) : nil
 
 # Redraw every interval; between frames wait for a key. The terminal is put in
 # raw mode so a single q ends the program, which also turns Ctrl-C into a
 # plain character we treat the same way.
 tty = $stdin.tty?
 restore = lambda do
+  journal&.stop
   $stdin.cooked! if tty
   print "\e[?25h\n"
 end
@@ -64,8 +67,9 @@ trap('INT') { restore.call; exit }
 trap('TERM') { restore.call; exit }
 $stdin.raw! if tty
 print "\e[?25l"
-# The first frame skips the journal so the screen comes up at once; the
-# journal columns fill in from the next cycle on.
+# The first frame skips the journal so the screen comes up at once (a job's
+# first look costs a moment each); the journal columns fill in from the
+# next cycle on, then keep up with the stream.
 first = true
 loop do
   lines = frame(first ? nil : journal)
