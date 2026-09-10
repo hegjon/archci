@@ -76,8 +76,27 @@ module Archci
     nil # raced with a claim/report, ignore
   end
 
-  def self.jobs(queue_name)
-    Dir.glob(File.join(queue(queue_name), '*.job')).sort.filter_map { |p| read_job(p) }
+  # newest: read only that many, the most recently written (a stat each,
+  # not a read, decides which; done/ holds a month of jobs)
+  def self.jobs(queue_name, newest: nil)
+    paths = Dir.glob(File.join(queue(queue_name), '*.job'))
+    paths = paths.sort_by { |p| -File.mtime(p).to_f }.first(newest) if newest
+    paths.sort.filter_map { |p| read_job(p) }
+  end
+
+  # A built record ("version commit [arches]") by path, cached by the file's
+  # mtime: archci top asks for every package's on every frame, and a stat is
+  # cheaper than a read. nil when there is none.
+  @built = {}
+  def self.built_record(path)
+    mtime = File.mtime(path)
+    hit = @built[path]
+    return hit[1] if hit && hit[0] == mtime
+
+    (@built[path] = [mtime, File.read(path).split])[1]
+  rescue Errno::ENOENT
+    @built.delete(path)
+    nil
   end
 
   # Arches the master builds for, and the arch whose workers build "any"
@@ -245,8 +264,7 @@ module Archci
 
         # built record: "version commit" and, for an any package, the arches it
         # was pooled for; an arch enabled since makes the package outstanding again
-        built_file = File.join(home, 'built', "#{repo}-#{job_arch}", p['pkgbase'])
-        built, _commit, pooled = File.exist?(built_file) ? File.read(built_file).split : []
+        built, _commit, pooled = built_record(File.join(home, 'built', "#{repo}-#{job_arch}", p['pkgbase'])) || []
         next if built == p['version'] && (!any || (arches - pooled.to_s.split(',')).empty?)
         next if running[[repo, p['pkgbase'], job_arch]]                 # one build per package and arch at a time
         next if queued[[repo, p['pkgbase'], job_arch]].include?(p['commit']) # queued, in retry backoff, or given up
@@ -299,8 +317,9 @@ module Archci
     rescue Errno::ENOENT, JSON::ParserError
       nil
     end
-    done = jobs('done').sort_by { |j| -j['mtime'].to_i }
-    recent = done.first(50).map do |j|
+    done_paths = Dir.glob(File.join(queue('done'), '*.job'))
+    done = jobs('done', newest: 50).sort_by { |j| -j['mtime'].to_i }
+    recent = done.map do |j|
       job[j].merge('finished' => j['finished'], 'heartbeat' => j['heartbeat'], **j.slice(*HOST_STATS))
     end
     {
@@ -311,7 +330,7 @@ module Archci
       'arches' => arches,
       'any_arch' => any_arch,
       'queue' => counts,
-      'done_last_hour' => done.count { |j| now - j['mtime'] < 3600 },
+      'done_last_hour' => done_paths.count { |p| now - File.mtime(p) < 3600 },
       'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
       'tracked' => sets.to_h,
       'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
