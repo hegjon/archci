@@ -202,8 +202,12 @@ module Archci
     repo = cfg['ARCHCI_REPO']
     running = jobs('running').to_h { |j| [[j['repo'], j['pkgbase'], j['arch']], true] }
     queued = Hash.new { |h, k| h[k] = [] } # pending or failed, by commit
+    given_up = {}                          # failed for good at this commit: not coming
     %w[pending failed].each do |q|
-      jobs(q).each { |j| queued[[j['repo'], j['pkgbase'], j['arch']]] << j['commit'] }
+      jobs(q).each do |j|
+        queued[[j['repo'], j['pkgbase'], j['arch']]] << j['commit']
+        given_up[[j['pkgbase'], j['arch']]] = j['commit'] if j['final'] == '1'
+      end
     end
 
     sources = cfg['ARCHCI_PKG_SOURCES'].to_s.split
@@ -220,10 +224,14 @@ module Archci
     per_arch, any_pkgs = candidates.partition { |p| p['arches'] != ['any'] }
     # which pkgbase of this repository provides each name a dependency may use
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
-    # a dependency is met once its pkgbase is built for the arch, or as an any package
+    # a dependency is met once its pkgbase is built for the arch, or as an
+    # any package; one that gave up at its current commit is not waited for
+    # (the chroot falls back on the mirrors' copy, if any)
+    by_base = candidates.to_h { |p| [p['pkgbase'], p] }
     dep_built = lambda do |dep_base, a|
       File.exist?(File.join(home, 'built', "#{repo}-#{a}", dep_base)) ||
-        File.exist?(File.join(home, 'built', "#{repo}-any", dep_base))
+        File.exist?(File.join(home, 'built', "#{repo}-any", dep_base)) ||
+        [a, 'any'].any? { |x| given_up[[dep_base, x]] == by_base[dep_base]['commit'] }
     end
     updates = []
     backlog = []

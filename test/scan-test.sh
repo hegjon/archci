@@ -53,6 +53,12 @@ ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 "$scan" >/dev/null 2>&
 order=$(next3)
 # the clone's own arch packages (no arch_repo) sort after multilib and before local
 [[ $order == "archci zz-core aa-extra lib32-mul "*" bb-lib mm-local bb-aur aa-app(bb-lib)" ]] || fail "claim order wrong: $order"
+# a dependency that gave up at its current commit is not waited for either
+c=$(git -C "$pkgs3" log -1 --format=%H -- pkgbuilds/bb-lib)
+printf 'id=5-1-omarchy,bb-lib,1-1,x86_64\nrepo=omarchy\narch=x86_64\npkgbase=bb-lib\nversion=1-1\ncommit=%s\nprofile=extra\ncreated=2026-01-01T00:00:00Z\nattempt=3\nworker=w\nstatus=failure\nfinished=2026-01-01T01:00:00Z\nfinal=1\n' "$c" >"$tmp/home3/queue/failed/5-1-omarchy,bb-lib,1-1,x86_64.job"
+order=$(next3)
+[[ $order == *" aa-app mm-local bb-aur" ]] || fail "a dependency that gave up must not hold its dependents back: $order"
+rm -f "$tmp/home3/queue/failed/5-1-omarchy,bb-lib,1-1,x86_64.job"
 # once bb-lib is built, aa-app takes its alphabetical place among the local packages
 mkdir -p "$tmp/home3/built/omarchy-x86_64"; echo "1-1 x" >"$tmp/home3/built/omarchy-x86_64/bb-lib"
 order=$(next3)
