@@ -130,9 +130,15 @@ module Archci
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       h['vendor'] ||= j['vendor']   # constant for a host: any worker that sent it will do
+      # the archci version: from the newest beat that carries one (a worker
+      # still running older code sends none, and may well be the newest beat)
+      if j['archci'] && beat && (h['archci_at'].nil? || beat > h['archci_at'])
+        h['archci'] = j['archci']
+        h['archci_at'] = beat
+      end
       next unless beat && j['load'] && (h['heartbeat_age_s'].nil? || now - beat < h['heartbeat_age_s'])
 
-      h.merge!('heartbeat_age_s' => (now - beat).to_i, **j.slice(*HOST_STATS).compact)
+      h.merge!('heartbeat_age_s' => (now - beat).to_i, **j.slice(*(HOST_STATS - ['archci'])).compact)
     end
     # this machine, the master, first: its own stats right now (the same
     # function the workers report with), whether or not it runs workers
@@ -142,7 +148,7 @@ module Archci
     m['arch'] ||= Etc.uname[:machine]
     m.merge!('heartbeat_age_s' => 0, **master_stats)
     rest = hosts.values.reject { |h| h.equal?(m) }.sort_by { |h| h['host'] }
-    [m, *rest].each { |h| h['workers'].sort! }
+    [m, *rest].each { |h| h['workers'].sort!; h.delete('archci_at') }
   end
 
   # The master's own host stats, as a worker would send them (load, mem, disk

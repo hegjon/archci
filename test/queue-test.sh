@@ -34,6 +34,11 @@ grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 me=$(cut -d. -f1 /proc/sys/kernel/hostname)
 "$top" --once --no-journal | sed -n '/^HOST/{n;p}' | grep "^$me .*  0  *0  " >/dev/null || fail "the master itself must be the first host row, with no workers: $("$top" --once --no-journal | sed -n '/^HOST/{n;p}')"
 "$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1  -$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count, active workers and a dash for an unknown archci version: $("$top" --once --no-journal | grep ^worker)"
+# a second worker of the host says which archci it runs; a newer beat from
+# the first, which says nothing, must not hide that
+ARCHCI_PKG_SOURCES=nothing "$job" claim worker-2 x86_64 load=0.20 mem=40 disk=61 cpus=4 archci=0.3.19-1 | grep . >/dev/null && fail "worker-2's poll must get no job with no sources enabled"
+"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu=3.7 rss=1840 peak=2100 build=5.0G
+"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *1  0.3.19-1$" >/dev/null || fail "the archci version must come from whichever worker sent it: $("$top" --once --no-journal | grep ^worker)"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 "$top" --once --no-journal | grep "^unsigned: 2 pkg in staging (oldest 1m30s)$" >/dev/null || fail "archci-top must show the unsigned staging backlog from signer.status: $("$top" --once --no-journal | grep ^unsigned)"
 "$top" --once --no-journal | grep "^released: x86_64 63 pkg  aarch64 unreachable$" >/dev/null || fail "the released line must show the released databases per arch: $("$top" --once --no-journal | grep ^released)"
@@ -49,10 +54,10 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
 grep -q '^heartbeat=20[0-9][0-9]-.*Z$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep when its last heartbeat arrived"
-"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *0  -$" >/dev/null || fail "archci-top must show an idle host with its last heartbeat and no active workers"
+"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *0  0.3.19-1$" >/dev/null || fail "archci-top must show an idle host with its last heartbeat, no active workers and the version its other worker sent: $("$top" --once --no-journal | grep ^worker)"
 # a worker not heard from for POLL_TTL is gone, however recent its last job
 sed -i "s/^heartbeat=.*/heartbeat=$(date -u -d '-20 minutes' +%FT%TZ)/" "$ARCHCI_HOME/queue/done/$id.job"
-"$top" --once --no-journal | grep "^worker " >/dev/null && fail "a worker silent for 20 minutes must leave the hosts table even with a recent job"
+"$top" --once --no-journal | grep "^worker  *-  *x86_64  *0.20 .* 4  *1  *0  0.3.19-1$" >/dev/null || fail "a worker silent for 20 minutes must leave the hosts table even with a recent job; its host keeps the other worker: $("$top" --once --no-journal | grep ^worker)"
 sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/$id.job"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
