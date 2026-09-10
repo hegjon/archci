@@ -161,21 +161,26 @@ archci_arch_conf() {
 	printf '%s\n' "$3"
 }
 
-# archci_chroot_pacconf SRC DST REPO -- DST is the chroot pacman.conf SRC with
-# the farm's own repository ([REPO], the job's, at ARCHCI_RELEASE_URL) inserted above
-# the first repository, so builds resolve dependencies from what the farm has
-# built before falling back to the mirrors (a repository listed first wins
-# for a name regardless of version). SRC that already names the repository
-# is copied as is. Signatures are checked: the host's pacman keyring, which
-# the chroot inherits, must trust the release key.
+# archci_chroot_pacconf SRC DST REPO ARCH -- DST is the chroot pacman.conf SRC
+# with the farm's own repository ([REPO], the job's, at ARCHCI_RELEASE_URL)
+# inserted above the first repository, so builds resolve dependencies from
+# what the farm has built before falling back to the mirrors (a repository
+# listed first wins for a name regardless of version), and with a package
+# cache of its own: the farm's packages share file names with the mirrors'
+# (and a port's) but not bytes, so a shared cache fails their checksums.
+# SRC that already names the repository is copied as is. Signatures are
+# checked: the host's pacman keyring, which the chroot inherits, must trust
+# the release key.
 archci_chroot_pacconf() {
-	local src=$1 dst=$2 repo=$3
+	local src=$1 dst=$2 repo=$3 arch=$4
 	mkdir -p "${dst%/*}"
 	if grep -q "^\[$repo\]" "$src"; then
 		cp "$src" "$dst.new"
 	else
-		awk -v repo="$repo" -v url="$ARCHCI_RELEASE_URL" '
-			!done && /^\[[^]]+\]/ && $0 != "[options]" {
+		awk -v repo="$repo" -v url="$ARCHCI_RELEASE_URL" -v cache="/var/cache/archci/pkg/$repo-$arch/" '
+			/^#?CacheDir *=/ { next }
+			$0 == "[options]" { print; print "# a cache of this repository'"'"'s own (archci-build): the farm'"'"'s packages share"; print "# file names with the mirrors'"'"' but not bytes"; print "CacheDir = " cache; next }
+			!done && /^\[[^]]+\]/ {
 				print "# The farm'"'"'s own repository first (archci-build, ARCHCI_RELEASE_URL):"
 				print "# what it has built is what dependencies resolve to."
 				print "[" repo "]"
