@@ -163,14 +163,15 @@ It verifies each package's builder signature, adds the client-facing release
 signature, runs `repo-add`, publishes packages + `.sig` + database to the R2
 release area that clients use, and deletes the package from staging.
 
-Builds use dependencies from the official Arch mirrors, not from our own
-output, so packages can be built in any order and workers stay simple. A
-package that depends on another package of the same repository (most
-`omarchy-*` packages do) needs that repository in the chroot: copy
-`/usr/share/devtools/pacman.conf.d/extra.conf` to
-`/etc/archci/<arch>/extra.conf` on the workers and add the repository, our
-own R2 release area or the one the PKGBUILDs were written for, above
-`[core]`.
+With `ARCHCI_RELEASE_URL` set on a worker, its chroots list the farm's own
+released repository above the Arch mirrors, so a build resolves its
+dependencies from what the farm has built (a package that depends on a
+sibling from this repository, as most `omarchy-*` packages do, or a port
+that must not mix in x86_64-built `any` packages) and falls back to the
+mirrors for the rest. The host's pacman keyring must trust the release key,
+which it does when the worker installs archci from that repository. Without
+the setting, builds use the mirrors only, plus whatever an
+`/etc/archci/<arch>/extra.conf` adds.
 
 ## Signing
 
@@ -519,10 +520,10 @@ download, not from that field.
   PKGBUILD repository (minus `skip_build` and anything `ARCHCI_PKG_SOURCES`
   excludes) is outstanding and gets built in the claim order above, as
   workers ask for work.
-- Packages are built independently against the official mirrors (plus
-  whatever `/etc/archci/<arch>/extra.conf` adds). If a build needs a newer
-  dependency than the mirror has, or a sibling from this repository that is
-  not published yet, it fails and is retried later.
+- Packages are built independently against the farm's own repository and
+  the official mirrors (plus whatever `/etc/archci/<arch>/extra.conf` adds).
+  If a build needs a newer dependency than either has, or a sibling from
+  this repository that is not published yet, it fails and is retried later.
 - The master sources every PKGBUILD at file scope (as the `archci` user, in
   a clean environment) to read its version, the same thing `makepkg
   --printsrcinfo` does. The PKGBUILD repository is trusted input; do not

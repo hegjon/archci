@@ -52,6 +52,12 @@ chroot=$ARCHCI_CHROOTS/$profile-$arch
 pacconf=$(archci_arch_conf "$arch" "$profile.conf" /usr/share/devtools/pacman.conf.d/"$profile.conf")
 mkconf=$(archci_arch_conf "$arch" makepkg.conf /usr/share/devtools/makepkg.conf.d/"$arch.conf")
 [[ -f $pacconf ]] || archci_die "no pacman.conf for repo $job_repo on $arch ($pacconf)"
+# With the released repository's URL, the chroot resolves dependencies from
+# what the farm has built before the mirrors.
+if [[ -n $ARCHCI_RELEASE_URL ]]; then
+	archci_chroot_pacconf "$pacconf" "$ARCHCI_WORKER_HOME/chroot-conf/$profile-$arch.conf"
+	pacconf=$ARCHCI_WORKER_HOME/chroot-conf/$profile-$arch.conf
+fi
 [[ -f $mkconf ]] || archci_die "no makepkg.conf for $arch (devtools has none; add /etc/archci/$arch/makepkg.conf)"
 base_packages=(base-devel)
 [[ $profile == multilib* ]] && base_packages+=(multilib-devel)

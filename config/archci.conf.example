@@ -52,9 +52,13 @@ ARCHCI_DONE_KEEP_DAYS=30
 ARCHCI_R2_STAGING=""
 ARCHCI_R2_RELEASE=""
 ARCHCI_RCLONE_CONFIG=/etc/archci/rclone.conf
-# Master: the released repo's public URL, as clients use it, e.g.
-# "https://pub-xxxx.r2.dev". archci-signer-status shows the released
-# databases' age and size from it in archci-top.
+# The released repo's public URL, as clients use it, e.g.
+# "https://pub-xxxx.r2.dev". On the master, archci-signer-status shows the
+# released databases' age and size from it in archci top. On a worker, the
+# chroots get [ARCHCI_REPO] at this URL above the mirrors, so builds use the
+# packages the farm has built; the host's pacman keyring must trust the
+# release key (it does when the worker installs archci from that repo).
+# Empty: the chroots use the mirrors only.
 ARCHCI_RELEASE_URL=""
 
 ## Signing (see README "Signing") --------------------------------------------

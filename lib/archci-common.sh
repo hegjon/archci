@@ -161,6 +161,34 @@ archci_arch_conf() {
 	printf '%s\n' "$3"
 }
 
+# archci_chroot_pacconf SRC DST -- DST is the chroot pacman.conf SRC with the
+# farm's own repository ([ARCHCI_REPO] at ARCHCI_RELEASE_URL) inserted above
+# the first repository, so builds resolve dependencies from what the farm has
+# built before falling back to the mirrors (a repository listed first wins
+# for a name regardless of version). SRC that already names the repository
+# is copied as is. Signatures are checked: the host's pacman keyring, which
+# the chroot inherits, must trust the release key.
+archci_chroot_pacconf() {
+	local src=$1 dst=$2
+	mkdir -p "${dst%/*}"
+	if grep -q "^\[$ARCHCI_REPO\]" "$src"; then
+		cp "$src" "$dst.new"
+	else
+		awk -v repo="$ARCHCI_REPO" -v url="$ARCHCI_RELEASE_URL" '
+			!done && /^\[[^]]+\]/ && $0 != "[options]" {
+				print "# The farm'"'"'s own repository first (archci-build, ARCHCI_RELEASE_URL):"
+				print "# what it has built is what dependencies resolve to."
+				print "[" repo "]"
+				print "SigLevel = Required DatabaseOptional"
+				print "Server = " url "/$repo/os/$arch"
+				print ""
+				done = 1
+			}
+			{ print }' "$src" >"$dst.new"
+	fi
+	mv "$dst.new" "$dst"
+}
+
 # archci_read_job FILE -> job_id job_repo job_arch job_pkgbase job_version
 #                         job_commit job_profile job_attempt job_worker
 # pkgbase is the package directory under ARCHCI_PKGBUILDS_DIR (its PKGBUILD's
