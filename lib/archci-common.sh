@@ -79,6 +79,9 @@ archci_load_conf
 : "${ARCHCI_SIGNER_HOME:=/var/lib/archci-signer}"
 # archci-sign-health warns when at least this many packages sit unsigned in staging.
 : "${ARCHCI_STAGING_WARN:=20}"
+# Packages archci-sign takes per pass (a minute apart): small, so what the
+# farm stages next, its own release first, waits a pass and not a backlog.
+: "${ARCHCI_SIGN_BATCH:=20}"
 : "${ARCHCI_MASTER:=archci@master}"
 # Empty (set to "" in the config) disables journal streaming; hence = not :=.
 # Journal streaming target: the master's journal-remote port through the ssh

@@ -74,6 +74,9 @@ ARCHCI_BUILDER_KEYRING=/etc/archci/builder-keyring
 ARCHCI_SIGNER_HOME=/var/lib/archci-signer
 # archci-sign-health warns when at least this many packages sit unsigned in staging.
 ARCHCI_STAGING_WARN=20
+# Packages archci-sign signs per pass; passes run a minute apart. Small keeps
+# a freshly staged archci release from waiting behind a long pass.
+ARCHCI_SIGN_BATCH=20
 
 ## Worker ---------------------------------------------------------------------
 # ssh destination of the master. The master droplet is named "master"; workers resolve

@@ -31,11 +31,12 @@ echo "--- R2 transport: master stages, signer verifies+signs+publishes (fake rcl
 # A faithful stand-in for rclone: every remote is a local path.
 cat >"$tmp/rclone" <<'SH'
 #!/bin/bash
-sub=""; pos=(); fmt=""; sep=""
+sub=""; pos=(); fmt=""; sep=""; list=/dev/null
 while [[ $# -gt 0 ]]; do
   case $1 in
     --format) fmt=$2; shift 2;;
     --separator) sep=$2; shift 2;;
+    --files-from) list=$2; shift 2;;
     --transfers|--checkers|--config|--stats|--timeout|--contimeout) shift 2;;
     -R|--*) shift;;
     *) [[ -z $sub ]] && sub=$1 || pos+=("$1"); shift;;
@@ -47,6 +48,8 @@ case $sub in
          else (cd "${pos[0]}" && find . -type f -printf '%P\n'); fi; fi;;
   copyto) [[ -f ${pos[0]} ]] || exit 1; mkdir -p "$(dirname "${pos[1]}")"; cp "${pos[0]}" "${pos[1]}";;
   deletefile) rm -f "${pos[0]}";;
+  copy) while IFS= read -r f; do [[ -f ${pos[0]}/$f ]] || continue; mkdir -p "$(dirname "${pos[1]}/$f")"; cp "${pos[0]}/$f" "${pos[1]}/$f"; done <"$list";;
+  delete) while IFS= read -r f; do rm -f "${pos[0]}/$f"; done <"$list";;
   move) if [[ -d ${pos[0]} ]]; then (cd "${pos[0]}" && find . -type f -printf '%P\n') | while IFS= read -r f; do
           mkdir -p "$(dirname "${pos[1]}/$f")"; mv "${pos[0]}/$f" "${pos[1]}/$f"; done; fi;;
 esac
@@ -85,6 +88,23 @@ bsdtar -xOf "$rel/omarchy.db.tar.gz" '*/desc' | grep -xF 'hello-1-1-x86_64.pkg.t
 gpg --homedir "$relpub" --batch --verify "$rel/hello-1-1-x86_64.pkg.tar.zst.sig" "$rel/hello-1-1-x86_64.pkg.tar.zst" 2>/dev/null || fail "released signature must verify for clients"
 # staging is drained (both the released and the rejected package removed)
 [[ -z $(find "$staging" -name '*.pkg.tar.zst' 2>/dev/null) ]] || fail "staging must be drained"
+
+echo "--- a pass takes ARCHCI_SIGN_BATCH packages, the farm's own first, the rest wait"
+bs=$tmp/batch; mkdir -p "$bs/staging/omarchy/os/x86_64" "$bs/release/omarchy/os/x86_64" "$tmp/bs-signer"
+for n in zzz-late archci-cli aaa-early; do
+	mkpkg "$bs/staging/omarchy/os/x86_64" $n 1-1
+	gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$bs/staging/omarchy/os/x86_64/$n-1-1-x86_64.pkg.tar.zst.buildsig" "$bs/staging/omarchy/os/x86_64/$n-1-1-x86_64.pkg.tar.zst"
+done
+touch -d '-2 hours' "$bs/staging/omarchy/os/x86_64/zzz-late-1-1-x86_64.pkg.tar.zst"   # the oldest, but archci comes first
+out=$(ARCHCI_R2_STAGING=$bs/staging ARCHCI_R2_RELEASE=$bs/release ARCHCI_SIGNER_HOME=$tmp/bs-signer ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
+[[ $out == *"this pass takes 2"* && $out == *"signed 2, rejected 0; 1 left"* ]] || fail "batch of 2 out of 3: $out"
+[[ -f $bs/release/omarchy/os/x86_64/archci-cli-1-1-x86_64.pkg.tar.zst.sig ]] || fail "the farm's own package must be in the first pass"
+[[ -f $bs/release/omarchy/os/x86_64/zzz-late-1-1-x86_64.pkg.tar.zst.sig ]] || fail "then the oldest"
+[[ ! -e $bs/release/omarchy/os/x86_64/aaa-early-1-1-x86_64.pkg.tar.zst && -f $bs/staging/omarchy/os/x86_64/aaa-early-1-1-x86_64.pkg.tar.zst ]] || fail "the third waits in staging"
+[[ ! -e $bs/staging/omarchy/os/x86_64/archci-cli-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "signed packages leave staging with their buildsig"
+out=$(ARCHCI_R2_STAGING=$bs/staging ARCHCI_R2_RELEASE=$bs/release ARCHCI_SIGNER_HOME=$tmp/bs-signer ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
+[[ $out == *"signed 1, rejected 0; 0 left"* ]] || fail "the next pass drains the rest: $out"
+bsdtar -xOf "$bs/release/omarchy/os/x86_64/omarchy.db.tar.gz" '*/desc' | grep -c '\.pkg\.tar\.zst$' | grep -x 3 >/dev/null || fail "all three in the release db"
 
 echo "--- sign-health: quiet when healthy, warns on lock or backlog"
 health=$here/../signer/archci-sign-health

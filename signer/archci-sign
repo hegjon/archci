@@ -2,12 +2,14 @@
 # archci-sign [--unlock] -- release-sign packages the master staged to R2.
 #
 # Runs on the signer droplet (root) on a timer. It talks only to R2, never to
-# the master. For every package in the STAGING area it: pulls the package and
-# its builder signature, verifies the builder signature against the authorized
-# builder keyring, makes the client-facing release signature with the release
-# key, adds the package to the release database (repo-add), publishes package +
-# .sig + database to the RELEASE area, and deletes the package from STAGING.
-# The release private key (passphrase-protected) never leaves this host.
+# the master. Each pass takes up to ARCHCI_SIGN_BATCH packages from the
+# STAGING area, the farm's own first, then the oldest: pulls them with their
+# builder signatures in one transfer, verifies each builder signature against
+# the authorized builder keyring, makes the client-facing release signature
+# with the release key, adds each package to its release database (repo-add),
+# publishes packages + .sig in one transfer and then the databases to the
+# RELEASE area, and deletes the batch from STAGING. The release private key
+# (passphrase-protected) never leaves this host.
 #
 #   --unlock   prime gpg-agent with the release passphrase (once per session)
 set -euo pipefail
@@ -45,7 +47,19 @@ mapfile -t rels < <(rclone lsf -R --files-only --format tp --separator '|' "$ARC
 	awk -F'|' '{ n = $2; sub(/.*\//, "", n); printf "%d|%s|%s\n", (n ~ /^archci(-[a-z0-9-]+)?-[0-9]/ ? 0 : 1), $1, $2 }' |
 	sort -t'|' -k1,1n -k2,2 | cut -d'|' -f3- || true)
 (( ${#rels[@]} )) || exit 0
-archci_log "staging holds ${#rels[@]} package(s) to sign"
+total=${#rels[@]}
+rels=("${rels[@]:0:ARCHCI_SIGN_BATCH}")
+archci_log "staging holds $total package(s) to sign; this pass takes ${#rels[@]}"
+
+# the batch, packages and builder signatures, in one transfer (a file that
+# is not there is simply not copied; the loop rejects what is missing)
+fetch=$work/fetch.list publish=$work/publish.list drop=$work/drop.list
+: >"$fetch"; : >"$publish"; : >"$drop"
+for rel in "${rels[@]}"; do
+	[[ $rel == *..* || $rel == /* ]] && continue
+	printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$fetch"
+done
+rclone copy --transfers 8 --files-from "$fetch" "$ARCHCI_R2_STAGING" "$work" 2>/dev/null || true
 
 declare -A touched=()
 declare -A dbready=()   # per-repo: is the local db authoritative for release (safe to prune)?
@@ -53,27 +67,22 @@ signed=0 rejected=0
 for rel in "${rels[@]}"; do
 	[[ $rel == *..* || $rel == /* ]] && { archci_log "skip suspicious path: $rel"; continue; }
 	reldir=${rel%/*}; db=${rel%%/*}
-	mkdir -p "$work/$reldir" "$localrepo/$reldir"
-	if ! rclone copyto "$ARCHCI_R2_STAGING/$rel" "$work/$rel" 2>/dev/null \
-	   || ! rclone copyto "$ARCHCI_R2_STAGING/$rel.buildsig" "$work/$rel.buildsig" 2>/dev/null; then
+	mkdir -p "$localrepo/$reldir"
+	if [[ ! -f $work/$rel || ! -f $work/$rel.buildsig ]]; then
 		archci_log "REJECT $rel: could not fetch package or builder signature"
-		rclone deletefile "$ARCHCI_R2_STAGING/$rel" 2>/dev/null || true
-		rclone deletefile "$ARCHCI_R2_STAGING/$rel.buildsig" 2>/dev/null || true
+		printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$drop"
 		(( ++rejected )); continue
 	fi
 	if ! gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --verify "$work/$rel.buildsig" "$work/$rel" 2>/dev/null; then
 		archci_log "REJECT $rel: builder signature invalid or from an unknown key"
-		rclone deletefile "$ARCHCI_R2_STAGING/$rel" 2>/dev/null || true
-		rclone deletefile "$ARCHCI_R2_STAGING/$rel.buildsig" 2>/dev/null || true
+		printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$drop"
 		rm -f "$work/$rel" "$work/$rel.buildsig"; (( ++rejected )); continue
 	fi
 	if ! release_sign "$work/$rel"; then
 		archci_log "release key is locked; run 'archci-sign --unlock' on the signer"
 		break
 	fi
-	# publish package + signature to the release area
-	rclone copyto "$work/$rel" "$ARCHCI_R2_RELEASE/$rel"
-	rclone copyto "$work/$rel.sig" "$ARCHCI_R2_RELEASE/$rel.sig"
+	printf '%s\n%s.sig\n' "$rel" "$rel" >>"$publish"
 	# Add to the release database. The first time this run touches a repo,
 	# establish whether the local db is authoritative for the release area:
 	# it is if it already existed locally, or if it seeds cleanly from release.
@@ -93,11 +102,13 @@ for rel in "${rels[@]}"; do
 	repo-add -R -q "$localrepo/$reldir/$db.db.tar.gz" "$localrepo/$rel" >/dev/null
 	rm -f "$localrepo/$rel"                       # keep only the database locally
 	touched[$reldir]=$db
-	rclone deletefile "$ARCHCI_R2_STAGING/$rel" 2>/dev/null || true
-	rclone deletefile "$ARCHCI_R2_STAGING/$rel.buildsig" 2>/dev/null || true
-	rm -f "$work/$rel" "$work/$rel.buildsig" "$work/$rel.sig"
+	printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$drop"
 	(( ++signed ))
 done
+
+# publish the signed packages and their signatures in one transfer, before
+# the databases that list them
+[[ -s $publish ]] && rclone copy --transfers 8 --files-from "$publish" "$work" "$ARCHCI_R2_RELEASE"
 
 # publish the updated databases (as <db>.db.tar.gz and the <db>.db clients fetch)
 for reldir in "${!touched[@]}"; do
@@ -135,5 +146,8 @@ for reldir in "${!touched[@]}"; do
 	done < <(rclone lsf --files-only "$ARCHCI_R2_RELEASE/$reldir" 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
 done
 
-archci_log "signed $signed, rejected $rejected"
+# drain what this pass signed or rejected from staging, in one call
+[[ -s $drop ]] && { rclone delete --files-from "$drop" "$ARCHCI_R2_STAGING" 2>/dev/null || true; }
+
+archci_log "signed $signed, rejected $rejected; $(( total - signed - rejected )) left for the next pass"
 exit 0
