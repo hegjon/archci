@@ -3,8 +3,9 @@
 [Trigger]
 Operation = Install
 Operation = Upgrade
+Operation = Remove
 Type = Path
-Target = etc/ssh/sshd_config.d/archci.conf
+Target = etc/ssh/sshd_config.d/*archci.conf
 
 [Action]
 Description = Reloading sshd for the archci worker-key drop-in...

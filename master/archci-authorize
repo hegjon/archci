@@ -4,7 +4,7 @@
 #
 # Appends the key, restricted to the job protocol by a forced command, to
 # /etc/archci/authorized_keys (root-owned; sshd reads it for the archci user
-# through /etc/ssh/sshd_config.d/archci.conf, which the master package
+# through /etc/ssh/sshd_config.d/60-archci.conf, which the master package
 # installs). The key may also forward to the journal-remote
 # port, for archci-logging-remote.service on a worker outside the private
 # network. A key already present gets its line rewritten, so re-running this
@@ -75,6 +75,6 @@ else
 	archci_log "authorized: ${key##* }"
 fi
 chmod 644 "$akf"
-if [[ -z ${ARCHCI_AUTHORIZED_KEYS:-} && ! -f /etc/ssh/sshd_config.d/archci.conf ]]; then
-	archci_log "WARNING: sshd does not read $akf yet: install ssh/sshd_config.d/archci.conf to /etc/ssh/sshd_config.d/ and reload sshd"
+if [[ -z ${ARCHCI_AUTHORIZED_KEYS:-} && ! -f /etc/ssh/sshd_config.d/60-archci.conf ]]; then
+	archci_log "WARNING: sshd does not read $akf yet: install ssh/sshd_config.d/60-archci.conf to /etc/ssh/sshd_config.d/ and reload sshd"
 fi

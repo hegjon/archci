@@ -242,7 +242,7 @@ config/   what the packages install outside /usr/lib/archci:
   archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
   systemd/  units and timers per role, the worker's journal tunnel and
             namespace, tmpfiles and sysusers, journal-remote drop-ins (master)
-  ssh/      sshd_config.d/archci.conf: worker keys from /etc/archci/authorized_keys
+  ssh/      sshd_config.d/60-archci.conf: worker keys from /etc/archci/authorized_keys
   pacman/   the hook that reloads sshd when that drop-in is installed
   gnupg/    the signer's release keyring gpg-agent.conf
 ```
@@ -360,7 +360,7 @@ filesystem allows. Then:
    `command="/usr/lib/archci/master/archci-shell",restrict <key>` to
    `/etc/archci/authorized_keys`, so a worker key can do nothing but the
    protocol. sshd reads that file for the archci user through
-   `/etc/ssh/sshd_config.d/archci.conf` (installed by the master package,
+   `/etc/ssh/sshd_config.d/60-archci.conf` (installed by the master package,
    whose pacman hook reloads sshd). It is root's on
    purpose: the archci user, which the forced command and queue scripts run
    as, cannot authorize keys for itself. The signer needs no key on the master.

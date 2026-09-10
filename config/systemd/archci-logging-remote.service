@@ -2,7 +2,7 @@
 # ssh tunnel to the master's journal-remote port so systemd-journal-upload can
 # stream this worker's journal to http://127.0.0.1:19532 (ARCHCI_JOURNAL_URL).
 # Uses the worker key; the master allows that key to forward to this one port
-# and nothing else (archci-authorize, sshd_config.d/archci.conf). With -N no
+# and nothing else (archci-authorize, sshd_config.d/60-archci.conf). With -N no
 # session is opened, so the key's forced command never runs.
 [Unit]
 Description=archci remote logging: ssh tunnel to the master's journal-remote port
