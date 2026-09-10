@@ -29,7 +29,13 @@ commit_pkgs lib32
 "$scan" >/dev/null
 [[ $("$next" aarch64) != *lib32-zlib* ]] || fail "a multilib package must not be offered to aarch64: $("$next" aarch64)"
 [[ $("$next" x86_64 | grep -c lib32-zlib) == 1 ]] || fail "but to x86_64: $("$next" x86_64)"
-rm -rf "$pkgs/pkgbuilds/lib32-zlib"; commit_pkgs "no lib32"; "$scan" >/dev/null   # the rest of the test expects the original set
+# a package listing aarch64 only (hyprland-guiutils in omarchy-pkgs) is not offered to x86_64, which builds without --ignorearch
+mkpkgbuild armonly 1-1 aarch64 '{"source": "local"}'
+commit_pkgs armonly
+"$scan" >/dev/null
+[[ $("$next" x86_64 | grep -c armonly) == 0 ]] || fail "a package not listing x86_64 must not be offered to it: $("$next" x86_64)"
+[[ $(ARCHCI_IGNOREARCH=0 "$next" aarch64) == "5 omarchy aarch64 armonly "* ]] || fail "but to aarch64, the only one listing it: $(ARCHCI_IGNOREARCH=0 "$next" aarch64)"
+rm -rf "$pkgs/pkgbuilds/lib32-zlib" "$pkgs/pkgbuilds/armonly"; commit_pkgs "no lib32, no armonly"; "$scan" >/dev/null   # the rest of the test expects the original set
 [[ $("$next" aarch64) == "5 omarchy aarch64 acl "* ]] || fail "aarch64 backlog should start at acl: $("$next" aarch64)"
 [[ $(ARCHCI_IGNOREARCH=0 "$next" aarch64) == "" ]] || fail "with ARCHCI_IGNOREARCH=0 only packages listing aarch64 are offered"
 out=$("$job" claim arm-1 aarch64)

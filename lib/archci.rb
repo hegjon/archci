@@ -243,7 +243,9 @@ module Archci
     # An arch-independent package is one job, for workers of the any arch,
     # and is pooled for every arch; those come after the arch's own packages.
     # Anything else is offered to every enabled arch: a port arch builds with
-    # --ignorearch (ARCHCI_IGNOREARCH) unless told to honour the arch array.
+    # --ignorearch (ARCHCI_IGNOREARCH) unless told to honour the arch array;
+    # x86_64 builds without it (archci-build's rule), so it gets only what
+    # lists it.
     per_arch, any_pkgs = candidates.partition { |p| p['arches'] != ['any'] }
     # which pkgbase of this repository provides each name a dependency may use
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
@@ -274,7 +276,7 @@ module Archci
       list.each do |p|
         any = p['arches'] == ['any']
         job_arch = any ? 'any' : a
-        next if !any && !ignorearch && !p['arches'].include?(a)
+        next if !any && !p['arches'].include?(a) && (a == 'x86_64' || !ignorearch)
         next if p['profile'] == 'multilib' && a != 'x86_64'   # 32-bit x86 libraries: x86_64 only, whatever --ignorearch says
 
         # built record: "version commit" and, for an any package, the arches it
