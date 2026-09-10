@@ -1,11 +1,11 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# archci-top [-n SECONDS] [--once] [--no-journal] [--json] -- top-like view of
-# the farm, redrawn from the master's queue, the workers' heartbeats and their
-# streamed journals, followed live (one journalctl -f for the session;
-# --no-journal leaves PHASE and the last output line out). --once prints one
-# frame, without the journal columns; --json prints the snapshot it is drawn from.
+# archci-top [-n SECONDS] [--json] -- top-like view of the farm, redrawn from
+# the master's queue, the workers' heartbeats and their streamed journals,
+# followed live (one journalctl -f for the session). Into a pipe or a file
+# (stdout not a terminal) it prints one frame, without the last-output
+# column, and exits; --json prints the snapshot a frame is drawn from.
 #
 #   header   queue depth, outstanding work, built per arch, done in the last hour
 #   hosts    the master itself first, then one row per host seen recently, its
@@ -24,19 +24,14 @@ require_relative '../lib/archci-frame'
 require 'io/console'
 
 interval = 5
-once = false
 json = false
-with_journal = true
 ARGV.each_with_index do |a, i|
   case a
   when '-n' then interval = ARGV[i + 1].to_f
-  when '--once' then once = true
   when '--json' then json = true
-  when '--no-journal' then with_journal = false
   when '-h', '--help'
-    puts 'usage: archci top [-n SECONDS] [--once] [--no-journal] [--json]'
-    puts '  --once        print one frame and exit (no PHASE or last output: instant)'
-    puts '  --no-journal  do not follow the workers\' streamed journals (no PHASE and last output)'
+    puts 'usage: archci top [-n SECONDS] [--json]'
+    puts '  -n SECONDS    redraw interval (5); into a pipe or a file, one frame is printed'
     puts '  --json        print the snapshot the frame is drawn from as JSON and exit'
     exit
   end
@@ -47,12 +42,13 @@ if json
   exit
 end
 
-if once
+# not a terminal: one frame, for scripts and the tests
+unless $stdout.tty?
   puts frame(nil, hint: false)
   exit
 end
 
-dir = with_journal ? Archci.config['ARCHCI_REMOTE_JOURNAL'] : nil
+dir = Archci.config['ARCHCI_REMOTE_JOURNAL']
 journal = dir && File.directory?(dir) ? JournalFollow.new(dir) : nil
 
 # Redraw every interval; between frames wait for a key. The terminal is put in

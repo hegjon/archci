@@ -32,22 +32,22 @@ grep -q '^build=5242880$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stat
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
 me=$(cut -d. -f1 /proc/sys/kernel/hostname)
-"$top" --once --no-journal | sed -n '/^HOST/{n;p}' | grep "^$me .*  0  *0  " >/dev/null || fail "the master itself must be the first host row, with no workers: $("$top" --once --no-journal | sed -n '/^HOST/{n;p}')"
-"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1  -$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count, active workers and a dash for an unknown archci version: $("$top" --once --no-journal | grep ^worker)"
+"$top" | sed -n '/^HOST/{n;p}' | grep "^$me .*  0  *0  " >/dev/null || fail "the master itself must be the first host row, with no workers: $("$top" | sed -n '/^HOST/{n;p}')"
+"$top" | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1  -$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count, active workers and a dash for an unknown archci version: $("$top" | grep ^worker)"
 # a second worker of the host says which archci it runs; a newer beat from
 # the first, which says nothing, must not hide that
 ARCHCI_PKG_SOURCES=nothing "$job" claim worker-2 x86_64 load=0.20 mem=40 disk=61 cpus=4 archci=0.3.19-1 | grep . >/dev/null && fail "worker-2's poll must get no job with no sources enabled"
 "$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
-"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *1  0.3.19-1$" >/dev/null || fail "the archci version must come from whichever worker sent it: $("$top" --once --no-journal | grep ^worker)"
+"$top" | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *1  0.3.19-1$" >/dev/null || fail "the archci version must come from whichever worker sent it: $("$top" | grep ^worker)"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
-"$top" --once --no-journal | grep "^unsigned: 2 pkg in staging (oldest 1m30s)$" >/dev/null || fail "archci-top must show the unsigned staging backlog from signer.status: $("$top" --once --no-journal | grep ^unsigned)"
-"$top" --once --no-journal | grep "^released: x86_64 63 pkg  aarch64 unreachable$" >/dev/null || fail "the released line must show the released databases per arch: $("$top" --once --no-journal | grep ^released)"
+"$top" | grep "^unsigned: 2 pkg in staging (oldest 1m30s)$" >/dev/null || fail "archci-top must show the unsigned staging backlog from signer.status: $("$top" | grep ^unsigned)"
+"$top" | grep "^released: x86_64 63 pkg  aarch64 unreachable$" >/dev/null || fail "the released line must show the released databases per arch: $("$top" | grep ^released)"
 "$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=104858 peak=204800 build=134217728
-COLUMNS=200 "$top" --once --no-journal | grep "  3.70  128G  102G  200G  -        arch     acl" >/dev/null || fail "memory from 100G up must keep five characters: $(COLUMNS=200 "$top" --once --no-journal | grep worker-1)"
+COLUMNS=200 "$top" | grep "  3.70  128G  102G  200G  -        arch     acl" >/dev/null || fail "memory from 100G up must keep five characters: $(COLUMNS=200 "$top" | grep worker-1)"
 "$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880 phase=check
-COLUMNS=200 "$top" --once --no-journal | grep "  3.70  5.0G  1.8G  2.1G  check    arch     acl 1:2.3.2-1 | -" >/dev/null || fail "the phase the worker sent must show: $(COLUMNS=200 "$top" --once --no-journal | grep worker-1)"
+COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  check    arch     acl 1:2.3.2-1 | -" >/dev/null || fail "the phase the worker sent must show: $(COLUMNS=200 "$top" | grep worker-1)"
 "$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
-COLUMNS=200 "$top" --once --no-journal | grep "  3.70  5.0G  1.8G  2.1G  -        arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" --once --no-journal | grep worker-1)"
+COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  -        arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
@@ -59,10 +59,10 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
 grep -q '^heartbeat=20[0-9][0-9]-.*Z$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep when its last heartbeat arrived"
-"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *0  0.3.19-1$" >/dev/null || fail "archci-top must show an idle host with its last heartbeat, no active workers and the version its other worker sent: $("$top" --once --no-journal | grep ^worker)"
+"$top" | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *0  0.3.19-1$" >/dev/null || fail "archci-top must show an idle host with its last heartbeat, no active workers and the version its other worker sent: $("$top" | grep ^worker)"
 # a worker not heard from for POLL_TTL is gone, however recent its last job
 sed -i "s/^heartbeat=.*/heartbeat=$(date -u -d '-20 minutes' +%FT%TZ)/" "$ARCHCI_HOME/queue/done/$id.job"
-"$top" --once --no-journal | grep "^worker  *-  *x86_64  *0.20 .* 4  *1  *0  0.3.19-1$" >/dev/null || fail "a worker silent for 20 minutes must leave the hosts table even with a recent job; its host keeps the other worker: $("$top" --once --no-journal | grep ^worker)"
+"$top" | grep "^worker  *-  *x86_64  *0.20 .* 4  *1  *0  0.3.19-1$" >/dev/null || fail "a worker silent for 20 minutes must leave the hosts table even with a recent job; its host keeps the other worker: $("$top" | grep ^worker)"
 sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/$id.job"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
@@ -127,8 +127,8 @@ commit_pkgs acl-metadata
 "$scan"
 [[ $("$next") != *" acl "* ]] || fail "acl was built at this version; a metadata commit must not rebuild it"
 
-echo "--- top --once and --json"
-"$top" --once --no-journal | head -5
+echo "--- top into a pipe, and --json"
+"$top" | head -5
 "$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json #{j["queue"]} #{j["outstanding"]}" unless j["queue"]["pending"] == 1 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["omarchy-x86_64"] == 1 && j["arches"] == ["x86_64"] && j["repo"] == "omarchy" && j["pkgbuilds"]["packages"] == 3'
 
 echo "--- retry --all gives every failed job a fresh first attempt"
@@ -156,11 +156,11 @@ echo "--- a claim carries the host's stats; an idle worker's host still shows"
 ARCHCI_ARCHES="x86_64 riscv64" ARCHCI_PKG_SOURCES=nothing "$job" claim idle-host-1 riscv64 load=0.50 mem=10 disk=20 cpus=2 vendor=DigitalOcean archci=0.3.19-1 | grep . >/dev/null && fail "an idle poll must get no job here"
 grep -q '^vendor=DigitalOcean$' "$ARCHCI_HOME/hosts/idle-host-1" || fail "the claim's host stats must be kept in hosts/"
 grep -q '^seen=20' "$ARCHCI_HOME/hosts/idle-host-1" || fail "hosts/ entry must say when the worker polled"
-"$top" --once --no-journal | grep "^idle-host  *DigitalOcean  *riscv64  *0.50  *20  *10  *2  *1  *0  0.3.19-1$" >/dev/null || fail "archci-top must show an idle host from its poll, with the archci it runs: $("$top" --once --no-journal | grep idle-host)"
+"$top" | grep "^idle-host  *DigitalOcean  *riscv64  *0.50  *20  *10  *2  *1  *0  0.3.19-1$" >/dev/null || fail "archci-top must show an idle host from its poll, with the archci it runs: $("$top" | grep idle-host)"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! ARCHCI_ARCHES="x86_64 riscv64" "$job" claim idle-host-1 riscv64 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
 touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
-"$top" --once --no-journal | grep "^idle-host " >/dev/null && fail "a worker that stopped polling must drop out of the hosts table"
+"$top" | grep "^idle-host " >/dev/null && fail "a worker that stopped polling must drop out of the hosts table"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/hosts/idle-host-1 ]] || fail "housekeeping must keep a poll younger than a day"
 touch -d '2 days ago' "$ARCHCI_HOME/hosts/idle-host-1"

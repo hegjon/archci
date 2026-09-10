@@ -151,7 +151,7 @@ class JournalFollow
 end
 
 # top's looks on a terminal: bold headers and figures. Plain when the output
-# is not a terminal (--once into a pipe, the tests).
+# is not a terminal (a pipe, the tests).
 STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
@@ -219,7 +219,7 @@ def frame(journal, snap = nil, hint: true)
     end
   end
   # the last output line from the journal follower, '-' without one: the
-  # first frame, --once, or --no-journal
+  # first frame, or stdout not a terminal
   lasts = journal ? journal.last(running.map { |j| [unit_name(j), j['claimed']] }) : {}
   # by host, its native workers first, then per emulated arch, instance
   # numbers as numbers: host-1, host-3, host-aarch64-1, host-riscv64-2
