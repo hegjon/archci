@@ -31,6 +31,8 @@ grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
+me=$(cut -d. -f1 /proc/sys/kernel/hostname)
+"$top" --once --no-journal | sed -n '/^HOST/{n;p}' | grep "^$me .*  0  *0  " >/dev/null || fail "the master itself must be the first host row, with no workers: $("$top" --once --no-journal | sed -n '/^HOST/{n;p}')"
 "$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1  -$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count, active workers and a dash for an unknown archci version: $("$top" --once --no-journal | grep ^worker)"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 "$top" --once --no-journal | grep "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" >/dev/null || fail "archci-top must show the signer status from signer.status"

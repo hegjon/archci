@@ -14,6 +14,7 @@ built: x86_64 428/569  aarch64 29/569  riscv64 16/569  any 85/119
 signer: staging 0 pkg   release x86_64 366 pkg  aarch64 152 pkg  riscv64 139 pkg
 
 HOST                   VENDOR        ARCH     LOAD %DISK  %MEM THREADS WORKERS ACTIVE  ARCHCI
+master                 DigitalOcean  x86_64   0.12  41.0  23.5       1       0      0  0.3.19-1
 jonny-ryzen9           AsrockRack    x86_64  12.35    46    18      32       8      4  0.3.19-1
 worker1                DigitalOcean  x86_64   0.57  63.7  32.4       1       1      0  0.3.19-1
 worker2                DigitalOcean  x86_64   0.06  57.6  31.9       1       1      0  0.3.19-1

@@ -224,14 +224,16 @@ archci_version() {
 	fi
 }
 
+# archci_worker_stats [DIR] -> the host stats: load, memory and the disk DIR
+# (the chroots by default; the master measures its state directory) is on.
 archci_worker_stats() {
-	local load total avail used=0 disk vendor version
+	local dir=${1:-$ARCHCI_CHROOTS} load total avail used=0 disk vendor version
 	read -r load _ </proc/loadavg
 	# memory and chroot disk in use, in percent with one decimal
 	total=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
 	avail=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
 	(( total > 0 )) && used=$(awk -v t="$total" -v a="$avail" 'BEGIN { printf "%.1f", (t - a) * 100 / t }')
-	disk=$(df --output=used,size "$ARCHCI_CHROOTS" 2>/dev/null | awk 'NR == 2 && $2 > 0 { printf "%.1f", $1 * 100 / $2 }')
+	disk=$(df --output=used,size "$dir" 2>/dev/null | awk 'NR == 2 && $2 > 0 { printf "%.1f", $1 * 100 / $2 }')
 	# who made the machine (DMI: "DigitalOcean", "AsrockRack"...), for the hosts table
 	vendor=$(tr -c 'A-Za-z0-9.-' '-' </sys/class/dmi/id/sys_vendor 2>/dev/null | sed -E 's/-+$//; s/^-+//' | cut -c1-32)
 	# the archci this worker runs, for the hosts table (only if it fits a stat token)

@@ -7,7 +7,8 @@
 # line). --once prints one frame; --json prints the snapshot it is drawn from.
 #
 #   header   queue depth, outstanding work, built per arch, done in the last hour
-#   hosts    one row per host seen recently, its workers grouped: native arch,
+#   hosts    the master itself first, then one row per host seen recently, its
+#            workers grouped: native arch,
 #            load, memory, chroot disk and threads from the newest heartbeat
 #            any of them sent, how many workers it runs and how many are busy,
 #            and the archci version the workers run

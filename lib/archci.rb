@@ -3,6 +3,7 @@
 # archci.rb -- shared helpers for the ruby parts of archci (scan, top).
 # Mirrors archci-common.sh: same config file, same job file format.
 require 'etc'
+require 'socket'
 require 'json'
 require 'open3'
 require 'time'
@@ -129,7 +130,24 @@ module Archci
 
       h.merge!('heartbeat_age_s' => (now - beat).to_i, **j.slice(*HOST_STATS).compact)
     end
-    hosts.values.sort_by { |h| h['host'] }.each { |h| h['workers'].sort! }
+    # this machine, the master, first: its own stats right now (the same
+    # function the workers report with), whether or not it runs workers
+    master = Socket.gethostname.split('.').first
+    m = hosts[master] ||= { 'host' => master, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
+                            **HOST_STATS.to_h { |k| [k, nil] } }
+    m['arch'] ||= Etc.uname[:machine]
+    m.merge!('heartbeat_age_s' => 0, **master_stats)
+    rest = hosts.values.reject { |h| h.equal?(m) }.sort_by { |h| h['host'] }
+    [m, *rest].each { |h| h['workers'].sort! }
+  end
+
+  # The master's own host stats, as a worker would send them (load, mem, disk
+  # of ARCHCI_HOME, cpus, vendor, archci), from lib/archci-common.sh.
+  def self.master_stats
+    out, status = Open3.capture2('bash', '-c', 'source "$1/lib/archci-common.sh"; archci_worker_stats "$ARCHCI_HOME"', '_', ROOT)
+    return {} unless status.success?
+
+    out.split.to_h { |kv| kv.split('=', 2) }.slice(*HOST_STATS)
   end
 
   # The packages in the PKGBUILD repository clone, from archci-pkgs (which
