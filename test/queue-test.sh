@@ -50,6 +50,10 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
 grep -q '^heartbeat=20[0-9][0-9]-.*Z$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep when its last heartbeat arrived"
 "$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *0  -$" >/dev/null || fail "archci-top must show an idle host with its last heartbeat and no active workers"
+# a worker not heard from for POLL_TTL is gone, however recent its last job
+sed -i "s/^heartbeat=.*/heartbeat=$(date -u -d '-20 minutes' +%FT%TZ)/" "$ARCHCI_HOME/queue/done/$id.job"
+"$top" --once --no-journal | grep "^worker " >/dev/null && fail "a worker silent for 20 minutes must leave the hosts table even with a recent job"
+sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/$id.job"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"

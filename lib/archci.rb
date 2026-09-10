@@ -115,7 +115,11 @@ module Archci
     hosts = {}
     seen = running.map { |j| [j, now - j['heartbeat_age_s'], true] } +
            recent.map { |j| [j, (j['heartbeat'] && Time.iso8601(j['heartbeat'])), false] } +
-           polls.map { |p| [p, (p['seen'] && Time.iso8601(p['seen'])), false] }.reject { |_, t, _| t.nil? || now - t > POLL_TTL }
+           polls.map { |p| [p, (p['seen'] && Time.iso8601(p['seen'])), false] }
+    # a worker counts while it was heard from within POLL_TTL: a running job,
+    # a finished job's last heartbeat, or an idle poll (a stopped worker
+    # drops out after that; the recent list alone kept it for 50 jobs)
+    seen = seen.reject { |j, t, running_now| !running_now && (t.nil? || now - t > POLL_TTL) }
     seen.each do |j, beat, running_now|
       next unless j['worker']
 
