@@ -91,7 +91,11 @@ prepare_root() {
 		(umask 0022; mkdir -p "$chroot")
 		mkarchroot -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" "${base_packages[@]}"
 		touch "$chroot/root.updated"
-	elif [[ -z $(find "$chroot/root.updated" -mmin -"$ARCHCI_CHROOT_UPDATE_MINUTES" 2>/dev/null) ]]; then
+	elif [[ -z $(find "$chroot/root.updated" -mmin -"$ARCHCI_CHROOT_UPDATE_MINUTES" 2>/dev/null) ]] ||
+	     ! cmp -s "$pacconf" "$chroot/root/etc/pacman.conf"; then
+		# also when the pacman.conf changed (a repository or cache added): the
+		# update writes it into the root, and makechrootpkg's own pacman in
+		# each copy reads that one, not ours
 		say "Updating chroot %s" "$chroot/root"
 		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm
 		touch "$chroot/root.updated"
