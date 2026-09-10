@@ -16,7 +16,8 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 [[ $("$next" | wc -l) == 1 ]] || fail "next prints one line"
 ! ARCHCI_PKG_SOURCES=local "$next" | grep . >/dev/null || fail "ARCHCI_PKG_SOURCES must filter by package.json source"
 [[ $(ARCHCI_PKG_SOURCES=local ARCHCI_PKG_ALSO=acl "$next") == "5 omarchy x86_64 acl "* ]] || fail "ARCHCI_PKG_ALSO must build a named package regardless of source"
-"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding #{j["outstanding"]}" unless j["outstanding"] == {"updates"=>0, "backlog"=>3}; abort "packages #{j["pkgbuilds"]}" unless j["pkgbuilds"]["packages"] == 3 && j["repo"] == "omarchy" && j["arches"] == ["x86_64"]'
+frame=$("$top")
+[[ $frame == *"pkgbuilds -> [omarchy]   arches: x86_64"* && $frame == *"outstanding: 0 update(s), 3 unbuilt"* && $frame == *"built: x86_64 0/3"* ]] || fail "top frame: $frame"
 
 echo "--- the PKGBUILD repository URL is config: a scan follows a changed one"
 pkgs2=$tmp/pkgs2

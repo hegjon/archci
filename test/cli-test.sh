@@ -33,5 +33,5 @@ complete_words archci to | grep -x top >/dev/null || fail "completion must narro
 complete_words archci job "" | grep -x retry >/dev/null || fail "completion must offer archci job's subcommands"
 complete_words archci job retry "" | grep -x -- --all >/dev/null || fail "archci job retry must offer --all"
 complete_words archci job retry "" | grep -xF "$id" >/dev/null || fail "archci job retry must offer the queue's job ids: $(complete_words archci job retry "")"
-complete_words archci top -- | grep -x -- --json >/dev/null || fail "archci top must offer --json"
+complete_words archci top - | grep -x -- -n >/dev/null || fail "archci top must offer -n"
 echo "ALL OK"

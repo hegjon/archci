@@ -20,7 +20,8 @@ mkpkgbuild archlinux-keyring 20260901-1 any
 commit_pkgs any
 "$scan"
 # x86_64: linux, libsigc++ (acl built); any: archlinux-keyring; aarch64: acl, linux, libsigc++
-"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "outstanding #{j["outstanding"]}" unless j["outstanding"] == {"updates"=>0, "backlog"=>6}; abort "tracked #{j["tracked"]}" unless j["tracked"]["omarchy-aarch64"] == 3 && j["tracked"]["omarchy-any"] == 1 && j["any_arch"] == "x86_64"'
+frame=$("$top")
+[[ $frame == *"outstanding: 0 update(s), 6 unbuilt"* && $frame == *" aarch64 0/3"* && $frame == *" any 0/1"* ]] || fail "top frame: $frame"
 ! "$job" claim worker-6 riscv64 2>/dev/null || fail "claim for an arch not in ARCHCI_ARCHES must fail"
 # a multilib package (lib32-*) is x86_64's alone, however --ignorearch treats the arch array
 mkpkgbuild lib32-zlib 1.3.2-1 x86_64 '{"source": "arch", "arch_repo": "multilib"}'
@@ -75,5 +76,6 @@ done
 [[ $("$next" x86_64) != *archlinux-keyring* ]] || fail "built any package must not be outstanding"
 # enabling another arch makes every any package outstanding again, so the new arch gets them
 [[ $(ARCHCI_ARCHES="x86_64 aarch64 riscv64" "$next" x86_64) == *" any archlinux-keyring "* ]] || fail "an any package must be rebuilt for an arch enabled later: $(ARCHCI_ARCHES="x86_64 aarch64 riscv64" "$next" x86_64)"
-"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "built #{j["built"]}" unless j["built"]["omarchy-any"] == 1 && j["built"]["omarchy-aarch64"] == 1 && j["built"]["omarchy-x86_64"] == 1'
+frame=$("$top")
+[[ $frame == *" x86_64 1/"* && $frame == *" aarch64 1/"* && $frame == *" any 1/"* ]] || fail "top built line: $frame"
 echo "ALL OK"

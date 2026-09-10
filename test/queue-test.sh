@@ -127,9 +127,11 @@ commit_pkgs acl-metadata
 "$scan"
 [[ $("$next") != *" acl "* ]] || fail "acl was built at this version; a metadata commit must not rebuild it"
 
-echo "--- top into a pipe, and --json"
-"$top" | head -5
-"$top" --json | ruby -rjson -e 'j=JSON.parse(STDIN.read); abort "bad json #{j["queue"]} #{j["outstanding"]}" unless j["queue"]["pending"] == 1 && j["outstanding"] == {"updates"=>0, "backlog"=>2} && j["built"]["omarchy-x86_64"] == 1 && j["arches"] == ["x86_64"] && j["repo"] == "omarchy" && j["pkgbuilds"]["packages"] == 3'
+echo "--- top into a pipe prints one frame"
+frame=$("$top")
+[[ $frame == *"pkgbuilds -> [omarchy]   arches: x86_64"* ]] || fail "top title: $frame"
+[[ $frame == *"queue: pending 1 "*"outstanding: 0 update(s), 2 unbuilt"* ]] || fail "top queue line: $frame"
+[[ $frame == *"built: x86_64 1/3"* ]] || fail "top built line: $frame"
 
 echo "--- retry --all gives every failed job a fresh first attempt"
 # two jobs that gave up (final after max attempts), as report leaves them

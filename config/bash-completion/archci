@@ -60,7 +60,7 @@ _archci() {
 				         (( COMP_CWORD == 5 )) && mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches) any" -- "$cur") ;;
 			esac
 			;;
-		top)      mapfile -t COMPREPLY < <(compgen -W '-n --json' -- "$cur") ;;
+		top)      mapfile -t COMPREPLY < <(compgen -W '-n' -- "$cur") ;;
 		sign)     mapfile -t COMPREPLY < <(compgen -W '--unlock' -- "$cur") ;;
 		stage)    mapfile -t COMPREPLY < <(compgen -W '--force' -- "$cur") ;;
 		next)     mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches)" -- "$cur") ;;

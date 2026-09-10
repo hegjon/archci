@@ -290,8 +290,7 @@ module Archci
   end
 
   # Everything archci-top draws, computed once from the queue, the built
-  # records and the package index. JSON-serialisable: archci-top --json emits
-  # it as is.
+  # records and the package index.
   def self.snapshot(now = Time.now)
     cfg = config
     repo = cfg['ARCHCI_REPO']

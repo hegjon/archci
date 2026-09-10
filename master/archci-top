@@ -1,11 +1,11 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# archci-top [-n SECONDS] [--json] -- top-like view of the farm, redrawn from
-# the master's queue, the workers' heartbeats and their streamed journals,
+# archci-top [-n SECONDS] -- top-like view of the farm, redrawn from the
+# master's queue, the workers' heartbeats and their streamed journals,
 # followed live (one journalctl -f for the session). Into a pipe or a file
 # (stdout not a terminal) it prints one frame, without the last-output
-# column, and exits; --json prints the snapshot a frame is drawn from.
+# column, and exits.
 #
 #   header   queue depth, outstanding work, built per arch, done in the last hour
 #   hosts    the master itself first, then one row per host seen recently, its
@@ -24,22 +24,14 @@ require_relative '../lib/archci-frame'
 require 'io/console'
 
 interval = 5
-json = false
 ARGV.each_with_index do |a, i|
   case a
   when '-n' then interval = ARGV[i + 1].to_f
-  when '--json' then json = true
   when '-h', '--help'
-    puts 'usage: archci top [-n SECONDS] [--json]'
+    puts 'usage: archci top [-n SECONDS]'
     puts '  -n SECONDS    redraw interval (5); into a pipe or a file, one frame is printed'
-    puts '  --json        print the snapshot the frame is drawn from as JSON and exit'
     exit
   end
-end
-
-if json
-  puts JSON.pretty_generate(Archci.snapshot)
-  exit
 end
 
 # not a terminal: one frame, for scripts and the tests
