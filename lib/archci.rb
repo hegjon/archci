@@ -205,27 +205,30 @@ module Archci
 
   # Packages whose PKGBUILD version is not the one we last built, in claim
   # order: the farm's own packages (ARCHCI_PKG_ALSO, i.e. archci) first, then
-  # updates of packages we already publish before the never-built backlog;
-  # within those, packages whose dependencies from this repository are all
-  # built before those still waiting for one (so a library goes before what
-  # links it, and a build is not tried before it can succeed); then by
+  # packages whose dependencies from this repository are all built, at their
+  # current version, before those still waiting for one (so a library goes
+  # before what links it, and a build is not tried before it can succeed:
+  # an update waiting for a library's update comes after the whole backlog);
+  # within those, updates of packages we already publish before the
+  # never-built backlog; then by
   # origin: Arch's core, then extra, then multilib, then the repository's
   # local packages, then those from the AUR; an arch's own packages before
   # the any packages; alphabetically last.
   # Nothing is stored; this is computed from the package index, built/ and the
   # queue on every call.
-  #   arch:  only jobs a worker of this arch may build (its own, plus "any" if
-  #          it is ARCHCI_ANY_ARCH); nil for every enabled arch
-  #   limit: return only this many candidates
-  def self.outstanding(arch: nil, limit: nil)
+  #   arch:   only jobs a worker of this arch may build (its own, plus "any" if
+  #           it is ARCHCI_ANY_ARCH); nil for every enabled arch
+  #   limit:  return only this many candidates
+  #   queued: include packages with a job running or queued (for waiting_for)
+  def self.outstanding(arch: nil, limit: nil, queued: false)
     cfg = config
     repo = cfg['ARCHCI_REPO']
     running = jobs('running').to_h { |j| [[j['repo'], j['pkgbase'], j['arch']], true] }
-    queued = Hash.new { |h, k| h[k] = [] } # pending or failed, by commit
+    queued_commits = Hash.new { |h, k| h[k] = [] } # pending or failed, by commit
     given_up = {}                          # failed for good at this commit: not coming
     %w[pending failed].each do |q|
       jobs(q).each do |j|
-        queued[[j['repo'], j['pkgbase'], j['arch']]] << j['commit']
+        queued_commits[[j['repo'], j['pkgbase'], j['arch']]] << j['commit']
         given_up[[j['pkgbase'], j['arch']]] = j['commit'] if j['final'] == '1'
       end
     end
@@ -244,18 +247,24 @@ module Archci
     per_arch, any_pkgs = candidates.partition { |p| p['arches'] != ['any'] }
     # which pkgbase of this repository provides each name a dependency may use
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
-    # a dependency is met once its pkgbase is built for the arch, or as an
-    # any package; one that gave up at its current commit is not waited for
-    # (the chroot falls back on the mirrors' copy, if any). The built names
-    # come from one listing per arch: the check runs for every dependency of
-    # every package on every archci top frame.
+    # a dependency is met once its pkgbase is built at its current version
+    # for the arch, or as an any package (built at an older one, its update
+    # is waited for: the dependent's new version usually needs it); one that
+    # gave up at its current commit is not waited for (the chroot falls back
+    # on the mirrors' copy, if any). The built names come from one listing
+    # per arch, the versions from the built records (cached): the check runs
+    # for every dependency of every package on every archci top frame.
     by_base = candidates.to_h { |p| [p['pkgbase'], p] }
     built_names = Hash.new do |h, a|
       dir = File.join(home, 'built', "#{repo}-#{a}")
       h[a] = File.directory?(dir) ? Dir.children(dir).to_set : Set.new
     end
+    current = Hash.new do |h, (dep_base, a)|
+      h[[dep_base, a]] = built_names[a].include?(dep_base) &&
+                         built_record(File.join(home, 'built', "#{repo}-#{a}", dep_base))&.first == by_base[dep_base]['version']
+    end
     dep_built = lambda do |dep_base, a|
-      built_names[a].include?(dep_base) || built_names['any'].include?(dep_base) ||
+      current[[dep_base, a]] || current[[dep_base, 'any']] ||
         [a, 'any'].any? { |x| given_up[[dep_base, x]] == by_base[dep_base]['commit'] }
     end
     updates = []
@@ -272,8 +281,10 @@ module Archci
         # was pooled for; an arch enabled since makes the package outstanding again
         built, _commit, pooled = built_record(File.join(home, 'built', "#{repo}-#{job_arch}", p['pkgbase'])) || []
         next if built == p['version'] && (!any || (arches - pooled.to_s.split(',')).empty?)
-        next if running[[repo, p['pkgbase'], job_arch]]                 # one build per package and arch at a time
-        next if queued[[repo, p['pkgbase'], job_arch]].include?(p['commit']) # queued, in retry backoff, or given up
+        unless queued
+          next if running[[repo, p['pkgbase'], job_arch]]                      # one build per package and arch at a time
+          next if queued_commits[[repo, p['pkgbase'], job_arch]].include?(p['commit']) # queued, in retry backoff, or given up
+        end
 
         # the dependencies this repository itself provides, not built yet for
         # this arch (an any package's on the any arch): built after them
@@ -281,12 +292,20 @@ module Archci
                            .reject { |b| b == p['pkgbase'] || dep_built[b, any ? any_arch : a] }
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
                   'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting,
-                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, built ? 0 : 1, waiting.empty? ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
+                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
         (built ? updates : backlog) << entry
       end
     end
     ordered = (updates + backlog).sort_by { |e| e['rank'] }
     limit ? ordered.first(limit) : ordered
+  end
+
+  # The dependencies from this repository a job for pkgbase on job_arch
+  # ("any" for an any package) still waits for (see outstanding); [] when
+  # none, or when the package is not outstanding at all.
+  def self.waiting_for(pkgbase, job_arch)
+    a = job_arch == 'any' ? any_arch : job_arch
+    outstanding(arch: a, queued: true).find { |e| e['pkgbase'] == pkgbase && e['arch'] == job_arch }&.dig('waiting') || []
   end
 
   # Everything archci-top draws, computed once from the queue, the built

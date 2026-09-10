@@ -177,4 +177,21 @@ grep -q "still running for dup-1, which asks for new work; requeued" <<<"$out" |
 (( $(grep -l '^worker=dup-1$' "$ARCHCI_HOME"/queue/running/*.job | wc -l) == 1 )) || fail "dup-1 must hold exactly one running job"
 # the job handed back is first in pending, so the same worker gets it again: attempt 1, not 2
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/running/$id.job" || fail "the orphaned attempt must not count: $(grep ^attempt= "$ARCHCI_HOME/queue/running/$id.job")"
+echo "--- a failed job's retry waits for a dependency this repository has yet to build"
+mkpkgbuild lib 1-1
+mkpkgbuild app 1-1
+sed -i 's/^arch=/depends=(lib)\narch=/' "$pkgs/pkgbuilds/app/PKGBUILD"
+commit_pkgs app-and-lib
+"$scan"
+[[ $("$next" --waiting app x86_64) == lib ]] || fail "archci-next --waiting must name the unbuilt dependency: $("$next" --waiting app x86_64)"
+[[ -z $("$next" --waiting lib x86_64) ]] || fail "archci-next --waiting must be empty for a package with its dependencies built"
+printf 'id=5-1-omarchy,app,1-1,x86_64\nrepo=omarchy\narch=x86_64\npkgbase=app\nversion=1-1\ncommit=%s\nprofile=extra\ncreated=2026-01-01T00:00:00Z\nattempt=1\nworker=w\nstatus=failure\nfinished=2026-01-01T01:00:00Z\n' "$(pkgcommit app)" >"$ARCHCI_HOME/queue/failed/5-1-omarchy,app,1-1,x86_64.job"
+"$housekeeping"
+[[ -f $ARCHCI_HOME/queue/failed/5-1-omarchy,app,1-1,x86_64.job ]] || fail "a retry must be held while its dependency is unbuilt"
+ARCHCI_RETRY_HOLD_MINUTES=0 "$housekeeping"
+[[ -f $ARCHCI_HOME/queue/pending/5-1-omarchy,app,1-1,x86_64.job ]] || fail "the hold must end after ARCHCI_RETRY_HOLD_MINUTES"
+mv "$ARCHCI_HOME/queue/pending/5-1-omarchy,app,1-1,x86_64.job" "$ARCHCI_HOME/queue/failed/"
+mkdir -p "$ARCHCI_HOME/built/omarchy-x86_64"; echo "1-1 $(pkgcommit lib)" >"$ARCHCI_HOME/built/omarchy-x86_64/lib"
+"$housekeeping"
+[[ -f $ARCHCI_HOME/queue/pending/5-1-omarchy,app,1-1,x86_64.job ]] || fail "a retry must go ahead once its dependency is built"
 echo "ALL OK"

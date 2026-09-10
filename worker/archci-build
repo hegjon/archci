@@ -82,6 +82,9 @@ echo "    repo=$job_repo arch=$job_arch profile=$profile chroot=$chroot copy=$co
 echo "    pacman.conf=$pacconf makepkg.conf=$mkconf cache=$cachedir"
 
 # --- clean chroot: create once, refresh periodically, recreate on devtools bumps
+update_root() {
+	arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm
+}
 prepare_root() {
 	local have=
 	[[ -f $chroot/root/.arch-chroot ]] && have=$(<"$chroot/root/.arch-chroot")
@@ -103,7 +106,14 @@ prepare_root() {
 		# update writes it into the root, and makechrootpkg's own pacman in
 		# each copy reads that one, not ours
 		say "Updating chroot %s" "$chroot/root"
-		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm
+		# once more on failure: a package another build on this host was
+		# fetching into the shared cache fails its checksum half-written
+		# (pacman drops it), or a mirror hiccupped
+		if ! update_root; then
+			say "chroot update failed; trying once more"
+			sleep 5
+			update_root
+		fi
 		touch "$chroot/root.updated"
 		# and thin the caches: this chroot's to ARCHCI_CACHE_KEEP versions, and
 		# the host's own, which builds no longer fill when the chroot has a

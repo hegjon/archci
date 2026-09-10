@@ -60,8 +60,14 @@ printf 'id=5-1-omarchy,bb-lib,1-1,x86_64\nrepo=omarchy\narch=x86_64\npkgbase=bb-
 order=$(next3)
 [[ $order == *" aa-app mm-local bb-aur" ]] || fail "a dependency that gave up must not hold its dependents back: $order"
 rm -f "$tmp/home3/queue/failed/5-1-omarchy,bb-lib,1-1,x86_64.job"
-# once bb-lib is built, aa-app takes its alphabetical place among the local packages
-mkdir -p "$tmp/home3/built/omarchy-x86_64"; echo "1-1 x" >"$tmp/home3/built/omarchy-x86_64/bb-lib"
+# bb-lib built at an older version: aa-app waits for its update; and as an
+# update itself it comes after the backlog, not before it
+mkdir -p "$tmp/home3/built/omarchy-x86_64"; echo "0-1 x" >"$tmp/home3/built/omarchy-x86_64/bb-lib"
+echo "0-1 x" >"$tmp/home3/built/omarchy-x86_64/aa-app"
 order=$(next3)
-[[ $order == *" aa-app mm-local bb-aur" ]] || fail "a package whose dependency is built must not wait: $order"
+[[ $order == "archci bb-lib zz-core "*" mm-local bb-aur aa-app(bb-lib)" ]] || fail "a dependency built at an older version must be waited for (its update, bb-lib, goes first), and an update waiting comes after the backlog: $order"
+# once bb-lib is built at its version, aa-app, an update, goes first after the farm's own
+echo "1-1 x" >"$tmp/home3/built/omarchy-x86_64/bb-lib"
+order=$(next3)
+[[ $order == "archci aa-app zz-core "* ]] || fail "an update whose dependency is built must not wait: $order"
 echo "ALL OK"

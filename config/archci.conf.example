@@ -40,8 +40,11 @@ ARCHCI_ARCHES="x86_64"
 ARCHCI_MAX_ATTEMPTS=3
 # A running job without a worker heartbeat for this long goes back to pending.
 ARCHCI_STALE_MINUTES=30
-# A failed job with attempts left is retried after this long.
+# A failed job with attempts left is retried after this long; one waiting for
+# a dependency this repository has yet to build is held until it is, at most
+# this much longer.
 ARCHCI_RETRY_MINUTES=180
+ARCHCI_RETRY_HOLD_MINUTES=720
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 ARCHCI_REMOTE_JOURNAL=/var/log/journal/remote
 # Finished job records are pruned from queue/done after this many days.

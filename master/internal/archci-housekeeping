@@ -5,7 +5,9 @@
 # running jobs whose worker stopped heartbeating (ARCHCI_STALE_MINUTES),
 # drops queued and failed jobs a newer commit of their package supersedes,
 # requeues failed jobs whose retry delay is over (ARCHCI_RETRY_MINUTES, up
-# to ARCHCI_MAX_ATTEMPTS), prunes done/ (ARCHCI_DONE_KEEP_DAYS) and the
+# to ARCHCI_MAX_ATTEMPTS; one still waiting for a dependency this
+# repository has yet to build is held, up to ARCHCI_RETRY_HOLD_MINUTES),
+# prunes done/ (ARCHCI_DONE_KEEP_DAYS) and the
 # polls of workers not heard from for a day (hosts/).
 set -euo pipefail
 here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
@@ -44,6 +46,18 @@ for file in "$Q_FAILED"/*.job; do
 	(( job_attempt < ARCHCI_MAX_ATTEMPTS )) || continue
 	age=$(( now - $(stat -c %Y "$file") ))
 	(( age >= ARCHCI_RETRY_MINUTES * 60 )) || continue
+	# a build that failed for want of a library this repository is still to
+	# build (an update whose dependencies update with it) is not tried again
+	# before the library is built; a dependency that never comes (a cycle, a
+	# build stuck) holds it for ARCHCI_RETRY_HOLD_MINUTES at most
+	if (( age < ARCHCI_RETRY_HOLD_MINUTES * 60 )); then
+		waiting=$("$ARCHCI_MASTER_DIR/archci-next" --waiting "$job_pkgbase" "$job_arch" 2>/dev/null || true)
+		if [[ -n $waiting ]]; then
+			# said once, on the first pass past the delay (the timer's 5 min)
+			(( age >= ARCHCI_RETRY_MINUTES * 60 + 300 )) || archci_log "$job_id: retry held, waiting for $waiting"
+			continue
+		fi
+	fi
 	archci_log "$job_id: retrying (attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS)"
 	requeue_file "$file"
 	(( ++n ))

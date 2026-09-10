@@ -6,7 +6,16 @@
 # Output: "<prio> <repo> <arch> <pkgbase> <version> <commit> <profile>", where
 # <arch> is the job's arch: the worker's, or "any". Used by archci-job claim
 # when queue/pending holds nothing for the worker; safe to run by hand.
+# archci-next --waiting PKGBASE ARCH -- the dependencies from this repository
+# a job for PKGBASE on ARCH ("any" for an any package) still waits for, one
+# line, empty for none. Used by archci-housekeeping to hold a failed job's
+# retry until they are built.
 require_relative '../lib/archci'
+
+if ARGV[0] == '--waiting'
+  puts Archci.waiting_for(ARGV[1], ARGV[2]).join(' ')
+  exit
+end
 
 entry = Archci.outstanding(arch: ARGV[0], limit: 1).first
 exit 0 unless entry
