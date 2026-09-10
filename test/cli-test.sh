@@ -27,11 +27,11 @@ complete_words() {   # complete_words WORD... -> COMPREPLY for the last (possibl
 }
 source "$here/../config/bash-completion/archci"
 PATH=$here/../bin:$PATH
-complete_words archci "" | grep -qx job || fail "completion must offer the installed subcommands; archci help says: $("$archci" help 2>&1 | head -5)"
-complete_words archci "" | grep -qx version || fail "completion must offer version"
-complete_words archci to | grep -qx top || fail "completion must narrow on the prefix"
-complete_words archci job "" | grep -qx retry || fail "completion must offer archci job's subcommands"
-complete_words archci job retry "" | grep -qx -- --all || fail "archci job retry must offer --all"
-complete_words archci job retry "" | grep -qxF "$id" || fail "archci job retry must offer the queue's job ids: $(complete_words archci job retry "")"
-complete_words archci top -- | grep -qx -- --json || fail "archci top must offer --json"
+complete_words archci "" | grep -x job >/dev/null || fail "completion must offer the installed subcommands; archci help says: $("$archci" help 2>&1 | head -5)"
+complete_words archci "" | grep -x version >/dev/null || fail "completion must offer version"
+complete_words archci to | grep -x top >/dev/null || fail "completion must narrow on the prefix"
+complete_words archci job "" | grep -x retry >/dev/null || fail "completion must offer archci job's subcommands"
+complete_words archci job retry "" | grep -x -- --all >/dev/null || fail "archci job retry must offer --all"
+complete_words archci job retry "" | grep -xF "$id" >/dev/null || fail "archci job retry must offer the queue's job ids: $(complete_words archci job retry "")"
+complete_words archci top -- | grep -x -- --json >/dev/null || fail "archci top must offer --json"
 echo "ALL OK"

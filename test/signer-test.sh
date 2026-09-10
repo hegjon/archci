@@ -81,7 +81,7 @@ rel=$release/omarchy/os/x86_64
 [[ -f $rel/hello-1-1-x86_64.pkg.tar.zst && -f $rel/hello-1-1-x86_64.pkg.tar.zst.sig ]] || fail "trusted package not released+signed"
 [[ ! -e $release/omarchy/os/x86_64/evil-1-1-x86_64.pkg.tar.zst ]] || fail "attacker package must not be released"
 [[ -f $rel/omarchy.db.tar.gz && -f $rel/omarchy.db ]] || fail "release database (both names) missing"
-bsdtar -xOf "$rel/omarchy.db.tar.gz" '*/desc' | grep -qxF 'hello-1-1-x86_64.pkg.tar.zst' || fail "hello not in release db"
+bsdtar -xOf "$rel/omarchy.db.tar.gz" '*/desc' | grep -xF 'hello-1-1-x86_64.pkg.tar.zst' >/dev/null || fail "hello not in release db"
 gpg --homedir "$relpub" --batch --verify "$rel/hello-1-1-x86_64.pkg.tar.zst.sig" "$rel/hello-1-1-x86_64.pkg.tar.zst" 2>/dev/null || fail "released signature must verify for clients"
 # staging is drained (both the released and the rejected package removed)
 [[ -z $(find "$staging" -name '*.pkg.tar.zst' 2>/dev/null) ]] || fail "staging must be drained"

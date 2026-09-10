@@ -19,9 +19,9 @@ grep -n '^\[' "$out" | head -3
 [[ $(grep '^\[' "$out" | head -2 | tr '\n' ' ') == "[options] [hegjon-test] " ]] || fail "the farm's repo must follow [options]: $(grep '^\[' "$out" | tr '\n' ' ')"
 [[ $(grep -c '^\[hegjon-test\]' "$out") == 1 ]] || fail "inserted once"
 grep -qx 'Server = https://pub-x.r2.dev/$repo/os/$arch' "$out" || fail "server line: $(grep Server "$out")"
-grep -A2 '^\[hegjon-test\]' "$out" | grep -q '^SigLevel = Required DatabaseOptional' || fail "signatures required"
+grep -A2 '^\[hegjon-test\]' "$out" | grep '^SigLevel = Required DatabaseOptional' >/dev/null || fail "signatures required"
 [[ $(grep -c "^\[" "$out") == 4 ]] || fail "the other repositories stay: $(grep -c "^\[" "$out")"
-bash -c 'pacman-conf --config "$1" --repo-list' _ "$out" | head -1 | grep -qx hegjon-test || fail "pacman-conf must list it first: $(pacman-conf --config "$out" --repo-list | tr '\n' ' ')"
+bash -c 'pacman-conf --config "$1" --repo-list' _ "$out" | head -1 | grep -x hegjon-test >/dev/null || fail "pacman-conf must list it first: $(pacman-conf --config "$out" --repo-list | tr '\n' ' ')"
 
 echo "--- a config that already names the repository is copied as is"
 printf '[options]\n[hegjon-test]\nServer = file:///x\n[core]\nServer = https://m/$repo/os/$arch\n' >"$tmp/own.conf"

@@ -31,10 +31,10 @@ grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
-"$top" --once --no-journal | grep -q "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1$" || fail "archci-top must show the host's arch, vendor, stats, threads, worker count and active workers"
+"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count and active workers"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
-"$top" --once --no-journal | grep -q "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" || fail "archci-top must show the signer status from signer.status"
-COLUMNS=200 "$top" --once --no-journal | grep -q "  370  5.0G  1.8G  2.1G  -        acl 1:2.3.2-1 | -" || fail "archci-top must show the job's cpu, memory and build size: $("$top" --once --no-journal | grep worker-1)"
+"$top" --once --no-journal | grep "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" >/dev/null || fail "archci-top must show the signer status from signer.status"
+COLUMNS=200 "$top" --once --no-journal | grep "  370  5.0G  1.8G  2.1G  -        acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $("$top" --once --no-journal | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
@@ -46,7 +46,7 @@ mkpkg "$inc" acl-debug 1:2.3.2-1
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
 grep -q '^heartbeat=20[0-9][0-9]-.*Z$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep when its last heartbeat arrived"
-"$top" --once --no-journal | grep -q "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *0$" || fail "archci-top must show an idle host with its last heartbeat and no active workers"
+"$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *0$" >/dev/null || fail "archci-top must show an idle host with its last heartbeat and no active workers"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"
@@ -94,13 +94,13 @@ mkpkgbuild libsigc++ 2.12.3-1
 commit_pkgs bump
 "$scan"
 "$housekeeping"
-ls "$ARCHCI_HOME/queue/pending" | grep -q 'linux,7.2.3.arch1-2' && fail "superseded pending job not dropped"
+ls "$ARCHCI_HOME/queue/pending" | grep 'linux,7.2.3.arch1-2' >/dev/null && fail "superseded pending job not dropped"
 [[ -z $(ls -A "$ARCHCI_HOME/queue/failed") ]] || fail "superseded final failure not dropped"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ 2.12.3-1 $(pkgcommit libsigc++) extra" ]] || fail "new libsigc++ version should be next: $("$next")"
 "$job" enqueue acl 0
-ls "$ARCHCI_HOME/queue/pending" | grep -q '^0-.*omarchy,acl' || fail "manual enqueue"
+ls "$ARCHCI_HOME/queue/pending" | grep '^0-.*omarchy,acl' >/dev/null || fail "manual enqueue"
 ! "$job" enqueue skipped 0 2>/dev/null || true   # skip_build packages may still be enqueued by hand
-ls "$ARCHCI_HOME/queue/pending" | grep -q 'omarchy,skipped,1-1' || fail "manual enqueue of a skip_build package"
+ls "$ARCHCI_HOME/queue/pending" | grep 'omarchy,skipped,1-1' >/dev/null || fail "manual enqueue of a skip_build package"
 rm -f "$ARCHCI_HOME"/queue/pending/*skipped*
 ! "$job" enqueue nosuch 0 2>/dev/null || fail "enqueue of an unknown package must fail"
 
@@ -136,14 +136,14 @@ done
 echo "--- a claim carries the host's stats; an idle worker's host still shows"
 # a riscv64 poll: the pending x86_64 jobs are not its to take, and with no
 # package source enabled nothing is outstanding, so it gets no job
-ARCHCI_ARCHES="x86_64 riscv64" ARCHCI_PKG_SOURCES=nothing "$job" claim idle-host-1 riscv64 load=0.50 mem=10 disk=20 cpus=2 vendor=DigitalOcean | grep -q . && fail "an idle poll must get no job here"
+ARCHCI_ARCHES="x86_64 riscv64" ARCHCI_PKG_SOURCES=nothing "$job" claim idle-host-1 riscv64 load=0.50 mem=10 disk=20 cpus=2 vendor=DigitalOcean | grep . >/dev/null && fail "an idle poll must get no job here"
 grep -q '^vendor=DigitalOcean$' "$ARCHCI_HOME/hosts/idle-host-1" || fail "the claim's host stats must be kept in hosts/"
 grep -q '^seen=20' "$ARCHCI_HOME/hosts/idle-host-1" || fail "hosts/ entry must say when the worker polled"
-"$top" --once --no-journal | grep -q "^idle-host  *DigitalOcean  *riscv64  *0.50  *20  *10  *2  *1  *0$" || fail "archci-top must show an idle host from its poll: $("$top" --once --no-journal | grep idle-host)"
+"$top" --once --no-journal | grep "^idle-host  *DigitalOcean  *riscv64  *0.50  *20  *10  *2  *1  *0$" >/dev/null || fail "archci-top must show an idle host from its poll: $("$top" --once --no-journal | grep idle-host)"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! ARCHCI_ARCHES="x86_64 riscv64" "$job" claim idle-host-1 riscv64 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
 touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
-"$top" --once --no-journal | grep -q "^idle-host " && fail "a worker that stopped polling must drop out of the hosts table"
+"$top" --once --no-journal | grep "^idle-host " >/dev/null && fail "a worker that stopped polling must drop out of the hosts table"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/hosts/idle-host-1 ]] || fail "housekeeping must keep a poll younger than a day"
 touch -d '2 days ago' "$ARCHCI_HOME/hosts/idle-host-1"

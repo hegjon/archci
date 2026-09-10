@@ -106,7 +106,7 @@ sleep 3   # a few retries against the dead master
 rm -f "$tmp/master-down" "$tmp/down-after-build"
 wait_for 20 'delivered after [0-9]* tries' "$tmp/worker.log" || fail "results not delivered after the master came back: $(<"$tmp/worker.log")"
 wait_for 10 . "$ARCHCI_HOME/built/omarchy-x86_64/acl" || fail "the master did not record the late delivery"
-grep -c 'master unreachable, keeping' "$tmp/worker.log" | grep -qx 1 || fail "the outage must be logged once, not per try"
+grep -c 'master unreachable, keeping' "$tmp/worker.log" | grep -x 1 >/dev/null || fail "the outage must be logged once, not per try"
 kill "$worker_pid"; wait "$worker_pid" 2>/dev/null || true; worker_pid=''
 
 echo "--- the worker re-executes itself when its script changes on disk"
