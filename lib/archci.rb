@@ -170,11 +170,12 @@ module Archci
       out, status = Open3.capture2(File.join(ROOT, 'master', 'archci-pkgs'))
       if status.success?
         out.lines.filter_map do |line|
-          name, version, commit, arch, profile, source, build, arch_repo = line.split
+          name, version, commit, arch, profile, source, build, arch_repo, pkgnames, deps = line.split
           next unless build
 
           { 'pkgbase' => name, 'version' => version, 'commit' => commit, 'arches' => arch.split(','),
-            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'arch_repo' => arch_repo.to_s }
+            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'arch_repo' => arch_repo.to_s,
+            'pkgnames' => (pkgnames || name).split(','), 'deps' => (deps == '-' ? [] : deps.to_s.split(',')) }
         end
       else
         []
@@ -184,10 +185,13 @@ module Archci
 
   # Packages whose PKGBUILD version is not the one we last built, in claim
   # order: the farm's own packages (ARCHCI_PKG_ALSO, i.e. archci) first, then
-  # updates of packages we already publish before the never-built backlog, and
-  # within those by origin: Arch's core, then extra, then multilib, then the
-  # repository's local packages, then those from the AUR; an arch's own
-  # packages before the any packages; alphabetically last.
+  # updates of packages we already publish before the never-built backlog;
+  # within those, packages whose dependencies from this repository are all
+  # built before those still waiting for one (so a library goes before what
+  # links it, and a build is not tried before it can succeed); then by
+  # origin: Arch's core, then extra, then multilib, then the repository's
+  # local packages, then those from the AUR; an arch's own packages before
+  # the any packages; alphabetically last.
   # Nothing is stored; this is computed from the package index, built/ and the
   # queue on every call.
   #   arch:  only jobs a worker of this arch may build (its own, plus "any" if
@@ -214,6 +218,13 @@ module Archci
     # Anything else is offered to every enabled arch: a port arch builds with
     # --ignorearch (ARCHCI_IGNOREARCH) unless told to honour the arch array.
     per_arch, any_pkgs = candidates.partition { |p| p['arches'] != ['any'] }
+    # which pkgbase of this repository provides each name a dependency may use
+    by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
+    # a dependency is met once its pkgbase is built for the arch, or as an any package
+    dep_built = lambda do |dep_base, a|
+      File.exist?(File.join(home, 'built', "#{repo}-#{a}", dep_base)) ||
+        File.exist?(File.join(home, 'built', "#{repo}-any", dep_base))
+    end
     updates = []
     backlog = []
     (arch ? [arch] : arches).each do |a|
@@ -231,9 +242,13 @@ module Archci
         next if running[[repo, p['pkgbase'], job_arch]]                 # one build per package and arch at a time
         next if queued[[repo, p['pkgbase'], job_arch]].include?(p['commit']) # queued, in retry backoff, or given up
 
+        # the dependencies this repository itself provides, not built yet for
+        # this arch (an any package's on the any arch): built after them
+        waiting = p['deps'].filter_map { |d| by_pkgname[d] }.uniq
+                           .reject { |b| b == p['pkgbase'] || dep_built[b, any ? any_arch : a] }
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
-                  'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5,
-                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, built ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
+                  'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting,
+                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, built ? 0 : 1, waiting.empty? ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
         (built ? updates : backlog) << entry
       end
     end

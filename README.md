@@ -76,8 +76,11 @@ later makes those packages outstanding again),
 skipping packages that are running, queued, waiting for a retry or given up
 on. The farm's own packages (`ARCHCI_PKG_ALSO`) come first, then updates to
 packages already in our repo before the never-built rest; within each of
-those, Arch's core before extra before multilib, then local and AUR
-packages, alphabetically. A commit that changes a package directory without
+those, packages whose dependencies from this repository are all built
+before those still waiting for one (the index records each PKGBUILD's
+`depends`, `makedepends` and `checkdepends`, so a library goes before what
+links it), then Arch's core before extra before multilib, then local and
+AUR packages, alphabetically. A commit that changes a package directory without
 changing its version does not rebuild it, the same rule omarchy-pkgs' own
 pipeline follows; it does drop a pending or failed job for the older commit.
 `ARCHCI_PKG_SOURCES` restricts the farm to packages with a given `source`,
