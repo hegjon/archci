@@ -89,31 +89,44 @@ class JournalFollow
   def follow
     loop do
       begin
-        Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-o', 'json', '--output-fields=MESSAGE,_SYSTEMD_UNIT',
-                     '-f', '-n', '100', err: File::NULL) do |_stdin, out, waiter|
-          @pid = waiter.pid
-          out.each_line do |line|
-            e = parse_entry(line.force_encoding(Encoding::UTF_8)) or next
-            u = unit_of(e)
-            next unless u.start_with?('archci-build@')
+        stdin, out, waiter = Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-o', 'json',
+                                          '--output-fields=MESSAGE,_SYSTEMD_UNIT', '-f', '-n', '100', err: File::NULL)
+        @pid = waiter.pid
+        stdin.close
+        out.each_line do |line|
+          e = parse_entry(line.force_encoding(Encoding::UTF_8)) or next
+          u = unit_of(e)
+          next unless u.start_with?('archci-build@')
 
-            msg = message_of(e)
-            @lock.synchronize { @last[u] = msg }
-          end
+          msg = message_of(e)
+          @lock.synchronize { @last[u] = msg }
         end
       rescue StandardError
         nil
+      ensure
+        # however the read ended (EOF, an error, this thread killed): no
+        # journalctl of ours outlives it
+        kill_child
+        out&.close
       end
-      @pid = nil
       sleep 2
     end
   end
 
+  def kill_child
+    pid = @pid
+    @pid = nil
+    return unless pid
+
+    Process.kill('TERM', pid)
+    Process.wait(pid)
+  rescue Errno::ESRCH, Errno::ECHILD, Errno::EPERM
+    nil
+  end
+
   def stop
     @reader.kill
-    Process.kill('TERM', @pid) if @pid
-  rescue Errno::ESRCH, Errno::EPERM
-    nil
+    kill_child
   end
 
   # jobs: [[unit, claimed], ...] -> { unit => last line }
