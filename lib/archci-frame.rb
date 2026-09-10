@@ -149,7 +149,7 @@ def frame(journal, snap = nil, hint: true)
     line += "   [status #{elapsed(s['age_s'])} old]" if s['age_s'] > 600
     out << line
     rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} unreachable" }
-    out << "signed: #{rel.join('  ')}" unless rel.empty?
+    out << "signed  : #{rel.join('  ')}" unless rel.empty?
   end
   out << ''
 
