@@ -76,8 +76,10 @@ file. The backlog is never written down: when a worker asks for work,
 for an `any` package also the arches it was pooled for, so enabling an arch
 later makes those packages outstanding again),
 skipping packages that are running, queued, waiting for a retry or given up
-on. Updates to packages already in our repo come first, then the never-built
-rest, alphabetically. A commit that changes a package directory without
+on. The farm's own packages (`ARCHCI_PKG_ALSO`) come first, then updates to
+packages already in our repo before the never-built rest; within each of
+those, Arch's core before extra before multilib, then local and AUR
+packages, alphabetically. A commit that changes a package directory without
 changing its version does not rebuild it, the same rule omarchy-pkgs' own
 pipeline follows; it does drop a pending or failed job for the older commit.
 `ARCHCI_PKG_SOURCES` restricts the farm to packages with a given `source`,
@@ -118,7 +120,12 @@ and is printed. The worker then:
    btrfs subvolume and each build gets a fresh snapshot of it, refreshed with
    `pacman -Syuu` at most once an hour. The chroot's `makepkg.conf` and
    pacman `<profile>.conf` come from `/etc/archci/<arch>/`, then
-   `arch/<arch>/` in the archci tree, then devtools,
+   `arch/<arch>/` in the archci tree, then devtools; `ARCHCI_BUILD_ENV`
+   adds a makepkg.conf drop-in with variables every build sees (by default
+   CMake's policy minimum, so projects with an old `cmake_minimum_required`
+   still configure). A worker building another arch than the machine's runs
+   under qemu user-mode emulation and skips `check()` there
+   (`ARCHCI_EMULATED_NOCHECK`),
 4. signs each package with the worker's own builder key (`<pkg>.buildsig`,
    internal provenance, see Signing below),
 5. takes the build's journal as `build.log`, and rsyncs it with the packages,
@@ -133,12 +140,12 @@ and is printed. The worker then:
    `TimeoutStartSec` timeout does fail the unit, but the result file also covers
    the stop/kill case, so the worker relies on it uniformly.
 
-While building, a background loop sends a heartbeat every minute
-(`ARCHCI_HEARTBEAT_SECONDS`), carrying the machine's load, memory, chroot
-disk use and core count, and the job's own CPU, memory and build-tree size
-read from its cgroup; the master keeps them with the job for `archci-top`. A job
-without a heartbeat for 30 minutes is put back in `pending/` by housekeeping (a 5-minute timer), so
-a worker can be destroyed at any time. On `systemctl stop` the worker reports
+While building, the worker sends heartbeats to the master, carrying the
+machine's load, memory, chroot disk use and core count, and the job's own
+CPU, memory and build-tree size read from its cgroup; the master keeps them
+with the job for `archci top`. A job without a heartbeat for 30 minutes is
+put back in `pending/` by housekeeping (a 5-minute timer), so a worker can
+be destroyed at any time. On `systemctl stop` the worker reports
 `abandoned`, which requeues without counting an attempt.
 
 **Master.** The master holds no signing key and builds no database. On `report
@@ -222,7 +229,7 @@ prefix, and do not serve `staging/` publicly.
 Trust bootstrap: export the release public key on the signer and give it to
 clients (`pacman-key --add release.pub && pacman-key --lsign-key <fpr>`), and
 register each worker's builder public key on the signer once with
-`archci-authorize-builder`. Ephemeral fleets can instead share one builder key
+`archci authorize-builder`. Ephemeral fleets can instead share one builder key
 baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 
 
@@ -231,12 +238,12 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ```
 bin/      archci: the command line (archci-cli), `archci <name>` runs archci-<name> of an installed role
 tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
-lib/      archci-common.sh, archci-queue.sh (bash) and archci.rb (ruby): config, the job queue, paths
-master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-top
+lib/      archci-common.sh, archci-queue.sh (bash), archci.rb and archci-frame.rb (ruby): config, the job queue, paths, the top frame
+master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top
           internal/archci-housekeeping: the queue's timer pass, not a command
-worker/   archci-worker, archci-build, archci-worker-setup
+worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
-arch/     chroot configs for arches devtools ships none for (aarch64/makepkg.conf.sed, qemu/)
+arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf.sed and qemu/ for aarch64 and riscv64
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
   archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
@@ -262,6 +269,8 @@ built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
 repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume)
 logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log
+hosts/<worker>              the last idle poll of each worker, with its host stats (for archci top)
+signer.status               the signer as seen through R2 (archci-signer-status, a timer)
 ```
 
 The released repository lives on R2, not on the master. The signer keeps only
@@ -277,8 +286,8 @@ repo=omarchy
 arch=x86_64
 pkgbase=linux
 version=7.2.3.arch1-2
-tag=7.2.3.arch1-2
 commit=5ad4989865a52c7b0a7b49f4117714e0b2b31d3d
+profile=extra
 attempt=1
 created=2026-09-05T07:40:00Z
 worker=build-a-1
@@ -470,48 +479,34 @@ SigLevel = Required DatabaseOptional
 Server = https://<r2 release domain>/$repo/os/$arch
 ```
 
-It then behaves like any pacman repository. Queried from the prototype part way
-through building `core` (67 packages so far, abridged; this instance predates
-the switch to a PKGBUILD repository and still serves `[core]`):
+It then behaves like any pacman repository. Queried from a client of the
+test instance ([docs/test-instance.md](docs/test-instance.md)), whose
+repository is called `hegjon-test` and held 970 x86_64 packages at the time:
 
 ```
-$ pacman -Sl core
-core acl 2.4.0-1
-core attr 2.6.0-1
-core audit 4.2.1-1
-core bash 5.3.15-1
-core binutils 2.47-4
-core btrfs-progs 7.1-1
-core cryptsetup 2.8.7-1
-core dbus 1.16.2-1
-core e2fsprogs 1.47.4-1
-core glib2 2.88.3-1
-core gnupg 2.4.9-3
-core iproute2 7.2.0-1
-...
-core python-brotli 1.2.0-1
+$ pacman -Sl hegjon-test | head -3
+hegjon-test a52dec 0.8.0-3
+hegjon-test aalib 1.4rc5-19
+hegjon-test abseil-cpp 20260817.0-2 [installed]
 
-$ pacman -Si core/iproute2
-Repository      : core
-Name            : iproute2
-Version         : 7.2.0-1
-Description     : IP Routing Utilities
+$ pacman -Si hegjon-test/rclone
+Repository      : hegjon-test
+Name            : rclone
+Version         : 1.75.1-1
+Description     : rsync for cloud storage
 Architecture    : x86_64
-URL             : https://git.kernel.org/pub/scm/network/iproute2/iproute2.git
-Licenses        : GPL-2.0-or-later
-Provides        : iproute
-Depends On      : glibc  libxtables.so=12-64  libcap  libcap.so=2-64  libelf  libbpf  libbpf.so=1-64
-Download Size   : 1214.64 KiB
-Installed Size  : 3181.61 KiB
-Packager        : Unknown Packager
-Build Date      : Tue Aug 18 07:37:09 2026
-Validated By    : SHA-256 Sum
+URL             : https://github.com/rclone/rclone
+Licenses        : MIT
+Depends On      : glibc
+Download Size   : 29.55 MiB
+Installed Size  : 109.66 MiB
+Packager        : Jonny Heggheim <hegjon@gmail.com>
+Build Date      : Thu 10 Sep 2026 12:41:15 AM CEST
 ```
 
-(These 67 packages were built before `ARCHCI_PACKAGER` was set, so they show
-`Unknown Packager`; builds now stamp `PACKAGER` from `ARCHCI_PACKAGER`. Either
-way the package's authenticity comes from the release signature, which pacman
-verifies against the imported key on download, not from that field.)
+`Packager` is `ARCHCI_PACKAGER`. The package's authenticity comes from the
+release signature, which pacman verifies against the imported key on
+download, not from that field.
 
 ## Documentation
 
@@ -524,8 +519,8 @@ verifies against the imported key on download, not from that field.)
 
 - Nothing is queued up front: with an empty `built/`, every package in the
   PKGBUILD repository (minus `skip_build` and anything `ARCHCI_PKG_SOURCES`
-  excludes) is outstanding and gets built in name order, as workers ask for
-  work.
+  excludes) is outstanding and gets built in the claim order above, as
+  workers ask for work.
 - Packages are built independently against the official mirrors (plus
   whatever `/etc/archci/<arch>/extra.conf` adds). If a build needs a newer
   dependency than the mirror has, or a sibling from this repository that is
@@ -534,12 +529,14 @@ verifies against the imported key on download, not from that field.)
   a clean environment) to read its version, the same thing `makepkg
   --printsrcinfo` does. The PKGBUILD repository is trusted input; do not
   point `ARCHCI_PKGBUILDS_URL` at one you would not run.
-- Upstream source PGP signatures are verified with the keys each PKGBUILD
-  ships in `keys/pgp/<fingerprint>.asc`, as Arch's packaging repositories
-  do; `archci-build` imports them for the build user before makechrootpkg
-  verifies the sources. A package whose keys are missing fails, which is the
-  point: the PKGBUILD repository decides which keys are trusted.
-  `ARCHCI_MAKEPKG_ARGS=--skippgpcheck` turns the check off.
+- Upstream source PGP signatures are verified against the keys each
+  PKGBUILD names in `validpgpkeys`: `archci-build` imports the copies the
+  package ships in `keys/pgp/<fingerprint>.asc`, as Arch's packaging
+  repositories do, then refreshes those fingerprints from `ARCHCI_KEYSERVERS`,
+  since the shipped copies lag a maintainer's new signing subkey or extended
+  expiry. The PKGBUILD repository still decides which keys are trusted; a
+  signature by any other key fails. `ARCHCI_MAKEPKG_ARGS=--skippgpcheck`
+  turns the check off.
 - Packages are signed by the `signer` role, never on the master; the database
   is left unsigned (`DatabaseOptional`). See Signing above. A built package
   whose builder signature the signer rejects is not re-attempted automatically,
@@ -556,8 +553,8 @@ verifies against the imported key on download, not from that field.)
   release bucket from a custom domain rather than the rate-limited r2.dev URL;
   give workers enough RAM (1 GB is too little for large packages); and decide on
   release-key longevity (see the signing section).
-- Worker ssh keys are shared secrets; rotate by running `archci-authorize` with
-  a new key and deleting the old line from `/etc/archci/authorized_keys`.
+- Worker ssh keys are shared secrets; rotate with `archci authorize` for the
+  new key and `archci authorize --revoke` for the old one.
 
 ## License
 
