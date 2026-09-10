@@ -34,7 +34,7 @@ grep -q '^build=5.0G$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats n
 "$top" --once --no-journal | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1  -$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count, active workers and a dash for an unknown archci version: $("$top" --once --no-journal | grep ^worker)"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 "$top" --once --no-journal | grep "^signer: staging 2 pkg (oldest 1m30s)   release x86_64 63 pkg  aarch64 unreachable" >/dev/null || fail "archci-top must show the signer status from signer.status"
-COLUMNS=200 "$top" --once --no-journal | grep "  370  5.0G  1.8G  2.1G  -        acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" --once --no-journal | grep worker-1)"
+COLUMNS=200 "$top" --once --no-journal | grep "  370  5.0G  1.8G  2.1G  -        arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" --once --no-journal | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id

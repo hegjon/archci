@@ -18,11 +18,11 @@ jonny-ryzen9           AsrockRack    x86_64  12.35    46    18      32       8  
 worker1                DigitalOcean  x86_64   0.57  63.7  32.4       1       1      0  0.3.19-1
 worker2                DigitalOcean  x86_64   0.06  57.6  31.9       1       1      0  0.3.19-1
 
-ELAPSED  WORKER                 ARCH    ATT   HB  %CPU  DISK   MEM  PEAK  PHASE    PACKAGE  | last output
-03:12:00 jonny-ryzen9-a1        aarch64   1  23s   100  1.9G  2.5G  2.6G  check    glibc 2.44+r24+g16be1518495f-1 | gc
-00:17:05 jonny-ryzen9-a2        aarch64   2  42s   150  271M  632M  714M  prepare  coreutils 9.11-2.1 | Creating lib/g
-01:04:31 jonny-ryzen9-r1        riscv64   1  57s   100  451M  1.0G  2.9G  check    elfutils 0.196-1 | /usr/bin/ld: war
-05:31:44 jonny-ryzen9-r2        riscv64   1  49s   100  1.4G  2.0G  9.4G  build    binutils 2.47-4 | libtool: compile:
+ELAPSED  WORKER              ARCH    ATT   HB  %CPU  DISK   MEM  PEAK  PHASE    SOURCE   PACKAGE  | last output
+03:12:00 jonny-ryzen9-a1     aarch64   1  23s   100  1.9G  2.5G  2.6G  check    core     glibc 2.44+r24+g16be1518495f-1 | gc
+00:17:05 jonny-ryzen9-a2     aarch64   2  42s   150  271M  632M  714M  prepare  core     coreutils 9.11-2.1 | Creating lib/g
+01:04:31 jonny-ryzen9-r1     riscv64   1  57s   100  451M  1.0G  2.9G  check    core     elfutils 0.196-1 | /usr/bin/ld: war
+05:31:44 jonny-ryzen9-r2     riscv64   1  49s   100  1.4G  2.0G  9.4G  build    core     binutils 2.47-4 | libtool: compile:
 
 FAILED (newest first)              ARCH     WORKER            FAILURES  GAVE UP  LAST FAILURE
 grub 2:2.14-1                      x86_64   worker1-1                3      yes  2026-09-09T21:07:10Z

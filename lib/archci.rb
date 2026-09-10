@@ -227,9 +227,10 @@ module Archci
     sets = arches.map { |a| ["#{repo}-#{a}", pkgs.size - any_count] } << ["#{repo}-any", any_count]
     outstanding = self.outstanding
     updates = outstanding.count { |e| e['prio'] == 1 }
+    by_name = packages.to_h { |p| [p['pkgbase'], p] }
     job = lambda do |j|
       { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
-        'worker' => j['worker'], 'attempt' => j['attempt'] }
+        'worker' => j['worker'], 'attempt' => j['attempt'], 'origin' => origin(by_name[j['pkgbase']]) }
     end
     running = jobs('running').sort_by { |j| j['claimed'].to_s }.map do |j|
       job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i,
@@ -273,6 +274,19 @@ module Archci
   # Claim order among packages of one class: Arch's core before extra before
   # multilib, then this repository's own (local) packages, then AUR ones.
   ORIGIN_RANK = { %w[arch core] => 0, %w[arch extra] => 1, %w[arch multilib] => 2 }.freeze
+  # Where a package comes from, as archci top shows it: Arch's repository
+  # (core, extra, multilib; "arch" when package.json does not say), aur or
+  # local; nil for a package the index no longer has.
+  def self.origin(pkg)
+    return nil unless pkg
+
+    if pkg['source'] == 'arch'
+      %w[- ''].include?(pkg['arch_repo'].to_s) ? 'arch' : pkg['arch_repo']
+    else
+      pkg['source']
+    end
+  end
+
   def self.origin_rank(pkg)
     ORIGIN_RANK.fetch([pkg['source'], pkg['arch_repo']]) do
       case pkg['source']

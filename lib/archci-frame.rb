@@ -163,7 +163,7 @@ def frame(journal, snap = nil, hint: true)
   end
   out << ''
 
-  out << bold(format('%-8s %-22s %-7s %3s %4s %5s %5s %5s %5s  %-8s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', '%CPU', 'DISK', 'MEM', 'PEAK', 'PHASE', 'PACKAGE  | last output')[0, width])
+  out << bold(format('%-8s %-19s %-7s %3s %4s %5s %5s %5s %5s  %-8s %-8s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', '%CPU', 'DISK', 'MEM', 'PEAK', 'PHASE', 'SOURCE', 'PACKAGE  | last output')[0, width])
   # a MiB count in five characters: 458M up to 999M, then 1.2G
   mem = ->(v) { v.nil? ? '-' : (v.to_i > 999 ? format('%.1fG', v.to_i / 1024.0) : "#{v}M") }
   # PHASE and the last output line from the journal (journal_tails), '-'
@@ -179,9 +179,9 @@ def frame(journal, snap = nil, hint: true)
     hb_s = j['heartbeat_age_s']
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     phase, last = tails[unit_name(j)] || ['', '']
-    line = format('%-8s %-22s %-7s %3d %4s %5s %5s %5s %5s  %-8s %s %s', hms(since), short_worker(j['worker']), j['arch'], j['attempt'], hb,
+    line = format('%-8s %-19s %-7s %3d %4s %5s %5s %5s %5s  %-8s %-8s %s %s', hms(since), short_worker(j['worker'])[0, 19], j['arch'], j['attempt'], hb,
                   j['cpu'] ? (j['cpu'].to_f * 100).round.to_s : '-', j['build'] || '-', mem[j['rss']], mem[j['peak']],
-                  phase.empty? ? '-' : phase[0, 8], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
+                  phase.empty? ? '-' : phase[0, 8], (j['origin'] || '-')[0, 8], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
   end
   out << '(nothing running)' if running.empty?
