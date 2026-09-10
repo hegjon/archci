@@ -145,7 +145,7 @@ def frame(journal, snap = nil, hint: true)
   # the next
   if (s = snap['signer'])
     rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} unreachable" }
-    out << "signed  : #{rel.join('  ')}" unless rel.empty?
+    out << "released: #{rel.join('  ')}" unless rel.empty?
     st = s['staging'] || {}
     line = format('unsigned: %s pkg in staging%s', bold(st['waiting'].to_i), st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
     line += "   [status #{elapsed(s['age_s'])} old]" if s['age_s'] > 600

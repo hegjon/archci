@@ -44,7 +44,7 @@ then writes `/var/lib/archci/signer.status`. `archci top`
 shows it as
 
 ```
-signed  : x86_64 63 pkg  aarch64 87 pkg  riscv64 80 pkg
+released: x86_64 63 pkg  aarch64 87 pkg  riscv64 80 pkg
 unsigned: 2 pkg in staging (oldest 1m30s)
 ```
 
