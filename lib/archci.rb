@@ -13,7 +13,7 @@ module Archci
   # The heartbeat's stats (the same two lists as archci-common.sh): the host's
   # and the job's, kept with the job file by archci-job heartbeat.
   HOST_STATS = %w[load mem disk cpus vendor archci].freeze
-  JOB_STATS = %w[cpu rss peak build phase].freeze
+  JOB_STATS = %w[cpu cpu_us cpu_dt rss peak build phase].freeze
 
   DEFAULTS = {
     'ARCHCI_HOME' => '/var/lib/archci',
@@ -65,7 +65,7 @@ module Archci
   def self.read_job(path)
     job = { 'path' => path }
     File.foreach(path) do |line|
-      next unless (m = line.match(/\A([a-z]+)=(.*)\z/m))
+      next unless (m = line.match(/\A([a-z_]+)=(.*)\z/m))
 
       job[m[1]] = m[2].chomp
     end

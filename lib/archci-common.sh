@@ -129,7 +129,8 @@ export "${!ARCHCI_@}"
 # (stat names must not be job fields: a heartbeat replaces lines of these
 # names in the job file, so a stat called version would eat the package's)
 ARCHCI_HOST_STATS='load mem disk cpus vendor archci'
-ARCHCI_JOB_STATS='cpu rss peak build phase'
+# (cpu is what workers before 0.3.30 sent: cores, computed there)
+ARCHCI_JOB_STATS='cpu cpu_us cpu_dt rss peak build phase'
 archci_stats_re() { local s="$ARCHCI_HOST_STATS $ARCHCI_JOB_STATS"; printf '%s' "${s// /|}"; }
 
 # Master: the PKGBUILD repository clone and the package index over it.
@@ -294,10 +295,12 @@ archci_phase_filter() {
 		}'
 }
 
-# archci_job_stats JOBDIR UNIT -> "phase=<phase> cpu=<cores> rss=<MiB> peak=<MiB> build=<MiB>"
+# archci_job_stats JOBDIR UNIT -> "phase=<phase> cpu_us=<us> cpu_dt=<us> rss=<MiB> peak=<MiB> build=<KiB>"
 # for the build UNIT (archci-build@...) running from JOBDIR: the phase as soon
 # as archci_phase_filter has written JOBDIR/phase, the rest once the build's
-# scope exists; nothing while there is neither. The container's processes live in a scope of nspawn's own,
+# scope exists; nothing while there is neither. Raw figures: the CPU time the
+# build used since the previous sample and the wall time that took (archci
+# top divides them into cores), memory in MiB, the build tree in KiB. The container's processes live in a scope of nspawn's own,
 # devtools.slice/*/makechrootpkg-<pkg>.build.<pid>.scope, named after the
 # makechrootpkg process, which itself sits in the build unit's cgroup; the
 # scope's cgroup accounts CPU and memory for the whole build. cpu is the cores
@@ -319,31 +322,31 @@ archci_job_stats() {
 	{
 		usage=$(awk '/^usage_usec/ { print $2 }' "$cg/cpu.stat" 2>/dev/null) || return 0
 		now=$(date +%s%6N)
-		# cores used since the previous sample; on the first, since the scope
-		# started (systemd's monotonic clock against /proc/uptime, both in us),
-		# or since the job started (JOBDIR/started, written by archci-worker)
-		# when the scope is too young to have a start time yet
-		cpu=''
+		# CPU time used since the previous sample, and the wall time between
+		# the samples; on the first, since the scope started (systemd's
+		# monotonic clock against /proc/uptime, both in us), or since the job
+		# started (JOBDIR/started, written by archci-worker) when the scope is
+		# too young to have a start time yet
+		local cpu_us='' cpu_dt=''
 		if [[ -f $jobdir/cpu.prev ]]; then
 			read -r prev_usage prev_now <"$jobdir/cpu.prev"
-			(( now > prev_now )) && cpu=$(awk -v u="$((usage - prev_usage))" -v t="$((now - prev_now))" 'BEGIN { printf "%.2f", u / t }')
+			(( now > prev_now )) && cpu_us=$((usage - prev_usage)) cpu_dt=$((now - prev_now))
 		else
 			local started up
 			started=$(systemctl show -p ActiveEnterTimestampMonotonic --value "${cg##*/}" 2>/dev/null || true)
 			up=$(awk '{ printf "%d", $1 * 1000000 }' /proc/uptime)
 			if [[ $started =~ ^[1-9][0-9]*$ ]] && (( up > started )); then
-				cpu=$(awk -v u="$usage" -v t="$((up - started))" 'BEGIN { printf "%.2f", u / t }')
+				cpu_us=$usage cpu_dt=$((up - started))
 			elif [[ -f $jobdir/started ]] && started=$(<"$jobdir/started") && [[ $started =~ ^[0-9]+$ ]] && (( now > started )); then
-				cpu=$(awk -v u="$usage" -v t="$((now - started))" 'BEGIN { printf "%.2f", u / t }')
+				cpu_us=$usage cpu_dt=$((now - started))
 			fi
 		fi
 		printf '%s %s\n' "$usage" "$now" >"$jobdir/cpu.prev"
 		mem=$(( $(<"$cg/memory.current") / 1048576 ))
 		peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
-		# human-readable (du -h: 39M, 2.1G), shown as is
 		build=0
-		[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$(du -sh "$copydir/build" 2>/dev/null | cut -f1)
-		printf '%s%srss=%s peak=%s build=%s\n' "${phase:+phase=$phase }" "${cpu:+cpu=$cpu }" "$mem" "$peak" "${build:-0}"
+		[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$(du -sk "$copydir/build" 2>/dev/null | cut -f1)
+		printf '%s%srss=%s peak=%s build=%s\n' "${phase:+phase=$phase }" "${cpu_us:+cpu_us=$cpu_us cpu_dt=$cpu_dt }" "$mem" "$peak" "${build:-0}"
 	}
 }
 

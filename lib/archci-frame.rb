@@ -228,6 +228,15 @@ def frame(journal, snap = nil, hint: true)
     else format('%.0fG', g)
     end
   end
+  # the build tree: KiB from the worker (raw du -sk; 5.0G before 0.3.30, shown as is)
+  tree = ->(v) { v.nil? ? '-' : (v =~ /\A\d+\z/ ? mem[(v.to_i / 1024.0).round] : v) }
+  # cores in use: the CPU time used over the wall time it took, both raw
+  # from the worker (cpu= cores from a worker before 0.3.30), shown like a load
+  cores = lambda do |j|
+    if j['cpu_us'] && j['cpu_dt'].to_i.positive? then load[format('%.2f', j['cpu_us'].to_f / j['cpu_dt'].to_f)]
+    else load[j['cpu']]
+    end
+  end
   # PHASE and the last output line from the journal follower, '-' without
   # one: the first frame, --once, or --no-journal
   tails = journal ? journal.tails(running.map { |j| [unit_name(j), j['claimed']] }) : {}
@@ -243,7 +252,7 @@ def frame(journal, snap = nil, hint: true)
     phase, last = tails[unit_name(j)] || ['', '']
     phase = j['phase'] if j['phase']   # the worker's own word for it (heartbeat), when it sends one
     line = format('%-8s %-19s %-7s %3d %4s %5s %5s %5s %5s  %-8s %-8s %s %s', hms(since), short_worker(j['worker'])[0, 19], j['arch'], j['attempt'], hb,
-                  load[j['cpu']], j['build'] || '-', mem[j['rss']], mem[j['peak']],
+                  cores[j], tree[j['build']], mem[j['rss']], mem[j['peak']],
                   phase.empty? ? '-' : phase[0, 8], (j['origin'] || '-')[0, 8], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
   end
