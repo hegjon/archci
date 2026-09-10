@@ -3,6 +3,7 @@
 # archci.rb -- shared helpers for the ruby parts of archci (scan, top).
 # Mirrors archci-common.sh: same config file, same job file format.
 require 'etc'
+require 'set'
 require 'socket'
 require 'json'
 require 'open3'
@@ -245,11 +246,16 @@ module Archci
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
     # a dependency is met once its pkgbase is built for the arch, or as an
     # any package; one that gave up at its current commit is not waited for
-    # (the chroot falls back on the mirrors' copy, if any)
+    # (the chroot falls back on the mirrors' copy, if any). The built names
+    # come from one listing per arch: the check runs for every dependency of
+    # every package on every archci top frame.
     by_base = candidates.to_h { |p| [p['pkgbase'], p] }
+    built_names = Hash.new do |h, a|
+      dir = File.join(home, 'built', "#{repo}-#{a}")
+      h[a] = File.directory?(dir) ? Dir.children(dir).to_set : Set.new
+    end
     dep_built = lambda do |dep_base, a|
-      File.exist?(File.join(home, 'built', "#{repo}-#{a}", dep_base)) ||
-        File.exist?(File.join(home, 'built', "#{repo}-any", dep_base)) ||
+      built_names[a].include?(dep_base) || built_names['any'].include?(dep_base) ||
         [a, 'any'].any? { |x| given_up[[dep_base, x]] == by_base[dep_base]['commit'] }
     end
     updates = []
