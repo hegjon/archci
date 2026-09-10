@@ -180,8 +180,16 @@ def frame(journal, snap = nil, hint: true)
   out << ''
 
   out << bold(format('%-8s %-19s %-7s %3s %4s %5s %5s %5s %5s  %-8s %-8s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', '%CPU', 'DISK', 'MEM', 'PEAK', 'PHASE', 'SOURCE', 'PACKAGE  | last output')[0, width])
-  # a MiB count in five characters: 458M up to 999M, then 1.2G
-  mem = ->(v) { v.nil? ? '-' : (v.to_i > 999 ? format('%.1fG', v.to_i / 1024.0) : "#{v}M") }
+  # a MiB count in five characters: 458M up to 999M, then 1.2G, then 100G
+  mem = lambda do |v|
+    return '-' if v.nil?
+
+    g = v.to_i / 1024.0
+    if v.to_i <= 999 then "#{v}M"
+    elsif g < 99.95 then format('%.1fG', g)
+    else format('%.0fG', g)
+    end
+  end
   # PHASE and the last output line from the journal (journal_tails), '-'
   # while it has not been read: the first frame, or --no-journal
   tails = journal_tails(journal, running.map { |j| [unit_name(j), j['claimed']] })

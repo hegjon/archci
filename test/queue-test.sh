@@ -42,6 +42,9 @@ ARCHCI_PKG_SOURCES=nothing "$job" claim worker-2 x86_64 load=0.20 mem=40 disk=61
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 "$top" --once --no-journal | grep "^unsigned: 2 pkg in staging (oldest 1m30s)$" >/dev/null || fail "archci-top must show the unsigned staging backlog from signer.status: $("$top" --once --no-journal | grep ^unsigned)"
 "$top" --once --no-journal | grep "^released: x86_64 63 pkg  aarch64 unreachable$" >/dev/null || fail "the released line must show the released databases per arch: $("$top" --once --no-journal | grep ^released)"
+"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu=3.7 rss=104858 peak=204800 build=128G
+COLUMNS=200 "$top" --once --no-journal | grep "  370  128G  102G  200G  -        arch     acl" >/dev/null || fail "memory from 100G up must keep five characters: $(COLUMNS=200 "$top" --once --no-journal | grep worker-1)"
+"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu=3.7 rss=1840 peak=2100 build=5.0G
 COLUMNS=200 "$top" --once --no-journal | grep "  370  5.0G  1.8G  2.1G  -        arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" --once --no-journal | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
