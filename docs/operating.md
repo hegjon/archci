@@ -13,10 +13,10 @@ queue: pending 9  running 4  failed 55  done 590 (3 in the last hour)    outstan
 built: x86_64 428/569  aarch64 29/569  riscv64 16/569  any 85/119
 signer: staging 0 pkg   release x86_64 366 pkg  aarch64 152 pkg  riscv64 139 pkg
 
-HOST                   VENDOR        ARCH     LOAD %DISK  %MEM THREADS WORKERS ACTIVE
-jonny-ryzen9           AsrockRack    x86_64  12.35    46    18      32       8      4
-worker1                DigitalOcean  x86_64   0.57  63.7  32.4       1       1      0
-worker2                DigitalOcean  x86_64   0.06  57.6  31.9       1       1      0
+HOST                   VENDOR        ARCH     LOAD %DISK  %MEM THREADS WORKERS ACTIVE  ARCHCI
+jonny-ryzen9           AsrockRack    x86_64  12.35    46    18      32       8      4  0.3.19-1
+worker1                DigitalOcean  x86_64   0.57  63.7  32.4       1       1      0  0.3.19-1
+worker2                DigitalOcean  x86_64   0.06  57.6  31.9       1       1      0  0.3.19-1
 
 ELAPSED  WORKER                 ARCH    ATT   HB  %CPU  DISK   MEM  PEAK  PHASE    PACKAGE  | last output
 03:12:00 jonny-ryzen9-a1        aarch64   1  23s   100  1.9G  2.5G  2.6G  check    glibc 2.44+r24+g16be1518495f-1 | gc

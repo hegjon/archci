@@ -154,12 +154,12 @@ def frame(journal, snap = nil, hint: true)
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
-  out << bold(format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%DISK', '%MEM', 'THREADS', 'WORKERS', 'ACTIVE'))
+  out << bold(format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s  %s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%DISK', '%MEM', 'THREADS', 'WORKERS', 'ACTIVE', 'ARCHCI'))
   # the load in five characters: as sent (two decimals) below 100, whole from 100
   load = ->(l) { l.nil? ? '-' : (l.to_f < 100 ? l : format('%.0f', l.to_f)) }
   snap['hosts'].each do |h|
-    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7d %6d', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', load[h['load']],
-                  h['disk'] || '-', h['mem'] || '-', h['cpus'] || '-', h['workers'].size, h['building'])
+    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7d %6d  %s', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', load[h['load']],
+                  h['disk'] || '-', h['mem'] || '-', h['cpus'] || '-', h['workers'].size, h['building'], h['archci'] || '-')
   end
   out << ''
 

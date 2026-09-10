@@ -11,7 +11,7 @@ module Archci
   CONF = ENV.fetch('ARCHCI_CONF', '/etc/archci/archci.conf')
   # The heartbeat's stats (the same two lists as archci-common.sh): the host's
   # and the job's, kept with the job file by archci-job heartbeat.
-  HOST_STATS = %w[load mem disk cpus vendor].freeze
+  HOST_STATS = %w[load mem disk cpus vendor archci].freeze
   JOB_STATS = %w[cpu rss peak build].freeze
 
   DEFAULTS = {

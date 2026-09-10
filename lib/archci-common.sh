@@ -116,7 +116,9 @@ export "${!ARCHCI_@}"
 # The heartbeat's stats, in one place (archci.rb keeps the same two lists):
 # the host's, sent by archci_worker_stats, and the job's, by archci_job_stats.
 # The master keeps them with the job (archci-job heartbeat) for the UIs.
-ARCHCI_HOST_STATS='load mem disk cpus vendor'
+# (stat names must not be job fields: a heartbeat replaces lines of these
+# names in the job file, so a stat called version would eat the package's)
+ARCHCI_HOST_STATS='load mem disk cpus vendor archci'
 ARCHCI_JOB_STATS='cpu rss peak build'
 archci_stats_re() { local s="$ARCHCI_HOST_STATS $ARCHCI_JOB_STATS"; printf '%s' "${s// /|}"; }
 
@@ -212,8 +214,18 @@ archci_read_job() {
 # archci_worker_stats -> "load=<1 min> mem=<used %> disk=<chroots %> cpus=<n>",
 # what a worker sends with each heartbeat (archci-job heartbeat validates the
 # tokens and keeps them in the job file).
+# archci_version -> the installed archci version: VERSION (archci-cli writes
+# it), else what pacman knows, else the checkout's git describe.
+archci_version() {
+	local v
+	if [[ -r $ARCHCI_ROOT/VERSION ]]; then cat "$ARCHCI_ROOT/VERSION"
+	elif [[ ! -d $ARCHCI_ROOT/.git ]] && v=$(pacman -Q archci 2>/dev/null); then echo "${v#* }"
+	else git -C "$ARCHCI_ROOT" describe --tags --always --dirty 2>/dev/null || echo unknown
+	fi
+}
+
 archci_worker_stats() {
-	local load total avail used=0 disk vendor
+	local load total avail used=0 disk vendor version
 	read -r load _ </proc/loadavg
 	# memory and chroot disk in use, in percent with one decimal
 	total=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
@@ -222,7 +234,9 @@ archci_worker_stats() {
 	disk=$(df --output=used,size "$ARCHCI_CHROOTS" 2>/dev/null | awk 'NR == 2 && $2 > 0 { printf "%.1f", $1 * 100 / $2 }')
 	# who made the machine (DMI: "DigitalOcean", "AsrockRack"...), for the hosts table
 	vendor=$(tr -c 'A-Za-z0-9.-' '-' </sys/class/dmi/id/sys_vendor 2>/dev/null | sed -E 's/-+$//; s/^-+//' | cut -c1-32)
-	printf 'load=%s mem=%s disk=%s cpus=%s%s\n' "$load" "$used" "${disk:-0}" "$(nproc)" "${vendor:+ vendor=$vendor}"
+	# the archci this worker runs, for the hosts table (only if it fits a stat token)
+	version=$(archci_version); [[ $version =~ ^[A-Za-z0-9./-]{1,32}$ ]] || version=''
+	printf 'load=%s mem=%s disk=%s cpus=%s%s%s\n' "$load" "$used" "${disk:-0}" "$(nproc)" "${vendor:+ vendor=$vendor}" "${version:+ archci=$version}"
 }
 
 # archci_job_stats JOBDIR UNIT -> "cpu=<cores> rss=<MiB> peak=<MiB> build=<MiB>"
