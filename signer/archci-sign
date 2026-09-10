@@ -63,6 +63,9 @@ rclone copy --transfers 8 --files-from "$fetch" "$ARCHCI_R2_STAGING" "$work" 2>/
 
 declare -A touched=()
 declare -A dbready=()   # per-repo: is the local db authoritative for release (safe to prune)?
+declare -A before=()    # per-repo: the package files its database named before this pass
+# db_files DIR DB -> the package files the local database names, one per line
+db_files() { bsdtar -xOf "$localrepo/$1/$2.db.tar.gz" '*/desc' 2>/dev/null | grep '\.pkg\.tar\.zst$' || true; }
 signed=0 rejected=0
 for rel in "${rels[@]}"; do
 	[[ $rel == *..* || $rel == /* ]] && { archci_log "skip suspicious path: $rel"; continue; }
@@ -98,6 +101,7 @@ for rel in "${rels[@]}"; do
 			dbready[$reldir]=0
 		fi
 	fi
+	[[ -n ${before[$reldir]+set} ]] || before[$reldir]=$(db_files "$reldir" "$db")
 	cp "$work/$rel" "$localrepo/$rel"
 	repo-add -R -q "$localrepo/$reldir/$db.db.tar.gz" "$localrepo/$rel" >/dev/null
 	rm -f "$localrepo/$rel"                       # keep only the database locally
@@ -126,11 +130,25 @@ for reldir in "${!touched[@]}"; do
 		archci_log "skipping prune of [$db]: local database was not seeded from release this run"
 		continue
 	fi
-	mapfile -t indb < <(bsdtar -xOf "$localrepo/$reldir/$db.db.tar.gz" '*/desc' 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
+	mapfile -t indb < <(db_files "$reldir" "$db")
 	if (( ${#indb[@]} == 0 )); then
 		archci_log "skipping prune of [$db]: local database is empty or unreadable"
 		continue
 	fi
+	# What this pass replaced (named by the database before, not after) goes
+	# now, in one delete, without listing the release area ...
+	gone=$work/gone.list; : >"$gone"
+	comm -23 <(sort <<<"${before[$reldir]}") <(printf '%s\n' "${indb[@]}" | sort) | grep '\.pkg\.tar\.zst$' |
+		while IFS= read -r f; do printf '%s\n%s.sig\n' "$reldir/$f" "$reldir/$f"; done >"$gone" || true
+	if [[ -s $gone ]]; then
+		archci_log "pruning $(( $(wc -l <"$gone") / 2 )) superseded package(s) from [$db]"
+		rclone delete --files-from "$gone" "$ARCHCI_R2_RELEASE" 2>/dev/null || true
+	fi
+	# ... and the listing that catches leftovers of an interrupted pass runs
+	# every ARCHCI_SIGN_PRUNE_MINUTES, not every minute
+	stamp=$ARCHCI_SIGNER_HOME/prune-${reldir//\//-}.stamp
+	[[ -n $(find "$stamp" -mmin -"$ARCHCI_SIGN_PRUNE_MINUTES" 2>/dev/null) ]] && continue
+	touch "$stamp"
 	# Membership through an associative array, not a pipeline into grep -q:
 	# grep quits at the first match, and with a database of a few hundred
 	# entries the printf feeding it then dies of SIGPIPE, which pipefail

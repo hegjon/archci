@@ -77,6 +77,10 @@ ARCHCI_STAGING_WARN=20
 # Packages archci-sign signs per pass; passes run a minute apart. Small keeps
 # a freshly staged archci release from waiting behind a long pass.
 ARCHCI_SIGN_BATCH=20
+# How often archci-sign lists a release directory to prune files its database
+# no longer names. A superseded version is deleted the pass that replaces it;
+# the listing only catches leftovers of an interrupted pass.
+ARCHCI_SIGN_PRUNE_MINUTES=60
 
 ## Worker ---------------------------------------------------------------------
 # ssh destination of the master. The master droplet is named "master"; workers resolve

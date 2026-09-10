@@ -82,6 +82,10 @@ archci_load_conf
 # Packages archci-sign takes per pass (a minute apart): small, so what the
 # farm stages next, its own release first, waits a pass and not a backlog.
 : "${ARCHCI_SIGN_BATCH:=20}"
+# How often archci-sign lists a release directory to prune what its database
+# no longer names (superseded versions are deleted as they are replaced; the
+# listing catches leftovers of interrupted passes).
+: "${ARCHCI_SIGN_PRUNE_MINUTES:=60}"
 : "${ARCHCI_MASTER:=archci@master}"
 # Empty (set to "" in the config) disables journal streaming; hence = not :=.
 # Journal streaming target: the master's journal-remote port through the ssh

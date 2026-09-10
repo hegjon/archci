@@ -89,6 +89,16 @@ gpg --homedir "$relpub" --batch --verify "$rel/hello-1-1-x86_64.pkg.tar.zst.sig"
 # staging is drained (both the released and the rejected package removed)
 [[ -z $(find "$staging" -name '*.pkg.tar.zst' 2>/dev/null) ]] || fail "staging must be drained"
 
+echo "--- a newer version prunes the one it replaces, from the database diff, the pass it lands"
+mkdir -p "$ARCHCI_HOME/repo/omarchy/os/x86_64"; mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" hello 1-2
+hp2=$ARCHCI_HOME/repo/omarchy/os/x86_64/hello-1-2-x86_64.pkg.tar.zst
+gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$hp2.buildsig" "$hp2"
+"$master/archci-stage" --force
+out=$("$here/../signer/archci-sign" 2>&1)
+[[ $out == *"pruning 1 superseded package(s) from [omarchy]"* ]] || fail "the replaced version must be pruned by the diff: $out"
+[[ -f $rel/hello-1-2-x86_64.pkg.tar.zst.sig && ! -e $rel/hello-1-1-x86_64.pkg.tar.zst && ! -e $rel/hello-1-1-x86_64.pkg.tar.zst.sig ]] || fail "hello 1-1 and its signature must be gone, 1-2 released: $(ls "$rel")"
+[[ -f $ARCHCI_SIGNER_HOME/prune-omarchy-os-x86_64.stamp ]] || fail "the listing prune leaves a stamp"
+
 echo "--- a pass takes ARCHCI_SIGN_BATCH packages, the farm's own first, the rest wait"
 bs=$tmp/batch; mkdir -p "$bs/staging/omarchy/os/x86_64" "$bs/release/omarchy/os/x86_64" "$tmp/bs-signer"
 for n in zzz-late archci-cli aaa-early; do
