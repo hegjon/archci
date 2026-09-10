@@ -105,13 +105,14 @@ class JournalFollow
     @reader = Thread.new { follow }
   end
 
-  # journalctl -f from now on; started again should it end (it survives
+  # journalctl -f, starting with the last 100 entries (a phase marker may
+  # have just gone by); started again should it end (it survives
   # the journal's own file rotation, but not much else)
   def follow
     loop do
       begin
         Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-o', 'json', '--output-fields=MESSAGE,_SYSTEMD_UNIT',
-                     '-f', '-n', '0', err: File::NULL) do |_stdin, out, waiter|
+                     '-f', '-n', '100', err: File::NULL) do |_stdin, out, waiter|
           @pid = waiter.pid
           out.each_line do |line|
             e = parse_entry(line.force_encoding(Encoding::UTF_8)) or next
