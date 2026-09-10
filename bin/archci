@@ -36,7 +36,7 @@ list() {
 version() {
 	if [[ -r $root/VERSION ]]; then cat "$root/VERSION"
 	elif [[ ! -d $root/.git ]] && v=$(pacman -Q archci 2>/dev/null); then echo "${v#* }"
-	else git -C "$root" describe --tags --always --dirty 2>/dev/null || echo unknown
+	else git -C "$root" describe --tags --always --dirty 2>/dev/null | sed "s/^v//" || echo unknown
 	fi
 }
 

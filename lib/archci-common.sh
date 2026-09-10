@@ -223,7 +223,7 @@ archci_version() {
 	local v
 	if [[ -r $ARCHCI_ROOT/VERSION ]]; then cat "$ARCHCI_ROOT/VERSION"
 	elif [[ ! -d $ARCHCI_ROOT/.git ]] && v=$(pacman -Q archci 2>/dev/null); then echo "${v#* }"
-	else git -C "$ARCHCI_ROOT" describe --tags --always --dirty 2>/dev/null || echo unknown
+	else git -C "$ARCHCI_ROOT" describe --tags --always --dirty 2>/dev/null | sed "s/^v//" || echo unknown
 	fi
 }
 
