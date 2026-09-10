@@ -104,8 +104,9 @@ archci_load_conf
 : "${ARCHCI_PACKAGER:=archci build farm <archci@localhost>}"
 : "${ARCHCI_CHROOT_UPDATE_MINUTES:=60}"
 # A build whose output stops for this long is killed (a stuck test suite);
-# 0 leaves only the unit's TimeoutStartSec.
-: "${ARCHCI_BUILD_IDLE_MINUTES:=30}"
+# 0 leaves only the unit's TimeoutStartSec. A fat-LTO link (mise, fish)
+# is silent for well over half an hour, so not too low.
+: "${ARCHCI_BUILD_MAX_IDLE_MINUTES:=90}"
 : "${ARCHCI_IDLE_SLEEP:=60}"
 # Between tries at delivering a finished build while the master is unreachable.
 : "${ARCHCI_DELIVERY_RETRY_SECONDS:=30}"

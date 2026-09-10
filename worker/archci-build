@@ -208,14 +208,14 @@ fi
 # it when it is the unit's journal stream socket, which left every line makepkg
 # printed inside the chroot out of the journal and of build.log. pipefail
 # makes rc makechrootpkg's own status.
-# A build silent for ARCHCI_BUILD_IDLE_MINUTES is a stuck test suite: kill it
+# A build silent for ARCHCI_BUILD_MAX_IDLE_MINUTES is a stuck test suite: kill it
 # rather than hold the worker until the unit's TimeoutStartSec.
 rc=0
-archci_watchdog "$(( ARCHCI_BUILD_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}" || rc=$?
+archci_watchdog "$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}" || rc=$?
 if (( rc == 124 )); then
 	# the container's own processes live in a scope of their own; make sure none survive
 	pkill -KILL -f -- "--directory=$chroot/$copy" 2>/dev/null || true
-	echo "==> build killed after $ARCHCI_BUILD_IDLE_MINUTES min without output"
+	echo "==> build killed after $ARCHCI_BUILD_MAX_IDLE_MINUTES min without output"
 fi
 (( rc == 0 )) || echo "==> makechrootpkg exited with $rc"
 

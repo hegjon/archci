@@ -86,8 +86,10 @@ ARCHCI_WORKER_HOME=/var/lib/archci-worker
 # Unprivileged local user makepkg runs as inside the chroot.
 ARCHCI_BUILD_USER=archci
 # Build timeout is TimeoutStartSec in archci-build@.service (systemctl edit archci-build@.service).
-# A build that prints nothing for this long (a hung test suite) is killed earlier; 0 disables.
-ARCHCI_BUILD_IDLE_MINUTES=30
+# A build that prints nothing for this long (a hung test suite) is killed earlier;
+# 0 disables. A fat-LTO link of a big Rust program (mise, fish) is silent for
+# well over half an hour on a busy machine, so keep it generous.
+ARCHCI_BUILD_MAX_IDLE_MINUTES=90
 # devtools chroot location; put it on btrfs to get snapshot-based clean chroots.
 ARCHCI_CHROOTS=/var/lib/archbuild
 # Extra args passed to makepkg (after --). Upstream source signatures are
