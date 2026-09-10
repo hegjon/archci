@@ -220,8 +220,22 @@ fi
 # makes rc makechrootpkg's own status.
 # A build silent for ARCHCI_BUILD_MAX_IDLE_MINUTES is a stuck test suite: kill it
 # rather than hold the worker until the unit's TimeoutStartSec.
+# (its output also lands in $outdir/makechrootpkg.log, for the check below)
+build_once() {
+	local rcf; rcf=$(mktemp)
+	{ archci_watchdog "$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}"; echo $? >"$rcf"; } 2>&1 | tee "$outdir/makechrootpkg.log"
+	rc=$(<"$rcf"); rm -f "$rcf"
+}
 rc=0
-archci_watchdog "$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}" || rc=$?
+build_once
+# The farm's packages share file names with the mirrors' but not bytes: a
+# file the chroot cached from a mirror before the farm built that same name
+# fails its checksum once the farm's repository has it. pacman drops the
+# file (--noconfirm) but fails the install; the second try fetches the right one.
+if (( rc )) && grep -q "invalid or corrupted package" "$outdir/makechrootpkg.log"; then
+	echo "==> a cached package failed its checksum (a mirror's copy of a name the farm now builds); pacman dropped it, building again"
+	build_once
+fi
 if (( rc == 124 )); then
 	# the container's own processes live in a scope of their own; make sure none survive
 	pkill -KILL -f -- "--directory=$chroot/$copy" 2>/dev/null || true
