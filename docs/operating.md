@@ -11,7 +11,8 @@ workers idle:
 archci-top  21:09:10   pkgbuilds -> [hegjon-test]   arches: x86_64 aarch64 riscv64   (q or Esc quits)
 queue: pending 9  running 4  failed 55  done 590 (3 in the last hour)    outstanding: 0 update(s), 850 unbuilt
 built: x86_64 428/569  aarch64 29/569  riscv64 16/569  any 85/119
-signer: staging 0 pkg   release x86_64 366 pkg  aarch64 152 pkg  riscv64 139 pkg
+unsigned: 0 pkg in staging
+signed: x86_64 366 pkg  aarch64 152 pkg  riscv64 139 pkg
 
 HOST                   VENDOR        ARCH     LOAD %DISK  %MEM THREADS WORKERS ACTIVE  ARCHCI
 master                 DigitalOcean  x86_64   0.12  41.0  23.5       1       0      0  0.3.19-1

@@ -140,15 +140,16 @@ def frame(journal, snap = nil, hint: true)
                 *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                   snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })
   out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{bold(n)}/#{snap['tracked'][k]}" }.join('  '))
-  # the signer, as seen through R2 by archci-signer-status: staging backlog
-  # and the released databases' age and size
+  # the signer, as seen through R2 by archci-signer-status: what waits
+  # unsigned in staging on one line, what is signed and released per arch
+  # on the next
   if (s = snap['signer'])
     st = s['staging'] || {}
-    line = format('signer: staging %s pkg%s', bold(st['waiting'].to_i), st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
-    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} unreachable" }
-    line += "   release #{rel.join('  ')}" unless rel.empty?
+    line = format('unsigned: %s pkg in staging%s', bold(st['waiting'].to_i), st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
     line += "   [status #{elapsed(s['age_s'])} old]" if s['age_s'] > 600
     out << line
+    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} unreachable" }
+    out << "signed: #{rel.join('  ')}" unless rel.empty?
   end
   out << ''
 
