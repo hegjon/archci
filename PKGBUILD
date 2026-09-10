@@ -73,7 +73,7 @@ package_archci() {
 
 package_archci-cli() {
   pkgdesc='Headless build farm for Arch Linux packages (the archci command line: operate the master or the signer)'
-  depends=(archci bash-completion)
+  depends=("archci=$pkgver-$pkgrel" bash-completion)
 
   cd "$srcdir/$_src"
   # the entry point: `archci <name>` runs archci-<name> of whichever role is installed
@@ -86,7 +86,7 @@ package_archci-cli() {
 
 package_archci-master() {
   pkgdesc='Headless build farm for Arch Linux packages (master: sync the PKGBUILD repository, hand out jobs, stage results)'
-  depends=(archci-cli ruby jq rsync openssh rclone)
+  depends=("archci-cli=$pkgver-$pkgrel" ruby jq rsync openssh rclone)
   optdepends=('btrfs-progs: btrfs subvolumes for the state directories'
               'libmicrohttpd: receive worker journals with systemd-journal-remote')
 
@@ -106,7 +106,7 @@ package_archci-master() {
 
 package_archci-worker() {
   pkgdesc='Headless build farm for Arch Linux packages (worker: builds jobs in clean devtools chroots)'
-  depends=(archci devtools rsync openssh gnupg)
+  depends=("archci=$pkgver-$pkgrel" devtools rsync openssh gnupg)
   optdepends=('btrfs-progs: snapshot-based clean chroots')
 
   _install_role worker archci-worker@.service archci-build@.service \
@@ -170,7 +170,7 @@ _package_qemu_arch() {
 # it from the text); the files come from _package_qemu_arch.
 package_archci-worker-qemu-aarch64() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: aarch64 instances on x86_64 under qemu user-mode emulation)'
-  depends=(archci-worker qemu-user-static qemu-user-static-binfmt)
+  depends=("archci-worker=$pkgver-$pkgrel" qemu-user-static qemu-user-static-binfmt)
   install=archci-worker-qemu-aarch64.install
   backup=(etc/binfmt.d/qemu-aarch64-static.conf etc/archci/aarch64/extra.conf)
   _package_qemu_arch aarch64
@@ -178,7 +178,7 @@ package_archci-worker-qemu-aarch64() {
 
 package_archci-worker-qemu-riscv64() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: riscv64 instances on x86_64 under qemu user-mode emulation)'
-  depends=(archci-worker qemu-user-static qemu-user-static-binfmt)
+  depends=("archci-worker=$pkgver-$pkgrel" qemu-user-static qemu-user-static-binfmt)
   install=archci-worker-qemu-riscv64.install
   backup=(etc/binfmt.d/qemu-riscv64-static.conf etc/archci/riscv64/extra.conf)
   _package_qemu_arch riscv64
@@ -186,7 +186,7 @@ package_archci-worker-qemu-riscv64() {
 
 package_archci-signer() {
   pkgdesc='Headless build farm for Arch Linux packages (signer: verify builder signatures, release-sign, publish)'
-  depends=(archci-cli rclone gnupg)
+  depends=("archci-cli=$pkgver-$pkgrel" rclone gnupg)
   backup=(etc/archci/release-gnupg/gpg-agent.conf)
 
   _install_role signer archci-sign.service archci-sign.timer \
