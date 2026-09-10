@@ -17,7 +17,8 @@ if ARGV[0] == '--waiting'
   exit
 end
 
-entry = Archci.outstanding(arch: ARGV[0], limit: 1).first
+# not a package whose dependency is being built or retried: that build would only fail first
+entry = Archci.outstanding(arch: ARGV[0]).find { |e| !e['expected'] }
 exit 0 unless entry
 
 puts entry.values_at('prio', 'repo', 'arch', 'pkgbase', 'version', 'commit', 'profile').join(' ')

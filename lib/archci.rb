@@ -215,6 +215,11 @@ module Archci
   # origin: Arch's core, then extra, then multilib, then the repository's
   # local packages, then those from the AUR; an arch's own packages before
   # the any packages; alphabetically last.
+  # An entry whose waited-for dependency has a job running or queued (a
+  # retry pending too) is 'expected': claim (archci-next) passes it over,
+  # since the build would only fail before the dependency lands; one whose
+  # dependency is merely unbuilt is claimed once nothing better is left,
+  # so a dependency cycle still gets its builds tried.
   # Nothing is stored; this is computed from the package index, built/ and the
   # queue on every call.
   #   arch:   only jobs a worker of this arch may build (its own, plus "any" if
@@ -297,8 +302,12 @@ module Archci
         # this arch (an any package's on the any arch): built after them
         waiting = p['deps'].filter_map { |d| by_pkgname[d] }.uniq
                            .reject { |b| b == p['pkgbase'] || dep_built[b, any ? any_arch : a] }
+        expected = waiting.any? do |b|
+          dep_arch = by_base[b]['arches'] == ['any'] ? 'any' : (any ? any_arch : a)
+          running[[repo, b, dep_arch]] || queued_commits[[repo, b, dep_arch]].include?(by_base[b]['commit'])
+        end
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
-                  'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting,
+                  'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting, 'expected' => expected,
                   'rank' => [also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
         (built ? updates : backlog) << entry
       end
