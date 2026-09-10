@@ -11,6 +11,12 @@
 # worker instance N found in the job file's worker= line.
 # To reproduce a build by hand:  archci-build /path/to/job /tmp/out manual
 set -euo pipefail
+# Everything runs inside main() so bash parses the whole file before it
+# starts: a build takes hours, and bash otherwise reads a script from disk
+# as it goes, so a file rewritten in place under a running build (a hand
+# copy; pacman renames, which is safe) ends it with a syntax error at the
+# end, after the packages were made.
+main() {
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 jobfile=${1:-} outdir=${2:-}
@@ -290,3 +296,5 @@ if (( rc == 0 )); then echo success; else echo failure; fi >"$outdir/result"
 echo "==> archci-build finished with $rc at $(archci_now): ${pkgs[*]##*/}"
 rm -rf "$srcdir"
 exit "$rc"
+}
+main "$@"
