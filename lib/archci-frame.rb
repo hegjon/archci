@@ -217,7 +217,7 @@ def frame(journal, snap = nil, hint: true)
   end
   out << ''
 
-  out << bold(format('%-8s %-19s %-7s %3s %4s %5s %5s %5s %5s  %-8s %-8s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', '%CPU', 'DISK', 'MEM', 'PEAK', 'PHASE', 'SOURCE', 'PACKAGE  | last output')[0, width])
+  out << bold(format('%-8s %-19s %-7s %3s %4s %5s %5s %5s %5s  %-8s %-8s %s', 'ELAPSED', 'WORKER', 'ARCH', 'ATT', 'HB', 'LOAD', 'DISK', 'MEM', 'PEAK', 'PHASE', 'SOURCE', 'PACKAGE  | last output')[0, width])
   # a MiB count in five characters: 458M up to 999M, then 1.2G, then 100G
   mem = lambda do |v|
     return '-' if v.nil?
@@ -243,7 +243,7 @@ def frame(journal, snap = nil, hint: true)
     phase, last = tails[unit_name(j)] || ['', '']
     phase = j['phase'] if j['phase']   # the worker's own word for it (heartbeat), when it sends one
     line = format('%-8s %-19s %-7s %3d %4s %5s %5s %5s %5s  %-8s %-8s %s %s', hms(since), short_worker(j['worker'])[0, 19], j['arch'], j['attempt'], hb,
-                  j['cpu'] ? (j['cpu'].to_f * 100).round.to_s : '-', j['build'] || '-', mem[j['rss']], mem[j['peak']],
+                  load[j['cpu']], j['build'] || '-', mem[j['rss']], mem[j['peak']],
                   phase.empty? ? '-' : phase[0, 8], (j['origin'] || '-')[0, 8], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
     out << line[0, width]
   end

@@ -14,7 +14,7 @@
 #            any of them sent, how many workers it runs and how many are busy,
 #            and the archci version the workers run
 #   jobs     one row per running job: elapsed, worker, attempt, heartbeat age,
-#            the job's %CPU (100 = one core), memory (current and peak) and build-tree
+#            the job's load (cores in use, like a load average), memory (current and peak) and build-tree
 #            size from its cgroup, the makepkg phase and the last output line
 #            (from the worker's journal streamed to ARCHCI_REMOTE_JOURNAL)
 #   failed   the newest failures
