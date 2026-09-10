@@ -1,7 +1,5 @@
 # archci
 
-[![CI](https://github.com/hegjon/archci/actions/workflows/ci.yml/badge.svg)](https://github.com/hegjon/archci/actions/workflows/ci.yml)
-
 A headless build farm for Arch Linux packages. One master watches a git
 repository of PKGBUILDs, by default
 [omarchy-pkgs](https://github.com/hegjon/omarchy-pkgs), for version changes,

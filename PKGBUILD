@@ -23,6 +23,7 @@ arch=(any)
 url='https://github.com/hegjon/archci'
 license=(MIT)
 makedepends=(gnupg devtools)
+checkdepends=(ruby git rsync openssh gnupg zstd shellcheck)
 source=("https://github.com/hegjon/archci/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=(SKIP)   # filled in by tools/release-pkgbuild
 _src="archci-$pkgver"
@@ -43,6 +44,13 @@ _install_role() {
     install -m644 "config/systemd/$f" "$pkgdir/usr/lib/systemd/system/$f"
   done
   install -Dm644 "config/systemd/archci-$role.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/archci-$role.conf"
+}
+
+# The test suite (test/run.sh) runs in check(): lint, the master's queue,
+# the signing chain, the worker, all on throwaway directories, no network.
+check() {
+  cd "$srcdir/$_src"
+  test/run.sh
 }
 
 package_archci() {

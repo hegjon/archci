@@ -67,7 +67,9 @@ All knobs are listed with their defaults in `config/archci.conf.example`
 (installed as `/usr/share/doc/archci/archci.conf.example`); set the ones you
 change in `/etc/archci/archci.conf`. Environment variables override the
 file, which is how the tests run without network or root. Run them with
-`test/run.sh` (add a name substring to filter, e.g. `test/run.sh lint`):
+`test/run.sh` (add a name substring to filter, e.g. `test/run.sh lint`);
+the PKGBUILD's `check()` runs the same suite, so a release that fails a
+test does not get built:
 
 - `test/lint-test.sh` — `bash -n` and `ruby -c` on every script, plus
   `shellcheck` when installed.
