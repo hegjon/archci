@@ -95,6 +95,9 @@ archci_load_conf
 # Skip check() when building another arch than the machine's (qemu user-mode
 # emulation), where test suites fail on the emulation more than on the package.
 : "${ARCHCI_EMULATED_NOCHECK:=1}"
+# Environment every build sees (VAR=value pairs, no spaces in a value),
+# written as a makepkg.conf drop-in into the clean chroot.
+: "${ARCHCI_BUILD_ENV:=CMAKE_POLICY_VERSION_MINIMUM=3.5}"
 # Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.

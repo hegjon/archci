@@ -15,26 +15,26 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# KEY=value lines, values without surrounding quotes
-sed -nE 's/^: "\$\{(ARCHCI_[A-Z0-9_]+):?=(.*)\}"$/\1=\2/p' "$root/lib/archci-common.sh" | sort >"$tmp/lib"
-sed -nE 's/^#?(ARCHCI_[A-Z0-9_]+)=(.*)$/\1=\2/p' "$root/config/archci.conf.example" | sed -E 's/=("(.*)"|'\''(.*)'\'')$/=\2\3/' | sort >"$tmp/example"
-ARCHCI_CONF=/dev/null ruby -e 'require "'"$root"'/lib/archci"; Archci::DEFAULTS.each { |k, v| puts "#{k}=#{v}" }' | sort >"$tmp/ruby"
+# KEY<tab>value lines (a value may hold '='), values without surrounding quotes
+sed -nE 's/^: "\$\{(ARCHCI_[A-Z0-9_]+):?=(.*)\}"$/\1\t\2/p' "$root/lib/archci-common.sh" | sort >"$tmp/lib"
+sed -nE 's/^#?(ARCHCI_[A-Z0-9_]+)=(.*)$/\1\t\2/p' "$root/config/archci.conf.example" | sed -E 's/\t("(.*)"|'\''(.*)'\'')$/\t\2\3/' | sort >"$tmp/example"
+ARCHCI_CONF=/dev/null ruby -e 'require "'"$root"'/lib/archci"; Archci::DEFAULTS.each { |k, v| puts "#{k}\t#{v}" }' | sort >"$tmp/ruby"
 (( $(wc -l <"$tmp/lib") > 20 )) || fail "could not read the library's defaults"
 
 echo "--- every setting is in the example, and the example names no other"
-only_lib=$(comm -23 <(cut -d= -f1 "$tmp/lib" | sort) <(cut -d= -f1 "$tmp/example" | sort))
-only_ex=$(comm -13 <(cut -d= -f1 "$tmp/lib" | sort) <(cut -d= -f1 "$tmp/example" | sort))
+only_lib=$(comm -23 <(cut -f1 "$tmp/lib" | sort) <(cut -f1 "$tmp/example" | sort))
+only_ex=$(comm -13 <(cut -f1 "$tmp/lib" | sort) <(cut -f1 "$tmp/example" | sort))
 [[ -z $only_lib ]] || fail "settings missing from config/archci.conf.example: $only_lib"
 [[ -z $only_ex ]] || fail "config/archci.conf.example names settings the library does not have: $only_ex"
 
 echo "--- the example shows the library's defaults"
-bad=$(join -t= -j1 "$tmp/lib" "$tmp/example" | awk -F= '$2 !~ /\$/ && $2 != $3 { print "  " $1 ": library " $2 " / example " $3 }')
+bad=$(join -t$'\t' -j1 "$tmp/lib" "$tmp/example" | awk -F'\t' '$2 !~ /\$/ && $2 != $3 { print "  " $1 ": library " $2 " / example " $3 }')
 [[ -z $bad ]] || fail "defaults differ:"$'\n'"$bad"
 
 echo "--- lib/archci.rb agrees with lib/archci-common.sh"
-only_rb=$(comm -13 <(cut -d= -f1 "$tmp/lib" | sort) <(cut -d= -f1 "$tmp/ruby" | sort))
+only_rb=$(comm -13 <(cut -f1 "$tmp/lib" | sort) <(cut -f1 "$tmp/ruby" | sort))
 [[ -z $only_rb ]] || fail "archci.rb has defaults the library does not: $only_rb"
-bad=$(join -t= -j1 "$tmp/lib" "$tmp/ruby" | awk -F= '$2 !~ /\$/ && $2 != $3 { print "  " $1 ": bash " $2 " / ruby " $3 }')
+bad=$(join -t$'\t' -j1 "$tmp/lib" "$tmp/ruby" | awk -F'\t' '$2 !~ /\$/ && $2 != $3 { print "  " $1 ": bash " $2 " / ruby " $3 }')
 [[ -z $bad ]] || fail "defaults differ:"$'\n'"$bad"
 
 echo "--- the heartbeat stat lists"

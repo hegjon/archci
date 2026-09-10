@@ -103,6 +103,11 @@ ARCHCI_KEYSERVERS="hkps://keys.openpgp.org hkps://keyserver.ubuntu.com"
 # under qemu user-mode emulation, where test suites trip over the emulation
 # (timing, signals, missing syscalls) more than over the package. 0 runs them.
 ARCHCI_EMULATED_NOCHECK=1
+# Environment every build runs with: VAR=value pairs separated by spaces (no
+# spaces inside a value), exported from a makepkg.conf drop-in archci-build
+# keeps in the clean chroot. The default lets CMake 4 configure the many
+# projects whose cmake_minimum_required is older than 3.5.
+ARCHCI_BUILD_ENV="CMAKE_POLICY_VERSION_MINIMUM=3.5"
 # On a port arch (anything but x86_64) also pass --ignorearch, since PKGBUILDs
 # carried from Arch declare arch=(x86_64) only. 0 to build just packages that
 # list the arch (read on the master too: such packages are then not offered).

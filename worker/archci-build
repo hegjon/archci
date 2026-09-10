@@ -91,9 +91,22 @@ prepare_root() {
 		touch "$chroot/root.updated"
 	fi
 }
+# The environment every build sees: ARCHCI_BUILD_ENV as a makepkg.conf
+# drop-in in the clean chroot, which each build copy inherits.
+build_env() {
+	local conf=$chroot/root/etc/makepkg.conf.d/archci.conf kv
+	if [[ -z $ARCHCI_BUILD_ENV ]]; then rm -f "$conf"; return; fi
+	{
+		echo "# written by archci-build from ARCHCI_BUILD_ENV"
+		for kv in $ARCHCI_BUILD_ENV; do printf "export %s='%s'\n" "${kv%%=*}" "${kv#*=}"; done
+	} >"$conf.new"
+	cmp -s "$conf.new" "$conf" 2>/dev/null || install -Dm644 "$conf.new" "$conf"
+	rm -f "$conf.new"
+}
 mkdir -p "$chroot"
 lock 9 "$chroot/root.lock" "Waiting for the clean chroot"
 prepare_root
+build_env
 lock_close 9
 
 # --- sources: the package directory of the PKGBUILD repository at exactly
