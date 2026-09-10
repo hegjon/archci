@@ -43,10 +43,10 @@ end
 # lines behind it), never through the journal as a whole. The phase comes
 # with the worker's heartbeat (archci_phase_filter), not from here.
 
-# dir nil: the caller names the file(s) itself (--file)
-def journal_entries(dir, *args)
+# args name the journal file(s) to read (--file) and select the entries
+def journal_entries(*args)
   t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  out, = Open3.capture2('journalctl', *(dir ? ['-D', dir] : []), '--no-pager', '-o', 'json',
+  out, = Open3.capture2('journalctl', '--no-pager', '-o', 'json',
                         '--output-fields=MESSAGE,_SYSTEMD_UNIT', *args, err: File::NULL)
   # ARCHCI_TOP_DEBUG=1: every journalctl call and what it cost, on stderr
   if ENV['ARCHCI_TOP_DEBUG']
@@ -141,7 +141,7 @@ class JournalFollow
       @seen[u] = true
       next if sel.empty?
 
-      l = journal_entries(nil, *sel, '-u', u, '-n', '1', '--reverse').first
+      l = journal_entries(*sel, '-u', u, '-n', '1', '--reverse').first
       @lock.synchronize { @last[u] ||= message_of(l) } if l
     end
     @lock.synchronize { jobs.to_h { |u, _| [u, @last[u].to_s] } }
@@ -155,13 +155,12 @@ end
 STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
-# journal: a JournalFollow for PHASE and the last output line, nil for
-# none; snap: a snapshot already taken; hint: the quit hint in the title
-# (not when the frame is printed once)
-def frame(journal, snap = nil, hint: true)
+# journal: a JournalFollow for the last output line, nil for none; hint: the
+# quit hint in the title (not when the frame is printed once)
+def frame(journal, hint: true)
   now = Time.now
   width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
-  snap ||= Archci.snapshot(now)
+  snap = Archci.snapshot(now)
   repo = snap['repo']
   counts = snap['queue']
   running = snap['running']

@@ -292,8 +292,7 @@ module Archci
   # Everything archci-top draws, computed once from the queue, the built
   # records and the package index.
   def self.snapshot(now = Time.now)
-    cfg = config
-    repo = cfg['ARCHCI_REPO']
+    repo = config['ARCHCI_REPO']
     counts = QUEUES.to_h { |q| [q, Dir.glob(File.join(queue(q), '*.job')).size] }
     # built and tracked are keyed like the built/ directories: "<repo>-<arch>"
     # per enabled arch, plus "<repo>-any" for the arch-independent packages.
@@ -304,16 +303,14 @@ module Archci
     updates = outstanding.count { |e| e['prio'] == 1 }
     by_name = packages.to_h { |p| [p['pkgbase'], p] }
     job = lambda do |j|
-      { 'id' => j['id'], 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
+      { 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
         'worker' => j['worker'], 'attempt' => j['attempt'], 'origin' => origin(by_name[j['pkgbase']]) }
     end
     running = jobs('running').sort_by { |j| j['claimed'].to_s }.map do |j|
-      job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i,
-                   'heartbeat_age_min' => ((now - j['mtime']) / 60).round, **j.slice(*HOST_STATS, *JOB_STATS))
+      job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i, **j.slice(*HOST_STATS, *JOB_STATS))
     end
     failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
-      job[j].merge('final' => j['final'] == '1', 'finished' => j['finished'],
-                   'log' => "logs/#{j['repo']}/#{j['pkgbase']}/#{j['version']}/#{j['arch']}/attempt-#{j['attempt']}.log")
+      job[j].merge('final' => j['final'] == '1', 'finished' => j['finished'])
     end
     # What archci-signer-status last saw of the signer through R2, if it runs.
     status = File.join(home, 'signer.status')
@@ -328,12 +325,8 @@ module Archci
       job[j].merge('finished' => j['finished'], 'heartbeat' => j['heartbeat'], **j.slice(*HOST_STATS))
     end
     {
-      'generated' => now.utc.iso8601,
-      'pkgbuilds' => { 'url' => cfg['ARCHCI_PKGBUILDS_URL'], 'branch' => cfg['ARCHCI_PKGBUILDS_BRANCH'],
-                       'packages' => pkgs.size },
       'repo' => repo,
       'arches' => arches,
-      'any_arch' => any_arch,
       'queue' => counts,
       'done_last_hour' => done_paths.count { |p| now - File.mtime(p) < 3600 },
       'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
@@ -342,8 +335,7 @@ module Archci
       'hosts' => hosts(running, recent, Dir.glob(File.join(home, 'hosts', '*')).filter_map { |p| read_job(p) }, now),
       'signer' => signer,
       'running' => running,
-      'failed' => failed,
-      'recent' => recent
+      'failed' => failed
     }
   end
 
