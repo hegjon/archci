@@ -44,8 +44,8 @@ then writes `/var/lib/archci/signer.status`. `archci top`
 shows it as
 
 ```
-unsigned: 2 pkg in staging (oldest 1m30s)
 signed  : x86_64 63 pkg  aarch64 87 pkg  riscv64 80 pkg
+unsigned: 2 pkg in staging (oldest 1m30s)
 ```
 
 A growing staging backlog with an ageing oldest package means the signer is
