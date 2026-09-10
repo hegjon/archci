@@ -101,6 +101,9 @@ archci_load_conf
 # Environment every build sees (VAR=value pairs, no spaces in a value),
 # written as a makepkg.conf drop-in into the clean chroot.
 : "${ARCHCI_BUILD_ENV:=CMAKE_POLICY_VERSION_MINIMUM=3.5}"
+# Versions of each package kept in the package caches the builds use (the
+# rest is deleted at the hourly chroot update); 0 keeps everything.
+: "${ARCHCI_CACHE_KEEP:=1}"
 # Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
@@ -164,6 +167,23 @@ archci_arch_conf() {
 		[[ -f $d/$2 ]] && { printf '%s\n' "$d/$2"; return 0; }
 	done
 	printf '%s\n' "$3"
+}
+
+# archci_prune_cache DIR KEEP -- delete all but the KEEP newest versions of
+# each package in the pacman cache DIR, with their signatures. A worker's
+# caches grow by a version of everything it builds against; nothing else
+# empties them. Versions are ordered as sort -V sees them.
+archci_prune_cache() {
+	local dir=$1 keep=$2 line
+	(( keep > 0 )) && [[ -d $dir ]] || return 0
+	# "<name>|<version>|<file>" per package file, newest version of a name first
+	find "$dir" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -printf '%f\n' |
+		sed -En 's/^(.+)-([^-]+)-([^-]+)-([^-]+)\.pkg\.tar\.[a-z0-9]+$/\1|\2-\3|&/p' |
+		sort -t'|' -k1,1 -k2,2rV |
+		awk -F'|' -v keep="$keep" '{ if (++n[$1] > keep) print $3 }' |
+	while IFS= read -r line; do
+		rm -f "$dir/$line" "$dir/$line.sig"
+	done
 }
 
 # archci_chroot_pacconf SRC DST REPO ARCH -- DST is the chroot pacman.conf SRC

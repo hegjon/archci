@@ -117,6 +117,11 @@ ARCHCI_EMULATED_NOCHECK=1
 # keeps in the clean chroot. The default lets CMake 4 configure the many
 # projects whose cmake_minimum_required is older than 3.5.
 ARCHCI_BUILD_ENV="CMAKE_POLICY_VERSION_MINIMUM=3.5"
+# How many versions of each package the package caches the builds use keep;
+# the rest is deleted at the hourly chroot update. A worker's caches grow by
+# a version of everything it builds against and nothing else empties them.
+# 0 keeps everything.
+ARCHCI_CACHE_KEEP=1
 # On a port arch (anything but x86_64) also pass --ignorearch, since PKGBUILDs
 # carried from Arch declare arch=(x86_64) only. 0 to build just packages that
 # list the arch (read on the master too: such packages are then not offered).

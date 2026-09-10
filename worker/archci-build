@@ -99,6 +99,17 @@ prepare_root() {
 		say "Updating chroot %s" "$chroot/root"
 		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm
 		touch "$chroot/root.updated"
+		# and thin the caches: this chroot's to ARCHCI_CACHE_KEEP versions, and
+		# the host's own, which builds no longer fill when the chroot has a
+		# cache of its own, to what the host has installed (pacman -Sc)
+		if (( ARCHCI_CACHE_KEEP > 0 )); then
+			archci_prune_cache "$cachedir" "$ARCHCI_CACHE_KEEP"
+			if ! pacman-conf CacheDir | grep -qx "$cachedir"; then
+				pacman -Sc --noconfirm >/dev/null 2>&1 || true
+			else
+				while IFS= read -r d; do archci_prune_cache "$d" "$ARCHCI_CACHE_KEEP"; done < <(pacman-conf CacheDir)
+			fi
+		fi
 	fi
 }
 # The environment every build sees: ARCHCI_BUILD_ENV as a makepkg.conf
