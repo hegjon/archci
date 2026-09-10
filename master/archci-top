@@ -34,8 +34,8 @@ ARGV.each_with_index do |a, i|
   end
 end
 
-# not a terminal: one frame, for scripts and the tests
-unless $stdout.tty?
+# not a terminal (a pipe, a file, the tests): one frame
+unless $stdout.tty? && $stdin.tty?
   puts frame(nil, hint: false)
   exit
 end
@@ -46,15 +46,14 @@ journal = dir && File.directory?(dir) ? JournalFollow.new(dir) : nil
 # Redraw every interval; between frames wait for a key. The terminal is put in
 # raw mode so a single q ends the program, which also turns Ctrl-C into a
 # plain character we treat the same way.
-tty = $stdin.tty?
 restore = lambda do
   journal&.stop
-  $stdin.cooked! if tty
+  $stdin.cooked!
   print "\e[?25h\n"
 end
 trap('INT') { restore.call; exit }
 trap('TERM') { restore.call; exit }
-$stdin.raw! if tty
+$stdin.raw!
 print "\e[?25l"
 # The first frame skips the journal so the screen comes up at once (a job's
 # first look costs a moment each); the journal columns fill in from the
@@ -67,11 +66,9 @@ loop do
   first = false
   print "\e[H\e[2J"
   puts lines.map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
-  if tty && IO.select([$stdin], nil, nil, wait)
-    key = $stdin.read_nonblock(1, exception: false)
-    break if key.is_a?(String) && (key.downcase == 'q' || key == "\e" || key == "\u0003")
-  elsif !tty
-    sleep wait
-  end
+  next unless IO.select([$stdin], nil, nil, wait)
+
+  key = $stdin.read_nonblock(1, exception: false)
+  break if key.is_a?(String) && (key.downcase == 'q' || key == "\e" || key == "\u0003")
 end
 restore.call

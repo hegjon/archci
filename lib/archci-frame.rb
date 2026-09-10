@@ -38,23 +38,9 @@ end
 # and the master has one CPU). It is read for one thing, each running job's
 # last output line: JournalFollow keeps one "journalctl -f" for the session,
 # read by a thread that remembers the newest line per build unit as it
-# arrives; a frame only renders. A job seen for the first time gets one look
-# of its own, backwards through the unit's index (a long build has 100k+
-# lines behind it), never through the journal as a whole. The phase comes
+# arrives; a frame only renders. A job that was already running when the
+# session began shows no line until it prints its next one. The phase comes
 # with the worker's heartbeat (archci_phase_filter), not from here.
-
-# args name the journal file(s) to read (--file) and select the entries
-def journal_entries(*args)
-  t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  out, = Open3.capture2('journalctl', '--no-pager', '-o', 'json',
-                        '--output-fields=MESSAGE,_SYSTEMD_UNIT', *args, err: File::NULL)
-  # ARCHCI_TOP_DEBUG=1: every journalctl call and what it cost, on stderr
-  if ENV['ARCHCI_TOP_DEBUG']
-    warn format('%6.2fs journalctl %s', Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, args.map { |a| a.to_s[0, 60] }.join(' ')[0, 200])
-  end
-  # journalctl writes UTF-8 whatever the locale (a unit's may be none: US-ASCII)
-  out.force_encoding(Encoding::UTF_8).each_line.filter_map { |l| parse_entry(l) }
-end
 
 def parse_entry(line)
   JSON.parse(line.scrub)
@@ -72,14 +58,13 @@ def message_of(entry)
   (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip
 end
 
-# One journalctl -f for the session; last(jobs) answers from what it has
-# streamed, after a first look at any job it has not seen.
+# One journalctl -f for the session; last(units) answers from what it has
+# streamed.
 class JournalFollow
   def initialize(dir)
     @dir = dir
     @lock = Mutex.new
     @last = {}
-    @seen = {}
     @pid = nil
     @reader = Thread.new { follow }
   end
@@ -94,6 +79,7 @@ class JournalFollow
         @pid = waiter.pid
         stdin.close
         out.each_line do |line|
+          # journalctl writes UTF-8 whatever the locale (a unit's may be none: US-ASCII)
           e = parse_entry(line.force_encoding(Encoding::UTF_8)) or next
           u = unit_of(e)
           next unless u.start_with?('archci-build@')
@@ -129,24 +115,9 @@ class JournalFollow
     kill_child
   end
 
-  # jobs: [[unit, claimed], ...] -> { unit => last line }
-  def last(jobs)
-    # first sight of a job: its last line so far, from the journal files
-    # written to since it was claimed, one entry backwards through the
-    # unit's index; what the stream has meanwhile is not overwritten
-    files = Dir.glob(File.join(@dir, '*.journal'))
-    jobs.reject { |u, _| @seen[u] }.each do |u, claimed|
-      since = claimed ? Time.iso8601(claimed) : Time.at(0)
-      sel = files.select { |f| File.mtime(f) >= since }.flat_map { |f| ['--file', f] }
-      @seen[u] = true
-      next if sel.empty?
-
-      l = journal_entries(*sel, '-u', u, '-n', '1', '--reverse').first
-      @lock.synchronize { @last[u] ||= message_of(l) } if l
-    end
-    @lock.synchronize { jobs.to_h { |u, _| [u, @last[u].to_s] } }
-  rescue StandardError
-    {}
+  # units -> { unit => last line streamed, '' for none yet }
+  def last(units)
+    @lock.synchronize { units.to_h { |u| [u, @last[u].to_s] } }
   end
 end
 
@@ -219,7 +190,7 @@ def frame(journal, hint: true)
   end
   # the last output line from the journal follower, '-' without one: the
   # first frame, or stdout not a terminal
-  lasts = journal ? journal.last(running.map { |j| [unit_name(j), j['claimed']] }) : {}
+  lasts = journal ? journal.last(running.map { |j| unit_name(j) }) : {}
   # by host, its native workers first, then per emulated arch, instance
   # numbers as numbers: host-1, host-3, host-aarch64-1, host-riscv64-2
   running.sort_by do |j|
