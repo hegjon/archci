@@ -58,8 +58,14 @@ chroot=$ARCHCI_CHROOTS/$profile-$arch
 pacconf=$(archci_arch_conf "$arch" "$profile.conf" /usr/share/devtools/pacman.conf.d/"$profile.conf")
 mkconf=$(archci_arch_conf "$arch" makepkg.conf /usr/share/devtools/makepkg.conf.d/"$arch.conf")
 [[ -f $pacconf ]] || archci_die "no pacman.conf for repo $job_repo on $arch ($pacconf)"
-# With the released repository's URL, the chroot resolves dependencies from
-# what the farm has built before the mirrors.
+# With the released repository's URL, a build's copy resolves dependencies
+# from what the farm has built before the mirrors. The root chroot itself is
+# made and upgraded from the mirrors only (mirrorconf): its pacman, gpg and
+# the rest stay the mirrors' own, so a library the farm built with an ABI
+# the mirrors' binaries were not built against (a port lags Arch) cannot
+# break the tools a build needs; the farm's packages enter a copy, as that
+# build's dependencies.
+mirrorconf=$pacconf
 if [[ -n $ARCHCI_RELEASE_URL ]]; then
 	archci_chroot_pacconf "$pacconf" "$ARCHCI_WORKER_HOME/chroot-conf/$job_repo-$profile-$arch.conf" "$job_repo" "$arch"
 	pacconf=$ARCHCI_WORKER_HOME/chroot-conf/$job_repo-$profile-$arch.conf
@@ -84,15 +90,22 @@ echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
 echo "    repo=$job_repo arch=$job_arch profile=$profile chroot=$chroot copy=$copy commit=$job_commit"
 echo "    pacman.conf=$pacconf makepkg.conf=$mkconf cache=$cachedir"
 
-# --- clean chroot: create once, refresh periodically, recreate on devtools bumps
+# --- clean chroot: create once, refresh periodically, recreate on devtools
+# bumps and when the root's policy changed (ROOT_POLICY, marked in the root)
+ROOT_POLICY=mirrors-only   # the root upgrades from the mirrors alone; the farm's repository is for the copies
+# upgrade the root from the mirrors, then give it the copies' pacman.conf
+# (the farm's repository first) with its databases synced: the copies
+# resolve dependencies from a fresh view, the root installs nothing from it
 update_root() {
-	arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm
+	arch-nspawn -C "$mirrorconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm &&
+		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Sy >/dev/null
 }
 prepare_root() {
-	local have=
+	local have='' policy=''
 	[[ -f $chroot/root/.arch-chroot ]] && have=$(<"$chroot/root/.arch-chroot")
-	if [[ ! -d $chroot/root || $have != "$CHROOT_VERSION" ]]; then
-		say "Creating chroot %s (version %s)" "$chroot/root" "$CHROOT_VERSION"
+	[[ -f $chroot/root/.archci-root ]] && policy=$(<"$chroot/root/.archci-root")
+	if [[ ! -d $chroot/root || $have != "$CHROOT_VERSION" || $policy != "$ROOT_POLICY" ]]; then
+		say "Creating chroot %s (version %s, %s)" "$chroot/root" "$CHROOT_VERSION" "$ROOT_POLICY"
 		local c
 		for c in "$chroot"/*/; do
 			[[ -d $c ]] || continue
@@ -101,7 +114,9 @@ prepare_root() {
 		done
 		rm -rf --one-file-system "$chroot"
 		(umask 0022; mkdir -p "$chroot")
-		mkarchroot -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" "${base_packages[@]}"
+		mkarchroot -C "$mirrorconf" -M "$mkconf" -c "$cachedir" "$chroot/root" "${base_packages[@]}"
+		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Sy >/dev/null
+		printf '%s\n' "$ROOT_POLICY" >"$chroot/root/.archci-root"
 		touch "$chroot/root.updated"
 	elif [[ -z $(find "$chroot/root.updated" -mmin -"$ARCHCI_CHROOT_UPDATE_MINUTES" 2>/dev/null) ]] ||
 	     ! cmp -s "$pacconf" "$chroot/root/etc/pacman.conf"; then
@@ -248,11 +263,10 @@ if [[ -n $ARCHCI_KEYSERVERS ]]; then
 		done
 	fi
 fi
-# -u: the copy syncs the databases and upgrades before the build, so a
-# dependency the farm released since the root's last update (up to
-# ARCHCI_CHROOT_UPDATE_MINUTES ago) is found, and no package the signer has
-# since pruned is asked for
-mcp_args=(-c -u -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
+# no -u: an upgrade in the copy would take the farm's packages wholesale,
+# and on a port those can break the copy's own tools (see mirrorconf); the
+# copy's databases are the root's, synced every ARCHCI_CHROOT_UPDATE_MINUTES
+mcp_args=(-c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
 # ARCHCI_MAKEPKG_ARGS is passed to makepkg after -- (default: none).
 extra_makepkg_args=()
 [[ -n $ARCHCI_MAKEPKG_ARGS ]] && read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"

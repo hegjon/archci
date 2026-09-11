@@ -52,7 +52,7 @@ archci_load_conf
 : "${ARCHCI_STALE_MINUTES:=30}"
 : "${ARCHCI_RETRY_MINUTES:=180}"
 : "${ARCHCI_RETRY_HOLD_MINUTES:=720}"
-: "${ARCHCI_RELEASE_LAG_MINUTES:=10}"
+: "${ARCHCI_RELEASE_LAG_MINUTES:=20}"
 # The sourcer (archci-sourcer): its state, the rclone path it keeps the
 # upstream tarballs (files/) and source packages (pkg/) at, packages fetched
 # per pass, the time one may take, how long a failed fetch waits before
@@ -125,7 +125,7 @@ archci_load_conf
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
 : "${ARCHCI_PACKAGER:=archci build farm <archci@localhost>}"
-: "${ARCHCI_CHROOT_UPDATE_MINUTES:=60}"
+: "${ARCHCI_CHROOT_UPDATE_MINUTES:=10}"
 # A build whose output stops for this long is killed (a stuck test suite);
 # 0 leaves only the unit's TimeoutStartSec. A fat-LTO link (mise, fish)
 # is silent for well over half an hour, so not too low.

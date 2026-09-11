@@ -48,7 +48,7 @@ ARCHCI_RETRY_HOLD_MINUTES=720
 # A dependency built this recently is taken as not yet released (the signer's
 # lag) and waited for, so its dependents are not claimed before the chroot
 # can install it.
-ARCHCI_RELEASE_LAG_MINUTES=10
+ARCHCI_RELEASE_LAG_MINUTES=20
 # The sourcer host fetches the outstanding packages' sources and keeps the
 # upstream tarballs and the source packages (<pkgbase>-<version>.src.tar.gz)
 # on this rclone path (a public R2 bucket): files/ and pkg/ under it. It
@@ -157,7 +157,7 @@ ARCHCI_CACHE_KEEP=1
 ARCHCI_IGNOREARCH=1
 # Stamped into every package (shown as Packager in pacman -Si). Use your identity.
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
-ARCHCI_CHROOT_UPDATE_MINUTES=60
+ARCHCI_CHROOT_UPDATE_MINUTES=10
 ARCHCI_IDLE_SLEEP=60
 # Between tries at delivering a finished build while the master is unreachable.
 ARCHCI_DELIVERY_RETRY_SECONDS=30
