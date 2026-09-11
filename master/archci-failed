@@ -34,8 +34,8 @@ MAX_ATTEMPTS = Archci.config['ARCHCI_MAX_ATTEMPTS'].to_i
 unless $stdout.tty? && $stdin.tty?
   failed_jobs.each do |j|
     lines, err = read_log(j['log'])
-    puts format('%-34s %-7s %-17s %d/%d %-7s %s: %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], j['worker'].to_s[0, 17],
-                j['attempt'], MAX_ATTEMPTS, j['final'] ? 'gave up' : 'retry', j['finished'], err ? lines[err].strip[0, 160] : '?')
+    puts format('%-34s %-7s %-8s %-17s %d/%d %-7s %s: %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], (j['origin'] || '-')[0, 8],
+                j['worker'].to_s[0, 17], j['attempt'], MAX_ATTEMPTS, j['final'] ? 'gave up' : 'retry', j['finished'], err ? lines[err].strip[0, 160] : '?')
   end
   exit
 end
@@ -88,12 +88,12 @@ frame = lambda do
   n = jobs.size
   list_rows = [[n, (rows * 0.4).to_i - 2].min, 3].max   # the list takes two fifths, the story the rest
   out << "#{bold('archci failed')}  #{n} failed#{dim('   (j/k pick, J/K scroll, e/E errors, l log, r retry, q quits)')}"
-  out << bold(format('%-34s %-7s %-17s %5s %-7s %s', 'PACKAGE', 'ARCH', 'WORKER', 'TRIES', '', 'FAILED AT'))
+  out << bold(format('%-34s %-7s %-8s %-17s %5s %-7s %s', 'PACKAGE', 'ARCH', 'SOURCE', 'WORKER', 'TRIES', '', 'FAILED AT'))
   list_top = selected if selected < list_top
   list_top = selected - list_rows + 1 if selected >= list_top + list_rows
   jobs[list_top, list_rows].to_a.each_with_index do |j, i|
-    line = format('%-34s %-7s %-17s %5s %-7s %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], j['worker'].to_s[0, 17],
-                  "#{j['attempt']}/#{MAX_ATTEMPTS}", j['final'] ? 'gave up' : 'retry', j['finished'])[0, cols]
+    line = format('%-34s %-7s %-8s %-17s %5s %-7s %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], (j['origin'] || '-')[0, 8],
+                  j['worker'].to_s[0, 17], "#{j['attempt']}/#{MAX_ATTEMPTS}", j['final'] ? 'gave up' : 'retry', j['finished'])[0, cols]
     out << (list_top + i == selected ? reverse(line.ljust(cols)) : line)
   end
   out << '(nothing failed)' if n.zero?
