@@ -58,10 +58,11 @@ head=$(git -C "$clone" rev-parse HEAD)
 index_current() { [[ -f $index && $(head -1 "$index") == "# $head v3" ]]; }
 
 # annotate PKGBUILD HASH LINE -- the line's fields as user.archci.* attributes
-# on the file, when it does not carry them for this hash yet
+# on the file, when it does not carry them for this hash yet (carries[] has
+# what the files carry, from one getfattr walk)
 annotate() {
 	local file=$1 hash=$2 f i
-	[[ $(getfattr --only-values -n user.archci.tree "$file" 2>/dev/null) == "$hash" ]] && return 0
+	[[ ${carries[$file]:-} == "$hash" ]] && return 0
 	read -ra f <<<"$3"
 	setfattr -n user.archci.tree -v "$hash" "$file" || archci_die "cannot set extended attributes on $file (is the clone on btrfs?)"
 	i=0
@@ -78,32 +79,39 @@ load_cache_file() {
 	while read -r hash line; do cached[$hash]=$line; done <"$cache"
 }
 # ... or from every PKGBUILD's user.archci.* attributes, one getfattr walk
-# over the clone (the line keyed by the tree hash the file carries)
-load_cache_xattr() {
-	local key value hash='' line
+# over the clone (the line keyed by the tree hash the file carries). Either
+# way the walk fills carries[] (file -> the tree hash its attributes are
+# for), so annotate knows what to leave alone; with all=1 it takes every
+# attribute and fills cached[] too.
+walk_xattrs() {
+	local all=$1 key value file='' hash=''
 	local -A a=()
+	flush() {
+		[[ -n $file && -n $hash ]] || return 0
+		carries[$file]=$hash
+		if (( all )) && [[ ${#a[@]} == 9 ]]; then
+			cached[$hash]="${a[version]} ${a[commit]} ${a[arch]} ${a[profile]} ${a[source]} ${a[build]} ${a[arch_repo]} ${a[pkgnames]} ${a[deps]}"
+		fi
+	}
 	while IFS= read -r key; do
 		case $key in
-			"# file: "*)   # the previous file's attributes, if complete, make a line
-				if [[ -n $hash && ${#a[@]} == 9 ]]; then
-					cached[$hash]="${a[version]} ${a[commit]} ${a[arch]} ${a[profile]} ${a[source]} ${a[build]} ${a[arch_repo]} ${a[pkgnames]} ${a[deps]}"
-				fi
-				hash=''; a=() ;;
+			"# file: "*) flush; file=${key#\# file: }; hash=''; a=() ;;
 			user.archci.tree=*) value=${key#*=}; hash=${value//\"/} ;;
 			user.archci.*=*) value=${key#*=}; key=${key%%=*}; a[${key#user.archci.}]=${value//\"/} ;;
 		esac
-	done < <(getfattr -R -d -m '^user\.archci\.' --absolute-names "$clone/$ARCHCI_PKGBUILDS_DIR" 2>/dev/null; echo "# file: end")
+	done < <(if (( all )); then getfattr -R -d -m '^user\.archci\.' --absolute-names "$clone/$ARCHCI_PKGBUILDS_DIR"
+	         else getfattr -R -n user.archci.tree --absolute-names "$clone/$ARCHCI_PKGBUILDS_DIR"; fi 2>/dev/null; echo "# file: ")
 }
 
 generate() {
 	local dir name version arches pkgnames deps commit source build profile mode type hash line newcache
 	local cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache t0 served=0 sourced=0
-	local -A cached=()
+	local -A cached=() carries=()
 	mkdir -p "$ARCHCI_CACHE_DIR"
 	t0=$EPOCHREALTIME
 	case $ARCHCI_INDEX_CACHE in
-		xattr) load_cache_xattr ;;
-		*) load_cache_file ;;
+		xattr) walk_xattrs 1 ;;
+		*) load_cache_file; walk_xattrs 0 ;;
 	esac
 	newcache=$(mktemp "$cache.XXXXXX")
 	printf '# %s v3\n' "$head"
