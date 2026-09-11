@@ -74,7 +74,10 @@ cachedir=$(pacman-conf --config "$pacconf" CacheDir | head -1)
 : "${cachedir:=/var/cache/pacman/pkg/}"
 mkdir -p "$cachedir"
 copy=archci-$instance
-srcdir=$ARCHCI_WORKER_HOME/build/$instance/$job_pkgbase
+# the sources by the arch this instance builds as well as its number: the
+# aarch64 and riscv64 instances 1 of one host both build a "guile" at times
+# (the chroot copy is per arch already: $chroot is)
+srcdir=$ARCHCI_WORKER_HOME/build/$ARCHCI_ARCH-$instance/$job_pkgbase
 printf '%s\n' "$chroot/$copy" >"${jobfile%/*}/copydir"   # for the worker's per-job heartbeat stats
 
 echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
