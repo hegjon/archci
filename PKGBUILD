@@ -75,11 +75,10 @@ _install_cli() {
 
 package_archci-master() {
   pkgdesc='Headless build farm for Arch Linux packages (master: sync the PKGBUILD repository, hand out jobs, stage results)'
-  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone attr)
+  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone attr btrfs-progs)
   # the release key is never on the master
   conflicts=(archci-signer)
-  optdepends=('btrfs-progs: btrfs subvolumes for the state directories'
-              'libmicrohttpd: receive worker journals with systemd-journal-remote')
+  optdepends=('libmicrohttpd: receive worker journals with systemd-journal-remote')
 
   _install_role master archci-scan.service archci-scan.timer \
     archci-housekeeping.service archci-housekeeping.timer archci-stage.service archci-stage.timer \
@@ -96,9 +95,8 @@ package_archci-master() {
 
 package_archci-worker() {
   pkgdesc='Headless build farm for Arch Linux packages (worker: builds jobs in clean devtools chroots)'
-  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg)
+  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg btrfs-progs)
   conflicts=(archci-sourcer)   # one role's /usr/bin/archci per host
-  optdepends=('btrfs-progs: snapshot-based clean chroots')
 
   _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service
   _install_cli worker

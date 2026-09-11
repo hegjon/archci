@@ -33,7 +33,8 @@
 # data is written onto the PKGBUILD file itself as extended attributes
 # (user.archci.tree, .version, .commit, .arch, .profile, .source, .build,
 # .arch_repo, .pkgnames, .deps; getfattr -d PKGBUILD shows them): a checkout
-# that changes the file drops them with the old inode. Nothing reads them yet.
+# that changes the file drops them with the old inode. Nothing reads them
+# yet. The clone is on btrfs (a requirement), which takes them.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -54,17 +55,15 @@ head=$(git -C "$clone" rev-parse HEAD)
 index_current() { [[ -f $index && $(head -1 "$index") == "# $head v3" ]]; }
 
 # annotate PKGBUILD HASH LINE -- the line's fields as user.archci.* attributes
-# on the file, when it does not carry them for this hash yet; best effort
-# (a filesystem without user attributes, no setfattr: silently none)
+# on the file, when it does not carry them for this hash yet
 annotate() {
 	local file=$1 hash=$2 f i
-	command -v setfattr >/dev/null || return 0
 	[[ $(getfattr --only-values -n user.archci.tree "$file" 2>/dev/null) == "$hash" ]] && return 0
 	read -ra f <<<"$3"
-	setfattr -n user.archci.tree -v "$hash" "$file" 2>/dev/null || return 0
+	setfattr -n user.archci.tree -v "$hash" "$file" || archci_die "cannot set extended attributes on $file (is the clone on btrfs?)"
 	i=0
 	for name in version commit arch profile source build arch_repo pkgnames deps; do
-		setfattr -n "user.archci.$name" -v "${f[i]:--}" "$file" 2>/dev/null || true
+		setfattr -n "user.archci.$name" -v "${f[i]:--}" "$file"
 		(( ++i ))
 	done
 }

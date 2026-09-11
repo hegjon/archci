@@ -17,11 +17,9 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 echo "--- the index caches each directory's line by its tree hash"
 cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
 [[ $(wc -l <"$cache") == 4 ]] || fail "one cache entry per package directory: $(cat "$cache")"
-# the same data on the PKGBUILD as extended attributes (where the filesystem takes them)
-if setfattr -n user.archci.probe -v 1 "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/.omarchy/package.json" 2>/dev/null; then
-	[[ $(getfattr --only-values -n user.archci.version "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>/dev/null) == "1:2.3.2-1" ]] || fail "the PKGBUILD must carry its version as user.archci.version: $(getfattr -d "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>&1)"
-	[[ $(getfattr --only-values -n user.archci.tree "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>/dev/null) == $(git -C "$ARCHCI_HOME/pkgbuilds" ls-tree HEAD:pkgbuilds | awk '$4 == "acl" { print $3 }') ]] || fail "user.archci.tree must be the directory's tree hash"
-fi
+# the same data on the PKGBUILD as extended attributes (btrfs, a requirement, takes them)
+[[ $(getfattr --only-values -n user.archci.version "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>/dev/null) == "1:2.3.2-1" ]] || fail "the PKGBUILD must carry its version as user.archci.version: $(getfattr -d "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>&1)"
+[[ $(getfattr --only-values -n user.archci.tree "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>/dev/null) == $(git -C "$ARCHCI_HOME/pkgbuilds" ls-tree HEAD:pkgbuilds | awk '$4 == "acl" { print $3 }') ]] || fail "user.archci.tree must be the directory's tree hash"
 # a line served from the cache is not re-read: doctor acl's entry, change another package, and see it used
 sed -i 's/^\([0-9a-f]* \)1:2.3.2-1 /\19:9-9 /' "$cache"
 mkpkgbuild linux 7.2.3.arch1-3

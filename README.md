@@ -340,7 +340,12 @@ claimed=2026-09-05T07:41:12Z
 
 ## Install
 
-All three roles (master, worker, signer) run on Arch or Omarchy machines and
+Every role runs on an Arch or Omarchy machine whose state directories are on
+btrfs: the master's `/var/lib/archci` (subvolumes for the pool and the
+uploads), a worker's `/var/lib/archbuild` (devtools' snapshot-based clean
+chroots), and the PKGBUILD clone, whose files carry the package index's
+data as extended attributes. That is a requirement, not an option; the
+packages depend on btrfs-progs. The roles
 are installed as pacman packages. `PKGBUILD` is a split package built from
 a tagged release (the farm builds and publishes it like any other package,
 see [docs/operating.md](docs/operating.md) "Releasing"), one package per
@@ -388,8 +393,8 @@ systemctl enable --now sshd archci-journal-remote    # workers come in over ssh;
 ```
 
 The package creates the `archci` user and the state directories under
-`/var/lib/archci`. Make `repo` and `incoming` there btrfs subvolumes if the
-filesystem allows. Then:
+`/var/lib/archci`, on btrfs. Make `repo` and `incoming` there subvolumes.
+Then:
 
 1. Create an R2 bucket and an API token that may write the `staging/` prefix,
    and write `/etc/archci/rclone.conf` (mode 600):
@@ -438,8 +443,8 @@ systemctl enable --now archci-worker@1
 `ARCHCI_MASTER` defaults to `archci@master`, so make sure `master` resolves
 to the master's address first. The first start runs
 `archci-worker-setup.service`: it generates `/etc/archci/worker_key` and the
-builder signing key, makes `/var/lib/archbuild` a btrfs subvolume when the
-filesystem allows, and logs the two public keys to authorize
+builder signing key, makes `/var/lib/archbuild` a btrfs subvolume, and logs
+the two public keys to authorize
 (`archci-logging-setup.service`, from archci-remote-logging, configures the
 journal streaming from `ARCHCI_JOURNAL_URL`):
 

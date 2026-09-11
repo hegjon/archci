@@ -5,7 +5,7 @@
 # Everything a package cannot ship as a file: the worker's ssh key and builder
 # signing key (generated once; their public halves are printed so they can be
 # authorized on the master and the signer), and the devtools chroot directory
-# as a btrfs subvolume when possible. (The journal streaming is
+# as a btrfs subvolume. (The journal streaming is
 # archci-logging-setup's, in archci-remote-logging.)
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
@@ -29,13 +29,11 @@ fi
 gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --armor \
 	--export "archci-builder@$host" >/etc/archci/builder_key.pub
 
-# chroots: a btrfs subvolume gives devtools snapshot-based clean chroots
+# chroots: a btrfs subvolume, for devtools' snapshot-based clean chroots
+# (btrfs is a requirement of every archci host)
 if [[ ! -e $ARCHCI_CHROOTS ]]; then
-	if [[ $(stat -f -c %T "$(dirname "$ARCHCI_CHROOTS")") == btrfs ]]; then
-		btrfs subvolume create "$ARCHCI_CHROOTS" >/dev/null
-	else
-		mkdir -p "$ARCHCI_CHROOTS"
-	fi
+	[[ $(stat -f -c %T "$(dirname "$ARCHCI_CHROOTS")") == btrfs ]] || archci_die "$(dirname "$ARCHCI_CHROOTS") is not on btrfs; archci requires it"
+	btrfs subvolume create "$ARCHCI_CHROOTS" >/dev/null
 fi
 
 cat <<MSG
