@@ -44,14 +44,22 @@ flowchart LR
   subgraph SIGNER["signer (holds release key)"]
     SIGN["archci-sign: verify buildsig, release-sign, repo-add"]
   end
+  subgraph SOURCER["sourcer (talks to upstream)"]
+    SRCR["archci-sourcer: makepkg --allsource"]
+  end
   subgraph R2["Cloudflare R2"]
     STG[("staging/ : unsigned pkgs + .buildsig")]
     REL[("release/ : signed pkgs + db")]
+    SRC[("sources/ : upstream files + src.tar.gz")]
   end
   PK -->|git pull| SCAN
   WL -->|ssh claim / report| JOB
   WL --> BUILD
-  PK -->|git archive at commit| BUILD
+  SRCR -->|ssh sources-needed / sources-ready| JOB
+  PK -->|git archive at commit| SRCR
+  UP["upstream sites"] --> SRCR --> SRC
+  SRC -->|src.tar.gz named by the claim| BUILD
+  PK -.->|git archive, without a source package| BUILD
   BUILD -->|rsync pkg + .buildsig| JOB
   JOB --> STAGE --> STG --> SIGN --> REL
   REL -->|"pacman, SigLevel=Required"| CLIENTS["clients"]
@@ -106,10 +114,15 @@ master's forced command (`archci-shell`) takes the first file in
 `queue/pending/` (manual enqueues and retries) the worker's arch can build,
 or else asks `archci next` for the next outstanding package and writes a job
 for it. The job goes to `running/` stamped with the worker name and attempt,
-and is printed. The worker then:
+and with the source package's name (`sources=`) when the sourcer has made one
+for the job's commit, and is printed. The worker then:
 
-1. exports `pkgbuilds/<name>/` from the PKGBUILD repository at exactly the
-   job's commit (`git archive` out of a bare mirror the worker keeps),
+1. takes the source package from the store (`ARCHCI_SOURCES_URL/pkg/`), the
+   PKGBUILD directory with every source in it, verified by the sourcer, and
+   builds with `--holdver` (VCS sources come as snapshots); or, with no
+   source package or no store configured, exports `pkgbuilds/<name>/` from
+   the PKGBUILD repository at exactly the job's commit (`git archive` out of
+   a bare mirror the worker keeps) and lets makepkg fetch upstream,
 2. starts `archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service`, a
    oneshot template unit, with a blocking `systemctl start`. The build has its
    own unit, cgroup and journal, runs at low CPU and I/O priority (`Nice=15`,
@@ -120,8 +133,13 @@ and is printed. The worker then:
    test suite otherwise holds the worker for the whole 12 h,
 3. inside that unit, builds with `makechrootpkg -c -l archci-N` in
    `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
-   btrfs subvolume and each build gets a fresh snapshot of it, refreshed with
-   `pacman -Syuu` at most once an hour. The chroot's `makepkg.conf` and
+   btrfs subvolume and each build gets a fresh snapshot of it. The root is
+   upgraded from the mirrors alone, every `ARCHCI_CHROOT_UPDATE_MINUTES`
+   (10), with the farm's repository first in the copies' `pacman.conf` and
+   its databases synced: a build's dependencies come from the farm, but
+   nothing of the farm's is installed into the root, whose tools a build
+   relies on (a port lags Arch, and a farm-built library can carry an ABI
+   the mirrors' binaries were not built against). The chroot's `makepkg.conf` and
    pacman `<profile>.conf` come from `/etc/archci/<arch>/`, then
    `arch/<arch>/` in the archci tree, then devtools; `ARCHCI_BUILD_ENV`
    adds a makepkg.conf drop-in with variables every build sees (by default
@@ -151,6 +169,20 @@ with the job for `archci top`. A job without a heartbeat for 30 minutes is
 put back in `pending/` by housekeeping (a 5-minute timer), so a worker can
 be destroyed at any time. On `systemctl stop` the worker reports
 `abandoned`, which requeues without counting an attempt.
+
+**Sourcer.** `archci-sourcer` (every 5 min, on the sourcer host) asks the
+master for the outstanding packages without a source package for their
+commit (`sources-needed`), takes `ARCHCI_SOURCER_BATCH` in claim order, and
+for each exports the PKGBUILD directory at the commit from its own mirror of
+the repository, fills `SRCDEST` from the upstream-file cache on R2
+(`files/`, by name), runs `makepkg --allsource` (every source of every arch
+downloaded, checksummed and signature-checked, packed as
+`<pkgbase>-<version>.src.tar.gz`), pushes new files to the cache and the
+source package to `pkg/`, and reports `sources-ready` or `sources-failed`;
+the master records it under `sources/<pkgbase>` and hands the name to the
+next claim. It is the one host that talks to upstream; a worker with
+`ARCHCI_SOURCES_URL` set fetches nothing else. `archci top` shows how many
+are packaged, still to fetch and failed.
 
 **Master.** The master holds no signing key and builds no database. On `report
 success` the packages and their builder signatures are pooled into
