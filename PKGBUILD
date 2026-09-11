@@ -97,6 +97,7 @@ package_archci-master() {
 package_archci-worker() {
   pkgdesc='Headless build farm for Arch Linux packages (worker: builds jobs in clean devtools chroots)'
   depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg)
+  conflicts=(archci-sourcer)   # one role's /usr/bin/archci per host
   optdepends=('btrfs-progs: snapshot-based clean chroots')
 
   _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service
@@ -149,6 +150,7 @@ package_archci-worker-qemu-riscv64() {
 package_archci-sourcer() {
   pkgdesc='Headless build farm for Arch Linux packages (sourcer: fetches upstream sources into source packages on R2 for the workers)'
   depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" git rclone gnupg openssh libarchive debugedit)
+  conflicts=(archci-worker)   # one role's /usr/bin/archci per host
 
   _install_role sourcer archci-sourcer.service archci-sourcer.timer
   _install_cli sourcer
