@@ -44,7 +44,7 @@ as_user() { runuser -u "$user" -- env HOME="$home" GNUPGHOME="$gnupghome" "$@"; 
 ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
 	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
 	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
-master() { ssh "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }
+master() { ssh -n "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }   # -n: never the pass's list on stdin
 
 # --- the PKGBUILD repository: one bare mirror, the directory exported at the commit
 export_pkgbuild() {   # export_pkgbuild PKGBASE COMMIT DIR
