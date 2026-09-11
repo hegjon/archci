@@ -122,19 +122,12 @@ package_archci-worker() {
   done
 }
 
-# _package_qemu_arch ARCH -> archci-worker-ARCH@.service (the worker template
-# with the arch argument), binfmt, setarch alias, the port's pacman.conf and
-# its keyring archci-ports-ARCH from arch/ARCH/qemu/
+# _package_qemu_arch ARCH -> archci-worker-ARCH@.service, binfmt, setarch alias,
+# the port's pacman.conf and its keyring archci-ports-ARCH from arch/ARCH/qemu/
 _package_qemu_arch() {
   local a=$1
   cd "$srcdir/$_src"
-  install -d "$pkgdir/usr/lib/systemd/system"
-  sed -e "s/^Description=archci build worker %i\$/Description=archci build worker %i ($a)/" \
-      -e "s#^ExecStart=/usr/lib/archci/worker/archci-worker %i\$#ExecStart=/usr/lib/archci/worker/archci-worker %i $a#" \
-      -e "1i # A worker instance building $a: natively on a $a machine, under qemu\n# user-mode emulation on another (archci-worker-qemu-$a). Runs alongside\n# archci-worker@ instances of the machine's own arch; known to the master as\n# <host>-$a-N." \
-      config/systemd/archci-worker@.service >"$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service"
-  grep -q "^ExecStart=/usr/lib/archci/worker/archci-worker %i $a\$" "$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service" ||
-    { echo "could not derive archci-worker-$a@.service from the worker template" >&2; return 1; }
+  install -Dm644 "config/systemd/archci-worker-$a@.service" "$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service"
   cd "arch/$a/qemu"
   install -Dm644 "binfmt.d/qemu-$a-static.conf" "$pkgdir/etc/binfmt.d/qemu-$a-static.conf"
   install -Dm644 "setarch-aliases.d/$a" "$pkgdir/usr/share/devtools/setarch-aliases.d/$a"
