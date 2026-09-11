@@ -274,10 +274,14 @@ build_once
 # file (--noconfirm) but fails the install; the second try fetches the right one.
 # A file the release no longer has (the signer pruned the version the
 # database still named when the copy synced) is the same kind of moment.
-if (( rc )) && grep -Eq "invalid or corrupted package|failed retrieving file" "$outdir/makechrootpkg.log"; then
+# pacman drops only the bad files of the one transaction it gave up on, so
+# a cache with several stale names takes a try per round: three at most.
+tries=1
+while (( rc && tries < 3 )) && grep -Eq "invalid or corrupted package|failed retrieving file" "$outdir/makechrootpkg.log"; do
 	echo "==> a package failed its checksum or was gone from the release (a mirror's copy of a name the farm now builds, or a version the signer just replaced); building again"
+	(( ++tries ))
 	build_once
-fi
+done
 if (( rc == 124 )); then
 	# the container's own processes live in a scope of their own; make sure none survive
 	pkill -KILL -f -- "--directory=$chroot/$copy" 2>/dev/null || true
