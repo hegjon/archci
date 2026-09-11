@@ -7,7 +7,7 @@
 # one directory per package under ARCHCI_PKGBUILDS_DIR; its PKGBUILD version is
 # the release list. Nothing is queued here: archci-job claim asks archci-next
 # for the next package just in time, comparing the package index
-# (archci-pkgs) with built/<repo>-<arch>/<name>.
+# (archci-pkgindex) with built/<repo>-<arch>/<name>.
 require_relative '../lib/archci'
 
 cfg = Archci.config

@@ -56,7 +56,7 @@ _archci() {
 				requeue) mapfile -t COMPREPLY < <(compgen -W "$(_archci_jobs running failed)" -- "$cur") ;;
 				report)  (( COMP_CWORD == 3 )) && mapfile -t COMPREPLY < <(compgen -W "$(_archci_jobs running)" -- "$cur")
 				         (( COMP_CWORD == 4 )) && mapfile -t COMPREPLY < <(compgen -W 'success failure abandoned' -- "$cur") ;;
-				enqueue) (( COMP_CWORD == 3 )) && mapfile -t COMPREPLY < <(compgen -W "$(archci pkgs 2>/dev/null | awk '{ print $1 }')" -- "$cur")
+				enqueue) (( COMP_CWORD == 3 )) && mapfile -t COMPREPLY < <(compgen -W "$(archci pkgindex 2>/dev/null | awk '{ print $1 }')" -- "$cur")
 				         (( COMP_CWORD == 5 )) && mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches) any" -- "$cur") ;;
 			esac
 			;;
@@ -64,7 +64,7 @@ _archci() {
 		sign)     mapfile -t COMPREPLY < <(compgen -W '--unlock' -- "$cur") ;;
 		stage)    mapfile -t COMPREPLY < <(compgen -W '--force' -- "$cur") ;;
 		next)     mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches)" -- "$cur") ;;
-		pkgs)     mapfile -t COMPREPLY < <(compgen -W "$(archci pkgs 2>/dev/null | awk '{ print $1 }')" -- "$cur") ;;
+		pkgindex) mapfile -t COMPREPLY < <(compgen -W "$(archci pkgindex 2>/dev/null | awk '{ print $1 }')" -- "$cur") ;;
 		authorize)
 			if [[ $cur == -* ]]; then mapfile -t COMPREPLY < <(compgen -W '--revoke' -- "$cur")
 			else mapfile -t COMPREPLY < <(compgen -f -- "$cur"); fi

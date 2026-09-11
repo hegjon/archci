@@ -69,7 +69,7 @@ flowchart LR
 
 **Scanning.** `archci-scan` (ruby, every 10 min) pulls the PKGBUILD
 repository (`ARCHCI_PKGBUILDS_URL`, branch `ARCHCI_PKGBUILDS_BRANCH`) into
-`pkgbuilds/` and refreshes the package index. `archci-pkgs` builds that index
+`pkgbuilds/` and refreshes the package index. `archci-pkgindex` builds that index
 from every `pkgbuilds/<name>/` holding a PKGBUILD and `.omarchy/package.json`:
 the version the PKGBUILD declares (read the way makepkg does, by sourcing it
 at file scope with `CARCH` set), the last commit that touched the directory,
@@ -278,7 +278,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 bin/      archci-master, archci-signer, archci-sourcer, archci-worker: the role's command line, installed as /usr/bin/archci; `archci <name>` runs archci-<name> of the role (a worker's: version only)
 tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh, archci-queue.sh (bash), archci.rb (ruby): config, the job queue, paths
-master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top, archci-failed
+master/   archci-scan, archci-pkgindex, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top, archci-failed
           archci-housekeeping: the queue's timer pass, run by its timer, not a command
 worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
@@ -304,7 +304,7 @@ one package per role (see Install).
 
 ```
 pkgbuilds/                  clone of the PKGBUILD repository (ARCHCI_PKGBUILDS_BRANCH)
-pkgbuilds.index             package index over it, keyed by the clone's HEAD (archci-pkgs)
+pkgbuilds.index             package index over it, keyed by the clone's HEAD (archci-pkgindex)
 sources/<pkgbase>           what the sourcer reported: the commit, then file=<src.tar.gz> or error=<why>
 queue/{pending,running,done,failed}/<jobid>.job
 built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any

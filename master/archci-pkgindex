@@ -1,5 +1,5 @@
 #!/bin/bash
-# archci-pkgs [NAME...] -- list the packages in the PKGBUILD repository clone.
+# archci-pkgindex [NAME...] -- list the packages in the PKGBUILD repository clone.
 #
 # One line per directory under <clone>/$ARCHCI_PKGBUILDS_DIR holding a PKGBUILD
 # and .omarchy/package.json (the omarchy-pkgs layout):

@@ -55,7 +55,7 @@ archci_load_conf
 : "${ARCHCI_RELEASE_LAG_MINUTES:=20}"
 # where the master keeps what it can rebuild (the index cache)
 : "${ARCHCI_CACHE_DIR:=/var/cache/archci}"
-# where archci-pkgs reads a directory's cached index line from: the cache file
+# where archci-pkgindex reads a directory's cached index line from: the cache file
 # (file) or the PKGBUILD's extended attributes (xattr); both are written
 : "${ARCHCI_INDEX_CACHE:=file}"
 # The sourcer (archci-sourcer): its state, the rclone path it keeps the
@@ -447,7 +447,7 @@ archci_pool() {
 
 # devtools build profile (name of pacman.conf.d/<profile>.conf) for a package:
 # multilib packages need the multilib one, everything else builds with extra
-# (Arch builds core with it too). archci-pkgs decides per package from
+# (Arch builds core with it too). archci-pkgindex decides per package from
 # .omarchy/package.json arch_repo and a lib32- prefix; this is the fallback
 # for a job file without a profile, keyed by its repo name.
 archci_profile() {

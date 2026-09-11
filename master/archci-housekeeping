@@ -20,7 +20,7 @@ now=$(date +%s)
 declare -A current=()
 while read -r name _ c _; do
 	[[ -n $c ]] && current[$name]=$c
-done < <("$ARCHCI_MASTER_DIR/archci-pkgs" 2>/dev/null || true)
+done < <("$ARCHCI_MASTER_DIR/archci-pkgindex" 2>/dev/null || true)
 lock_queue
 shopt -s nullglob
 for file in "$Q_RUNNING"/*.job; do

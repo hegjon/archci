@@ -245,7 +245,7 @@ cmd_enqueue() {
 	local pkgbase=$1 prio=${2:-0} arch=${3:-$ARCHCI_ARCH} repo=$ARCHCI_REPO line name version commit parch profile old
 	archci_valid_arch "$arch" || archci_die "invalid arch: $arch"
 	[[ $arch == any ]] || archci_enabled_arch "$arch" || archci_die "arch $arch is not enabled (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
-	line=$("$ARCHCI_MASTER_DIR/archci-pkgs" "$pkgbase")
+	line=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase")
 	[[ -n $line ]] || archci_die "no package $pkgbase in the PKGBUILD repository (run archci-scan first?)"
 	read -r name version commit parch profile _ <<<"$line"
 	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected index line: $line"

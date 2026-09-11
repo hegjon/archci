@@ -181,14 +181,14 @@ module Archci
     out.split.to_h { |kv| kv.split('=', 2) }.slice(*HOST_STATS)
   end
 
-  # The packages in the PKGBUILD repository clone, from archci-pkgs (which
+  # The packages in the PKGBUILD repository clone, from archci-pkgindex (which
   # caches them per clone HEAD): name (the job's pkgbase), version, commit,
   # arches, profile, source and whether package.json skips the build. Empty
   # when the clone does not exist yet (archci-scan creates it).
   def self.packages(refresh: false)
     @packages = nil if refresh
     @packages ||= begin
-      out, status = Open3.capture2(File.join(ROOT, 'master', 'archci-pkgs'))
+      out, status = Open3.capture2(File.join(ROOT, 'master', 'archci-pkgindex'))
       if status.success?
         out.lines.filter_map do |line|
           name, version, commit, arch, profile, source, build, arch_repo, pkgnames, deps = line.split

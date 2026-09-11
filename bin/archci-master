@@ -13,7 +13,7 @@ commands=(
 	"authorize let a worker key talk to this master, or stop it"
 	"job the queue: enqueue, retry, requeue, report (runs as the archci user)"
 	"next the next package a worker of ARCH would build"
-	"pkgs the packages in the PKGBUILD repository clone"
+	"pkgindex the packages in the PKGBUILD repository clone: the index (a package name for its line)"
 	"scan sync the PKGBUILD repository and report what is outstanding"
 	"signer-status what the master can see of the signer, through R2"
 	"stage push pooled (unsigned) packages to the R2 staging area"
