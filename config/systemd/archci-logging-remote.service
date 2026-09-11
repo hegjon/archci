@@ -1,6 +1,6 @@
 # Remote logging for a worker outside the master's private network: hold an
 # ssh tunnel to the master's journal-remote port so systemd-journal-upload can
-# stream this worker's journal to http://127.0.0.1:19532 (ARCHCI_JOURNAL_URL).
+# stream this worker's journal to http://127.0.0.1:19533 (ARCHCI_JOURNAL_URL).
 # Uses the worker key; the master allows that key to forward to this one port
 # and nothing else (archci-authorize, sshd_config.d/60-archci.conf). With -N no
 # session is opened, so the key's forced command never runs.
@@ -20,10 +20,10 @@ ExecStart=/usr/bin/ssh -N -i ${ARCHCI_WORKER_KEY} \
     -o BatchMode=yes -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
     -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts \
-    -L 127.0.0.1:19532:127.0.0.1:19532 ${ARCHCI_MASTER}
+    -L 127.0.0.1:19533:127.0.0.1:19533 ${ARCHCI_MASTER}
 # The unit counts as started once the forward listens, so units ordered
 # After= it (systemd-journal-upload) find the port open.
-ExecStartPost=/bin/sh -c 'for i in $(seq 100); do ss -ltn | grep -q "127.0.0.1:19532 " && exit 0; sleep 0.2; done; exit 1'
+ExecStartPost=/bin/sh -c 'for i in $(seq 100); do ss -ltn | grep -q "127.0.0.1:19533 " && exit 0; sleep 0.2; done; exit 1'
 Restart=always
 RestartSec=15
 LogNamespace=archci

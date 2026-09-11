@@ -62,7 +62,7 @@ if [[ ! -e $akf && -f $old ]]; then
 	archci_log "moved the keys from $old to $akf"
 fi
 [[ -e $akf ]] || : >"$akf"
-line=$(printf 'command="%s",restrict,port-forwarding,permitopen="127.0.0.1:19532" %s' "$ARCHCI_MASTER_DIR/archci-shell" "$key")
+line=$(printf 'command="%s",restrict,port-forwarding,permitopen="127.0.0.1:19533" %s' "$ARCHCI_MASTER_DIR/archci-shell" "$key")
 if grep -qxF "$line" "$akf"; then
 	archci_log "key already authorized"
 elif grep -qF "${BASH_REMATCH[0]}" "$akf"; then

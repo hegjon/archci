@@ -92,7 +92,7 @@ archci_load_conf
 # Empty (set to "" in the config) disables journal streaming; hence = not :=.
 # Journal streaming target: the master's journal-remote port through the ssh
 # tunnel of archci-logging-remote.service (the master listens on loopback only).
-: "${ARCHCI_JOURNAL_URL=http://127.0.0.1:19532}"
+: "${ARCHCI_JOURNAL_URL=http://127.0.0.1:19533}"
 : "${ARCHCI_WORKER_KEY:=/etc/archci/worker_key}"
 : "${ARCHCI_WORKER_HOME:=/var/lib/archci-worker}"
 : "${ARCHCI_BUILD_USER:=archci}"

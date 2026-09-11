@@ -98,7 +98,7 @@ ARCHCI_MASTER="archci@master"
 # worker key (archci-logging-remote.service, started with the worker); the
 # master listens for journals on loopback only, so this works from anywhere
 # the worker can ssh to the master. "" keeps the journal local.
-ARCHCI_JOURNAL_URL=http://127.0.0.1:19532
+ARCHCI_JOURNAL_URL=http://127.0.0.1:19533
 ARCHCI_WORKER_KEY=/etc/archci/worker_key
 ARCHCI_WORKER_HOME=/var/lib/archci-worker
 # Unprivileged local user makepkg runs as inside the chroot.
