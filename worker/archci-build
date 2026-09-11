@@ -196,6 +196,9 @@ if [[ -n ${job_sources:-} && -n $ARCHCI_SOURCES_URL ]]; then
 	bsdtar -xf "$srcdir.src.tar.gz" --strip-components=1 -C "$srcdir" || archci_die "$job_sources does not unpack"
 	rm -f "$srcdir.src.tar.gz"
 	[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $job_sources"
+	# the build user's: git refuses a clone (a VCS source's snapshot) owned by
+	# anyone else
+	chown -R "$ARCHCI_BUILD_USER" "$srcdir"
 	chmod -R a+rX "$srcdir"
 	from_srcpkg=1
 fi
@@ -232,7 +235,11 @@ fi
 mkdir -p "$outdir" "$ARCHCI_WORKER_HOME/srcdest"
 chown "$ARCHCI_BUILD_USER" "$ARCHCI_WORKER_HOME/srcdest" "$outdir"
 export PKGDEST=$outdir LOGDEST=$outdir SRCPKGDEST=$outdir
+# the sources: the worker's own cache, or the source package's directory
+# itself, so makepkg takes its files and VCS snapshots and nothing older
+# from the cache
 export SRCDEST=$ARCHCI_WORKER_HOME/srcdest
+(( from_srcpkg )) && export SRCDEST=$srcdir
 # the commit's time, from the mirror; from a source package, the job's creation
 if (( from_srcpkg )); then SOURCE_DATE_EPOCH=$(date -d "${job_created:-now}" +%s)
 else SOURCE_DATE_EPOCH=$(git -C "$mirror" log -1 --format=%ct "$job_commit")
