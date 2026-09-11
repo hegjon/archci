@@ -1,0 +1,171 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# archci-failed -- the failed builds, newest first, and each one's story. On
+# a terminal the window is split: the list above, the failure picked below
+# (the job, when its retry is due or what holds it, and its log opened at the
+# first error). Into a pipe: one line per failure, with the first error line
+# of its log.
+#   up/down, j/k     pick a failure          PgUp/PgDn, K/J  scroll the log
+#   e/E              next/previous error     g/G             top/bottom of the log
+#   l                the log in $PAGER       r               retry it (a fresh first attempt)
+#   q, Esc           quit
+require_relative '../lib/archci'
+require 'io/console'
+require 'open3'
+
+# a line that names the failure; the second set names one without being it
+ERROR_RE = /error:|ERROR|FAILED|Unmet dependencies|target not found|Failure while downloading|did not pass the validity|returned error: 4\d\d/
+NOT_ERROR_RE = /gpg:|Verifying|Build failed, check|makechrootpkg exited|archci-build finished|-Werror|ERRORFUNC|_error|error_/
+
+def error_line?(line) = line.match?(ERROR_RE) && !line.match?(NOT_ERROR_RE)
+
+# the log's lines (none without one) and the index of its first error
+def read_log(path)
+  lines = File.exist?(path) ? File.read(path).scrub.lines(chomp: true) : []
+  [lines, lines.index { |l| error_line?(l) }]
+end
+
+def failed_jobs = Archci.snapshot['failed']
+
+MAX_ATTEMPTS = Archci.config['ARCHCI_MAX_ATTEMPTS'].to_i
+
+# ---- into a pipe: the list, with the first error line ----
+unless $stdout.tty? && $stdin.tty?
+  failed_jobs.each do |j|
+    lines, err = read_log(j['log'])
+    puts format('%-34s %-7s %-17s %d/%d %-7s %s: %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], j['worker'].to_s[0, 17],
+                j['attempt'], MAX_ATTEMPTS, j['final'] ? 'gave up' : 'retry', j['finished'], err ? lines[err].strip[0, 160] : '?')
+  end
+  exit
+end
+
+# ---- the two-pane view ----
+def reverse(s) = "\e[7m#{s}\e[0m"
+def bold(s) = "\e[1m#{s}\e[0m"
+def dim(s) = "\e[2m#{s}\e[0m"
+
+jobs = failed_jobs
+selected = 0     # index into jobs
+list_top = 0     # the first list row shown
+log_lines = []
+log_at = nil     # the first log line shown
+log_of = nil     # the job id the log is loaded for
+log_mtime = nil
+message = nil    # a status line, until the next key
+
+# the selected job's log, loaded when the selection or the file changed
+load_log = lambda do
+  j = jobs[selected] or return
+  mtime = File.exist?(j['log']) ? File.mtime(j['log']) : nil
+  return if log_of == j['id'] && log_mtime == mtime
+
+  log_lines, err = read_log(j['log'])
+  log_at = err ? [err - 3, 0].max : [log_lines.size - 1, 0].max
+  log_of = j['id']
+  log_mtime = mtime
+end
+
+# the story of the selected job: what happened, what comes next
+story = lambda do |j|
+  s = "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{MAX_ATTEMPTS}"
+  return "#{s}: gave up" if j['final']
+
+  due = begin
+    (Time.iso8601(j['finished']) + Archci.config['ARCHCI_RETRY_MINUTES'].to_i * 60).utc.strftime('%FT%TZ')
+  rescue ArgumentError, TypeError
+    '?'
+  end
+  waiting = Archci.waiting_for(j['pkgbase'], j['arch'])
+  "#{s}; retry due #{due}#{waiting.empty? ? '' : ", held for #{waiting.join(' ')}"}"
+end
+
+frame = lambda do
+  rows, cols = $stdout.winsize
+  cols = 120 if cols.to_i <= 0
+  rows = 40 if rows.to_i <= 0
+  out = []
+  n = jobs.size
+  list_rows = [[n, (rows * 0.4).to_i - 2].min, 3].max   # the list takes two fifths, the story the rest
+  out << "#{bold('archci failed')}  #{n} failed#{dim('   (j/k pick, J/K scroll, e/E errors, l log, r retry, q quits)')}"
+  out << bold(format('%-34s %-7s %-17s %5s %-7s %s', 'PACKAGE', 'ARCH', 'WORKER', 'TRIES', '', 'FAILED AT'))
+  list_top = selected if selected < list_top
+  list_top = selected - list_rows + 1 if selected >= list_top + list_rows
+  jobs[list_top, list_rows].to_a.each_with_index do |j, i|
+    line = format('%-34s %-7s %-17s %5s %-7s %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], j['worker'].to_s[0, 17],
+                  "#{j['attempt']}/#{MAX_ATTEMPTS}", j['final'] ? 'gave up' : 'retry', j['finished'])[0, cols]
+    out << (list_top + i == selected ? reverse(line.ljust(cols)) : line)
+  end
+  out << '(nothing failed)' if n.zero?
+  out << ''
+  if (j = jobs[selected])
+    load_log.call
+    out << "#{bold("#{j['pkgbase']} #{j['version']}")}  #{j['arch']}, from #{j['origin'] || '-'}   job #{j['id']}"
+    out << story[j][0, cols]
+    out << (message ? bold(message) : dim("log #{j['log']}#{log_lines.empty? ? ' (none)' : " (#{log_lines.size} lines)"}"))
+    body = rows - out.size - 1
+    log_lines[log_at.to_i, body].to_a.each do |l|
+      l = l[0, cols]
+      out << (error_line?(l) ? bold(l) : l)
+    end
+  end
+  print "\e[H", out.first(rows - 1).map { |l| "#{l}\e[K\r\n" }.join, "\e[J"
+end
+
+# the log index to show for the next/previous error from the line shown
+next_error = lambda do |from|
+  i = log_lines.each_index.find { |k| k > from && error_line?(log_lines[k]) }
+  i ? [i - 3, 0].max : log_at
+end
+prev_error = lambda do |from|
+  i = log_lines.each_index.reverse_each.find { |k| k < from && error_line?(log_lines[k]) }
+  i ? [i - 3, 0].max : log_at
+end
+
+restore = -> { $stdin.cooked!; print "\e[?25h\e[H\e[J" }
+trap('INT') { restore.call; exit }
+trap('TERM') { restore.call; exit }
+$stdin.raw!
+print "\e[?25l"
+loop do
+  frame.call
+  key = IO.select([$stdin], nil, nil, 5) ? $stdin.read_nonblock(16, exception: false) : nil
+  if key.nil?   # the interval passed: the queue may have changed
+    keep = jobs[selected]&.dig('id')
+    jobs = failed_jobs
+    selected = [jobs.index { |j| j['id'] == keep } || selected, [jobs.size - 1, 0].max].min
+    next
+  end
+  next unless key.is_a?(String)
+
+  message = nil
+  page = ($stdout.winsize[0] * 0.5).to_i
+  last = [log_lines.size - 1, 0].max
+  case key
+  when 'q', "\e", "\u0003" then break
+  when 'j', "\e[B" then selected = [selected + 1, [jobs.size - 1, 0].max].min
+  when 'k', "\e[A" then selected = [selected - 1, 0].max
+  when 'J', "\e[6~" then log_at = [log_at.to_i + page, last].min
+  when 'K', "\e[5~" then log_at = [log_at.to_i - page, 0].max
+  when 'g' then log_at = 0
+  when 'G' then log_at = [log_lines.size - page, 0].max
+  when 'e' then log_at = next_error[log_at.to_i + 3]
+  when 'E' then log_at = prev_error[log_at.to_i + 3]
+  when 'l'
+    if (j = jobs[selected]) && File.exist?(j['log'])
+      $stdin.cooked!
+      print "\e[?25h"
+      system(ENV.fetch('PAGER', 'less'), "+#{log_at.to_i + 1}", j['log'])
+      $stdin.raw!
+      print "\e[?25l"
+    end
+  when 'r'
+    if (j = jobs[selected])
+      out, st = Open3.capture2e(File.join(Archci::ROOT, 'master', 'archci-job'), 'retry', j['id'])
+      message = st.success? ? "retrying #{j['pkgbase']} #{j['version']} #{j['arch']}: queued as a fresh first attempt" : "retry failed: #{out.strip}"
+      jobs = failed_jobs
+      selected = [selected, [jobs.size - 1, 0].max].min
+    end
+  end
+end
+restore.call

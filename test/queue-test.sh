@@ -77,6 +77,9 @@ id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
 "$job" report "$id" failure
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
+mkdir -p "$ARCHCI_HOME/logs/omarchy/libsigc++/2.12.2-1/x86_64"
+printf 'building\n==> ERROR: A failure occurred in build().\n' >"$ARCHCI_HOME/logs/omarchy/libsigc++/2.12.2-1/x86_64/attempt-1.log"
+"$failed" | grep "^libsigc++ 2.12.2-1 .* x86_64  *worker-2  *1/2 retry  *20.*: ==> ERROR: A failure occurred in build()" >/dev/null || fail "archci failed must list the failure with the first error line of its log: $("$failed")"
 grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be final yet"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "housekeeping should have requeued"

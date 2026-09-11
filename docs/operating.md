@@ -44,6 +44,8 @@ operator commands:
 ```
 archci version                      the installed archci version
 archci top | cat                    one frame, without the last-output column: instant
+archci failed                       the failed builds, two panes: the list, and the one picked with its log
+archci failed | cat                 the list, each with the first error line of its log
 archci next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results

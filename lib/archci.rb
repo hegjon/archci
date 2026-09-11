@@ -346,7 +346,8 @@ module Archci
       job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i, **j.slice(*HOST_STATS, *JOB_STATS))
     end
     failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
-      job[j].merge('final' => j['final'] == '1', 'finished' => j['finished'])
+      job[j].merge('id' => j['id'], 'final' => j['final'] == '1', 'finished' => j['finished'],
+                   'log' => File.join(home, 'logs', j['repo'], j['pkgbase'], j['version'], j['arch'], "attempt-#{j['attempt']}.log"))
     end
     # What archci-signer-status last saw of the signer through R2, if it runs.
     status = File.join(home, 'signer.status')
