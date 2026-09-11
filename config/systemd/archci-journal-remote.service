@@ -1,6 +1,6 @@
 # The master's receiver for the workers' journals: systemd-journal-remote on
 # plain HTTP at 127.0.0.1:19533, the one port number the workers' tunnels
-# (archci-logging-remote.service), sshd's PermitOpen and ARCHCI_JOURNAL_URL
+# (archci-logging-tunnel.service), sshd's PermitOpen and ARCHCI_JOURNAL_URL
 # name too. Only the tunnels reach it. A unit of archci's own rather than
 # the stock systemd-journal-remote.service, whose socket activation cannot
 # be dropped from a drop-in; the stock socket stays disabled. Sizes and

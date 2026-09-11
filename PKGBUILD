@@ -98,7 +98,7 @@ package_archci-worker() {
   optdepends=('btrfs-progs: snapshot-based clean chroots')
 
   _install_role worker archci-worker@.service archci-build@.service \
-    archci-worker-setup.service archci-logging-remote.service
+    archci-worker-setup.service archci-logging-tunnel.service
   _install_cli worker
   cd "$srcdir/$_src"
   # the archci journal namespace and its upload to the master

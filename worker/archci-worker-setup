@@ -7,7 +7,7 @@
 # authorized on the master and the signer), the devtools chroot directory as a
 # btrfs subvolume when possible, and the journal streaming configuration from
 # ARCHCI_JOURNAL_URL: the systemd-journal-upload drop-in in /run, and the flag
-# that lets archci-logging-remote.service start when the URL is the tunnel's.
+# that lets archci-logging-tunnel.service start when the URL is the tunnel's.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 (( EUID == 0 )) || archci_die "must run as root"
@@ -39,7 +39,7 @@ if [[ ! -e $ARCHCI_CHROOTS ]]; then
 	fi
 fi
 
-# journal streaming: URL for systemd-journal-upload, tunnel flag for archci-logging-remote
+# journal streaming: URL for systemd-journal-upload, tunnel flag for archci-logging-tunnel
 install -d -m 755 /run/archci /run/systemd/journal-upload.conf.d
 rm -f /run/archci/logging-tunnel /run/systemd/journal-upload.conf.d/archci.conf
 if [[ -n $ARCHCI_JOURNAL_URL ]]; then

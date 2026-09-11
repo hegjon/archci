@@ -95,7 +95,7 @@ ARCHCI_SIGN_PRUNE_MINUTES=60
 ARCHCI_MASTER="archci@master"
 # Where systemd-journal-upload streams this worker's journal. The default is
 # the master's journal-remote port reached through an ssh tunnel over the
-# worker key (archci-logging-remote.service, started with the worker); the
+# worker key (archci-logging-tunnel.service, started with the worker); the
 # master listens for journals on loopback only, so this works from anywhere
 # the worker can ssh to the master. "" keeps the journal local.
 ARCHCI_JOURNAL_URL=http://127.0.0.1:19533

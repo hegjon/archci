@@ -6,7 +6,7 @@
 # /etc/archci/authorized_keys (root-owned; sshd reads it for the archci user
 # through /etc/ssh/sshd_config.d/60-archci.conf, which the master package
 # installs). The key may also forward to the journal-remote
-# port, for archci-logging-remote.service on a worker outside the private
+# port, for archci-logging-tunnel.service on a worker outside the private
 # network. A key already present gets its line rewritten, so re-running this
 # after an upgrade refreshes the options. --revoke drops the line(s) holding
 # that key, or whose comment (the key's last word: archci-worker@<host> for

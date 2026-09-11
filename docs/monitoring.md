@@ -2,7 +2,7 @@
 
 Workers stream the `archci` journal namespace, and nothing else of their
 journal, to the master with `systemd-journal-upload --namespace=archci`,
-through an ssh tunnel over the worker key: `archci-logging-remote.service`
+through an ssh tunnel over the worker key: `archci-logging-tunnel.service`
 holds `ssh -N -L 127.0.0.1:19533:127.0.0.1:19533 archci@master` open, and
 the upload goes to `http://127.0.0.1:19533`, the default `ARCHCI_JOURNAL_URL`
 (`""` streams nothing; `archci-worker-setup` configures both on every worker

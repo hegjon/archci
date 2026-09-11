@@ -7,7 +7,7 @@ Description=archci build worker %i (riscv64)
 After=network-online.target archci-worker-setup.service
 Wants=network-online.target archci-worker-setup.service
 # Journal streaming to the master, when configured (archci-worker-setup decides).
-Wants=archci-logging-remote.service systemd-journal-upload.service
+Wants=archci-logging-tunnel.service systemd-journal-upload.service
 StartLimitIntervalSec=0
 
 [Service]
