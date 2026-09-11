@@ -135,6 +135,48 @@ end
 # is not a terminal (a pipe, the tests).
 STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
+# a colour (an SGR code) around a cell already padded to its width, so the
+# escape bytes cost no columns; nil for none
+def paint(s, code) = STYLE && code ? "\e[#{code}m#{s}\e[0m" : s
+DIM = '2'
+RED = '31'
+GREEN = '32'
+YELLOW = '33'
+BLUE = '34'
+MAGENTA = '35'
+CYAN = '36'
+BOLD_RED = '1;31'
+BOLD_YELLOW = '1;33'
+# a share of something (disk, memory, a host's threads): green to 60%,
+# yellow to 85%, red above
+def heat(pct) = pct < 60 ? GREEN : (pct < 85 ? YELLOW : RED)
+# a five-cell gauge of a percentage, ▇▇▇▁▁ (on a terminal only: the piped
+# frame keeps the bare figures)
+def gauge(pct) = ('▇' * (pct / 20.0).round.clamp(0, 5)).ljust(5, '▁')
+# the makepkg phases the worker reports, coloured by kind: getting the
+# sources, preparing the chroot, building, packaging, delivering
+PHASE_COLOUR = { 'download' => CYAN, 'verify' => CYAN, 'sums' => CYAN, 'extract' => CYAN,
+                 'sync' => BLUE, 'update' => BLUE, 'deps' => BLUE, 'start' => BLUE,
+                 'build' => BOLD_YELLOW, 'check' => MAGENTA,
+                 'package' => GREEN, 'compress' => GREEN, 'upload' => GREEN }.freeze
+
+# cells [[text, colour], ...] as one row: joined by a space, cut to width
+# when one is given, each cell coloured after the cut (its text is already
+# padded to its column)
+def row(cells, width = nil)
+  out = +''
+  used = 0
+  cells.each_with_index do |(text, colour), i|
+    sep = i.zero? ? '' : ' '
+    room = width ? width - used - sep.length : text.to_s.length
+    break if room <= 0
+
+    t = text.to_s[0, room]
+    out << sep << paint(t, colour)
+    used += sep.length + t.length
+  end
+  out
+end
 
 # journal: a JournalFollow for the last output line, nil for none (stdout not
 # a terminal, which also leaves the quit hint out of the title)
@@ -148,33 +190,54 @@ def frame(journal)
   failed = snap['failed'].first(5)
 
   out = []
-  out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s%s', now.strftime('%H:%M:%S'), repo,
-                snap['arches'].join(' '), STYLE ? '   (q or Esc quits)' : '')
+  out << format('%s  %s   pkgbuilds -> [%s]   arches: %s%s', bold('archci-top'), now.strftime('%H:%M:%S'), repo,
+                snap['arches'].join(' '), STYLE ? paint('   (q or Esc quits)', DIM) : '')
   out << format('queue: pending %s  running %s  failed %s  done %s (%s in the last hour)    outstanding: %s update(s), %s unbuilt',
-                *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
-                  snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })
+                bold(counts['pending']), bold(counts['running']), paint(bold(counts['failed']), counts['failed'].positive? ? RED : nil),
+                bold(counts['done']), bold(snap['done_last_hour']), bold(snap['outstanding']['updates']), bold(snap['outstanding']['backlog']))
   out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{bold(n)}/#{snap['tracked'][k]}" }.join('  '))
   # the signer, as seen through R2 by archci-signer-status: what is signed
   # and released per arch on one line, what waits unsigned in staging on
   # the next
   if (s = snap['signer'])
-    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} unreachable" }
+    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} #{paint('unreachable', BOLD_RED)}" }
     out << "released: #{rel.join('  ')}" unless rel.empty?
     st = s['staging'] || {}
-    line = format('unsigned: %s pkg in staging%s', bold(st['waiting'].to_i), st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
-    line += "   [status #{elapsed(s['age_s'])} old]" if s['age_s'] > 600
+    waiting = st['waiting'].to_i
+    line = format('unsigned: %s pkg in staging%s', paint(bold(waiting), waiting.positive? ? YELLOW : nil), st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
+    line += paint("   [status #{elapsed(s['age_s'])} old]", BOLD_YELLOW) if s['age_s'] > 600
     out << line
   end
   out << ''
 
   # hosts: one row each, its workers grouped, from the newest heartbeat any
   # of them sent (an idle host shows the last beat its finished jobs kept)
-  out << bold(format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s  %s', 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%DISK', '%MEM', 'THREADS', 'WORKERS', 'ACTIVE', 'ARCHCI'))
+  # on a terminal the load, disk and memory columns carry a gauge before the
+  # figure (the load's against the host's threads) and its colour; the
+  # piped frame the figures alone
+  gw = STYLE ? 11 : 5   # gauge, a space, the figure
+  out << bold(format("%-22s %-13s %-7s %#{gw}s %#{gw}s %#{gw}s %7s %7s %6s  %s", 'HOST', 'VENDOR', 'ARCH', 'LOAD', '%DISK', '%MEM', 'THREADS', 'WORKERS', 'ACTIVE', 'ARCHCI'))
   # the load in five characters: as sent (two decimals) below 100, whole from 100
   load = ->(l) { l.nil? ? '-' : (l.to_f < 100 ? l : format('%.0f', l.to_f)) }
+  # a percentage as a cell: the gauge and the figure on a terminal, coloured by heat
+  share = lambda do |v|
+    return [format("%#{gw}s", '-'), nil] if v.nil?
+
+    pct = v.to_f
+    [STYLE ? format('%s %4d%%', gauge(pct), pct.round) : format('%5s', v), heat(pct)]
+  end
+  master_version = snap['hosts'].first&.dig('archci')
   snap['hosts'].each do |h|
-    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7d %6d  %s', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', load[h['load']],
-                  h['disk'] || '-', h['mem'] || '-', h['cpus'] || '-', h['workers'].size, h['building'], h['archci'] || '-')
+    if h['load'].nil? then load_cell = [format("%#{gw}s", '-'), nil]
+    else
+      pct = h['cpus'].to_i.positive? ? h['load'].to_f / h['cpus'].to_i * 100 : 0
+      load_cell = [STYLE ? format('%s %5s', gauge(pct), load[h['load']]) : format('%5s', load[h['load']]), heat(pct)]
+    end
+    version = h['archci'] || '-'
+    out << row([[format('%-22s', h['host']), nil], [format('%-13s', (h['vendor'] || '-')[0, 13]), nil], [format('%-7s', h['arch'] || '-'), nil],
+                load_cell, share[h['disk']], share[h['mem']], [format('%7s', h['cpus'] || '-'), nil],
+                [format('%7d', h['workers'].size), h['workers'].empty? ? DIM : nil], [format('%6d ', h['building']), h['building'].zero? ? DIM : nil],
+                [version, version == master_version ? nil : BOLD_RED]])
   end
   out << ''
 
@@ -207,18 +270,21 @@ def frame(journal)
     hb = hb_s <= 99 ? "#{hb_s}s" : "#{(hb_s / 60.0).round}m"   # seconds while they fit in two digits, then minutes
     last = lasts[unit_name(j)].to_s
     phase = j['phase'].to_s   # from the worker's heartbeat
-    line = format('%-8s %-19s %-7s %3d %4s %5s %5s %5s %5s  %-8s %-8s %s %s', hms(since), short_worker(j['worker'])[0, 19], j['arch'], j['attempt'], hb,
-                  cores[j], tree[j['build']], mem[j['rss']], mem[j['peak']],
-                  phase.empty? ? '-' : phase[0, 8], (j['origin'] || '-')[0, 8], "#{j['pkgbase']} #{j['version']}", "| #{last.empty? ? '-' : last}")
-    out << line[0, width]
+    out << row([[format('%-8s', hms(since)), nil], [format('%-19s', short_worker(j['worker'])[0, 19]), nil], [format('%-7s', j['arch']), nil],
+                [format('%3d', j['attempt']), j['attempt'] > 1 ? YELLOW : nil],
+                [format('%4s', hb), hb_s > 120 ? BOLD_RED : (hb_s > 60 ? YELLOW : nil)],   # a beat comes every 30 s
+                [format('%5s', cores[j]), nil], [format('%5s', tree[j['build']]), nil], [format('%5s', mem[j['rss']]), nil], [format('%5s ', mem[j['peak']]), nil],
+                [format('%-8s', phase.empty? ? '-' : phase[0, 8]), phase.empty? ? DIM : PHASE_COLOUR[phase]],
+                [format('%-8s', (j['origin'] || '-')[0, 8]), DIM], ["#{j['pkgbase']} #{j['version']}", nil],
+                ["| #{last.empty? ? '-' : last}", DIM]], width)
   end
   out << '(nothing running)' if running.empty?
   out << ''
   unless failed.empty?
     out << bold(format('%-34s %-7s  %-17s %8s  %7s  %s', 'FAILED (newest first)', 'ARCH', 'WORKER', 'FAILURES', 'GAVE UP', 'LAST FAILURE'))
-    failed.each do |j|
-      out << format('%-34s %-7s  %-17s %8d  %7s  %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], short_worker(j['worker']),
-                    j['attempt'], j['final'] ? 'yes' : '-', j['finished'])[0, width]
+    failed.each do |j|   # given up in red, still to be retried in yellow
+      out << paint(format('%-34s %-7s  %-17s %8d  %7s  %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], short_worker(j['worker']),
+                          j['attempt'], j['final'] ? 'yes' : '-', j['finished'])[0, width], j['final'] ? RED : YELLOW)
     end
   end
   out
