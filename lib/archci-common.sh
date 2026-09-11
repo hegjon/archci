@@ -244,9 +244,9 @@ archci_chroot_pacconf() {
 # repository commit the build is pinned to. (tag is accepted from old files.)
 archci_read_job() {
 	local line
-	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker=''
+	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker='' job_created='' job_sources=''
 	while IFS= read -r line || [[ -n $line ]]; do
-		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker)=(.*)$ ]] || continue
+		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker|created|sources)=(.*)$ ]] || continue
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 	done <"$1"
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]
