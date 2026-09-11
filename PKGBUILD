@@ -19,7 +19,7 @@ arch=(any)
 url='https://github.com/hegjon/archci'
 license=(MIT)
 makedepends=(gnupg)
-checkdepends=(ruby jq git rsync openssh gnupg zstd shellcheck)
+checkdepends=(ruby jq git rsync openssh gnupg zstd shellcheck attr)
 source=("https://github.com/hegjon/archci/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=(SKIP)   # filled in by tools/release-pkgbuild
 _src="archci-$pkgver"
@@ -75,7 +75,7 @@ _install_cli() {
 
 package_archci-master() {
   pkgdesc='Headless build farm for Arch Linux packages (master: sync the PKGBUILD repository, hand out jobs, stage results)'
-  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone)
+  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone attr)
   # the release key is never on the master
   conflicts=(archci-signer)
   optdepends=('btrfs-progs: btrfs subvolumes for the state directories'

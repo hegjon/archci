@@ -29,7 +29,11 @@
 # Each directory's line is cached too, in $ARCHCI_CACHE_DIR/pkgbuilds.cache keyed
 # by the directory's git tree hash (git ls-tree), which changes exactly when
 # its content does: a new commit re-reads only the PKGBUILDs it touched,
-# and a directory at a content seen before is never sourced again.
+# and a directory at a content seen before is never sourced again. The same
+# data is written onto the PKGBUILD file itself as extended attributes
+# (user.archci.tree, .version, .commit, .arch, .profile, .source, .build,
+# .arch_repo, .pkgnames, .deps; getfattr -d PKGBUILD shows them): a checkout
+# that changes the file drops them with the old inode. Nothing reads them yet.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -49,6 +53,22 @@ head=$(git -C "$clone" rev-parse HEAD)
 
 index_current() { [[ -f $index && $(head -1 "$index") == "# $head v3" ]]; }
 
+# annotate PKGBUILD HASH LINE -- the line's fields as user.archci.* attributes
+# on the file, when it does not carry them for this hash yet; best effort
+# (a filesystem without user attributes, no setfattr: silently none)
+annotate() {
+	local file=$1 hash=$2 f i
+	command -v setfattr >/dev/null || return 0
+	[[ $(getfattr --only-values -n user.archci.tree "$file" 2>/dev/null) == "$hash" ]] && return 0
+	read -ra f <<<"$3"
+	setfattr -n user.archci.tree -v "$hash" "$file" 2>/dev/null || return 0
+	i=0
+	for name in version commit arch profile source build arch_repo pkgnames deps; do
+		setfattr -n "user.archci.$name" -v "${f[i]:--}" "$file" 2>/dev/null || true
+		(( ++i ))
+	done
+}
+
 generate() {
 	local dir name version arches pkgnames deps commit source build profile mode type hash line newcache
 	local cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
@@ -65,6 +85,7 @@ generate() {
 		if [[ -n ${cached[$hash]:-} ]]; then   # this content was read before
 			printf '%s %s\n' "$name" "${cached[$hash]}"
 			printf '%s %s\n' "$hash" "${cached[$hash]}" >>"$newcache"
+			annotate "$dir/PKGBUILD" "$hash" "${cached[$hash]}"
 			continue
 		fi
 		[[ -f $dir/PKGBUILD && -f $dir/.omarchy/package.json ]] || continue
@@ -89,6 +110,7 @@ generate() {
 		line="$version $commit ${arches:-x86_64} $profile $source $build $repo ${pkgnames:-$name} ${deps:--}"
 		printf '%s %s\n' "$name" "$line"
 		printf '%s %s\n' "$hash" "$line" >>"$newcache"
+		annotate "$dir/PKGBUILD" "$hash" "$line"
 	done < <(git -C "$clone" ls-tree "HEAD:$ARCHCI_PKGBUILDS_DIR")
 	mv "$newcache" "$cache"   # entries for content no longer in the tree are gone with the old file
 }
