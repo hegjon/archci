@@ -1,17 +1,11 @@
 # shellcheck shell=bash disable=SC2164  # makepkg runs this with set -e
 # Maintainer: Jonny Heggheim <hegjon@gmail.com>
 #
-# Split package: archci holds what every role shares (lib/, the config, the
-# archci user); archci-master, archci-worker and archci-signer hold one role
-# each (its scripts under /usr/lib/archci/<role>/, run by its units, its
-# state directories); each role installs its own `archci <name>` command
-# line as /usr/bin/archci (a worker's knows `archci version` only: it is run
-# by its units). Keys, R2 config and enabling the role's units stay manual (README
-# "Install").
-#
-# Built from a tagged tarball: the version is the tag. This file is the
-# source; tools/release-pkgbuild writes the copy the farm builds (pkgver from
-# the tag, the tarball's checksum) into the PKGBUILD repository.
+# archci: what every role shares (lib/, config, user). archci-master, -worker,
+# -signer: one role each (scripts under /usr/lib/archci/<role>/, units, state
+# dirs, its `archci` command line). Keys, R2 config, enabling units: manual.
+# Built from the tag's tarball; tools/release-pkgbuild fills in pkgver and the
+# checksum for the copy the farm builds.
 
 pkgbase=archci
 pkgname=(archci archci-master archci-worker archci-signer
@@ -30,10 +24,8 @@ _src="archci-$pkgver"
 
 _libdir=/usr/lib/archci
 
-# _install_role ROLE UNIT... -> the role's scripts under /usr/lib/archci/ROLE/
-# (same layout as the source tree, so they find lib/ relative to themselves;
-# `archci <name>` and the units run them there, nothing goes to /usr/bin),
-# its units, and its tmpfiles entry.
+# _install_role ROLE UNIT... -> scripts under /usr/lib/archci/ROLE/ (tree
+# layout, so they find lib/), the units, the tmpfiles entry
 _install_role() {
   local role=$1 f
   shift
@@ -46,8 +38,7 @@ _install_role() {
   install -Dm644 "config/systemd/archci-$role.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/archci-$role.conf"
 }
 
-# The test suite (test/run.sh) runs in check(): lint, the master's queue,
-# the signing chain, the worker, all on throwaway directories, no network.
+# the test suite: throwaway directories, no network
 check() {
   cd "$srcdir/$_src"
   test/run.sh
@@ -60,10 +51,8 @@ package_archci() {
 
   cd "$srcdir/$_src"
   (cd lib && find . -type f -exec install -Dm644 '{}' "$pkgdir$_libdir/lib/{}" \;)
-  # the live config is a stub (only what differs from the defaults goes in),
-  # so an upgrade rarely has a .pacnew to offer; the annotated full sample
-  # is documentation
-  printf '%s\n' "$pkgver-$pkgrel" >"$pkgdir$_libdir/VERSION"   # what `archci version` and the heartbeats say
+  printf '%s\n' "$pkgver-$pkgrel" >"$pkgdir$_libdir/VERSION"   # `archci version`, the heartbeats
+  # the live config is a stub (rarely a .pacnew); the annotated sample is documentation
   install -Dm644 config/archci.conf "$pkgdir/etc/archci/archci.conf"
   install -Dm644 config/archci.conf.example "$pkgdir/usr/share/doc/archci/archci.conf.example"
   install -Dm644 config/systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
@@ -72,7 +61,7 @@ package_archci() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgbase/LICENSE"
 }
 
-# the role's `archci <name>` command line (bin/archci-<role>) as /usr/bin/archci, with the completion
+# bin/archci-ROLE as /usr/bin/archci, with the completion (the worker's has only version)
 _install_cli() {
   local role=$1
   cd "$srcdir/$_src"
@@ -85,7 +74,7 @@ _install_cli() {
 package_archci-master() {
   pkgdesc='Headless build farm for Arch Linux packages (master: sync the PKGBUILD repository, hand out jobs, stage results)'
   depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone)
-  # the master never holds the release key (README "Signing"): not on one machine
+  # the release key is never on the master
   conflicts=(archci-signer)
   optdepends=('btrfs-progs: btrfs subvolumes for the state directories'
               'libmicrohttpd: receive worker journals with systemd-journal-remote')
@@ -98,7 +87,7 @@ package_archci-master() {
   install -Dm644 config/systemd/archci-journal-remote.service \
     "$pkgdir/usr/lib/systemd/system/archci-journal-remote.service"
   install -Dm644 config/systemd/journal-remote.conf "$pkgdir/usr/lib/systemd/journal-remote.conf.d/archci.conf"
-  # sshd reads worker keys from /etc/archci/authorized_keys; a hook reloads sshd
+  # worker keys: /etc/archci/authorized_keys; the hook reloads sshd
   install -Dm644 config/ssh/sshd_config.d/60-archci.conf "$pkgdir/etc/ssh/sshd_config.d/60-archci.conf"
   install -Dm644 config/pacman/archci-sshd.hook "$pkgdir/usr/share/libalpm/hooks/archci-sshd.hook"
 }
@@ -112,14 +101,12 @@ package_archci-worker() {
     archci-worker-setup.service archci-logging-remote.service
   _install_cli worker
   cd "$srcdir/$_src"
-  # the archci journal namespace the units log to, and its upload to the master
+  # the archci journal namespace and its upload to the master
   install -Dm644 config/systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
   install -Dm644 config/systemd/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
-  # Chroot makepkg.conf for every arch devtools ships none for: derived from
-  # devtools' x86_64 one (and its conf.d) with arch/<arch>/makepkg.conf.sed, so
-  # the ports follow devtools' flags. The build fails if a substitution no
-  # longer matches. (arch/<arch>/qemu/ belongs to archci-worker-qemu-<arch>.)
+  # chroot makepkg.conf per port arch: devtools' x86_64 one (and conf.d) through
+  # arch/<arch>/makepkg.conf.sed; fails if a substitution no longer matches
   local dt=/usr/share/devtools/makepkg.conf.d sedf a out f
   for sedf in arch/*/makepkg.conf.sed; do
     a=${sedf#arch/}; a=${a%%/*}; out=$pkgdir$_libdir/arch/$a
@@ -135,12 +122,9 @@ package_archci-worker() {
   done
 }
 
-# _package_qemu_arch ARCH -> the files of an archci-worker-qemu-<arch> package:
-# archci-worker-<arch>@.service (the worker template with the arch argument),
-# the qemu-<arch> binfmt registration with the C flag, the devtools setarch
-# alias, the chroot pacman.conf for that port's repository, and the port's key
-# as a pacman keyring archci-ports-<arch> when arch/<arch>/qemu/keys/ has one
-# (archci-qemu-setup, run by the package's install script, populates it).
+# _package_qemu_arch ARCH -> archci-worker-ARCH@.service (the worker template
+# with the arch argument), binfmt, setarch alias, the port's pacman.conf and
+# its keyring archci-ports-ARCH from arch/ARCH/qemu/
 _package_qemu_arch() {
   local a=$1
   cd "$srcdir/$_src"
@@ -162,12 +146,8 @@ _package_qemu_arch() {
   fi
 }
 
-# Add-ons for an x86_64 worker: worker instances of another arch under qemu
-# user-mode emulation, archci-worker-<arch>@N (the unit is named for what it
-# builds), next to the machine's own archci-worker@N (see docs/ports.md). A
-# native machine of that arch needs none of this: archci-worker@N builds it
-# there. Package metadata has to be literal in each function (makepkg reads
-# it from the text); the files come from _package_qemu_arch.
+# x86_64 worker add-ons: archci-worker-ARCH@N instances under qemu (docs/ports.md).
+# Metadata must be literal per function (makepkg reads the text).
 package_archci-worker-qemu-aarch64() {
   pkgdesc='Headless build farm for Arch Linux packages (worker add-on: aarch64 instances on x86_64 under qemu user-mode emulation)'
   depends=("archci-worker=$pkgver-$pkgrel" qemu-user-static qemu-user-static-binfmt)
