@@ -10,8 +10,8 @@ id=$(claim_id worker-1 x86_64)   # a running job for the completion to offer
 echo "--- archci <name> runs archci-<name> of an installed role"
 archci=$here/../bin/archci
 help=$("$archci" help)   # grep -q on a pipe would SIGPIPE the writer under pipefail
-grep -q '^  job  *master-side queue operations' <<<"$help" || fail "archci help must list job with its description"
-grep -q '^  top  *top-like view of the farm, redrawn from the master' <<<"$help" || fail "archci help must join a wrapped header line"
+grep -q '^  job  *the queue: enqueue, retry, requeue, report' <<<"$help" || fail "archci help must list job with its description"
+grep -q '^  top  *the farm live' <<<"$help" || fail "archci help must list top with its description"
 grep -q '^  shell' <<<"$help" && fail "archci-shell is not a subcommand"
 [[ $("$archci" next x86_64) == "$("$next" x86_64)" ]] || fail "archci next must run archci-next"
 [[ $("$archci" job retry -a 2>&1) == *'retried from scratch'* ]] || fail "archci job must pass its arguments on"

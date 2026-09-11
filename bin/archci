@@ -1,39 +1,53 @@
 #!/bin/bash
 # archci SUBCOMMAND [ARGS...] -- the one entry point. Every archci-<name>
-# script of the roles installed on this host (a directory next to lib/ with
-# archci-* scripts: master/, signer/, worker/) is `archci <name>`: `archci job retry --all`, `archci top`,
+# script of the roles installed on this host (master/, signer/, worker/ next
+# to lib/) is `archci <name>`: `archci job retry --all`, `archci top`,
 # `archci sign --unlock`. `archci` alone, or `archci help`, lists the ones
 # installed here with what they do. Nothing else goes to /usr/bin: the
 # units run the scripts where they live.
 set -euo pipefail
 root=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
 source "$root/lib/archci-common.sh"
-# the roles installed here: the directories next to lib/ holding archci-* scripts
-roles=()
-for d in "$root"/*/; do
-	d=${d%/}
-	[[ ${d##*/} != @(bin|lib) ]] || continue
-	for f in "$d"/archci-*; do [[ -x $f ]] && { roles+=("${d##*/}"); break; }; done
-done
+
+# The commands, by role: "name role what it does". archci-shell (sshd's
+# forced command for worker keys) and master/internal/ are not commands.
+commands=(
+	"authorize         master  let a worker key talk to this master, or stop it"
+	"job               master  the queue: enqueue, retry, requeue, report (runs as the archci user)"
+	"next              master  the next package a worker of ARCH would build"
+	"pkgs              master  the packages in the PKGBUILD repository clone"
+	"scan              master  sync the PKGBUILD repository and report what is outstanding"
+	"signer-status     master  what the master can see of the signer, through R2"
+	"stage             master  push pooled (unsigned) packages to the R2 staging area"
+	"top               master  the farm live: queue, hosts, jobs, failures (one frame into a pipe)"
+	"authorize-builder signer  trust a worker's builder key on the signer"
+	"sign              signer  release-sign the packages the master staged to R2"
+	"sign-health       signer  warn in the journal when release signing is stalled"
+	"build             worker  build one job in a clean devtools chroot (run by archci-build@)"
+	"qemu-setup        worker  enable or drop building ARCH under qemu on this worker"
+	"worker            worker  pull jobs from the master, build, upload (run by archci-worker@)"
+	"worker-setup      worker  first-start preparation of a worker (run by its unit)"
+)
+
+# the role directory a command lives in, if installed here
+script_of() {   # script_of NAME -> path, or 1
+	local c name role
+	for c in "${commands[@]}"; do
+		read -r name role _ <<<"$c"
+		[[ $name == "$1" ]] || continue
+		[[ -x $root/$role/archci-$name ]] && { printf '%s' "$root/$role/archci-$name"; return 0; }
+	done
+	return 1
+}
 
 list() {
-	local role f name line desc
+	local c name role desc last=''
 	echo "usage: archci SUBCOMMAND [ARGS...]   (archci version: the installed version)"
-	for role in "${roles[@]}"; do
-		echo
-		echo "$role:"
-		for f in "$root/$role"/archci-*; do
-			name=${f##*/archci-}
-			[[ $name == shell ]] && continue   # sshd's forced command, not a command
-			# the script's header, "# archci-<name> [ARGS] -- what it does",
-			# up to the end of its first sentence
-			line=$(awk -v n="archci-$name" '
-				!on && $1 == "#" && $2 == n { on = 1 }
-				on { sub(/^# ?/, ""); s = s (s ? " " : "") $0; if ($0 ~ /\.$/ || $0 == "") exit }
-				END { print s }' "$f")
-			if [[ $line == *' -- '* ]]; then desc=${line#* -- }; else desc=${line#"archci-$name"}; desc=${desc# }; fi
-			printf '  %-18s %s\n' "$name" "${desc%.}"
-		done
+	for c in "${commands[@]}"; do
+		read -r name role desc <<<"$c"
+		[[ -x $root/$role/archci-$name ]] || continue
+		[[ $role == "$last" ]] || { echo; echo "$role:"; last=$role; }
+		printf '  %-18s %s\n' "$name" "$desc"
 	done
 }
 
@@ -44,8 +58,6 @@ case $sub in
 	version|-V|--version) echo "archci $(archci_version)"; exit 0 ;;
 	shell) echo "archci: 'shell' is the ssh forced command for worker keys, not a subcommand" >&2; exit 2 ;;
 esac
-for role in "${roles[@]}"; do
-	[[ -x $root/$role/archci-$sub ]] && exec "$root/$role/archci-$sub" "$@"
-done
+if script=$(script_of "$sub"); then exec "$script" "$@"; fi
 echo "archci: unknown subcommand '$sub' ('archci help' lists the ones installed here)" >&2
 exit 2
