@@ -132,7 +132,7 @@ export "${!ARCHCI_@}"
 # names in the job file, so a stat called version would eat the package's)
 ARCHCI_HOST_STATS='load mem disk cpus vendor archci'
 # (cpu is what workers before 0.3.30 sent: cores, computed there)
-ARCHCI_JOB_STATS='cpu cpu_us cpu_dt rss peak build phase'
+ARCHCI_JOB_STATS='cpu_us cpu_dt rss peak build phase'
 archci_stats_re() { local s="$ARCHCI_HOST_STATS $ARCHCI_JOB_STATS"; printf '%s' "${s// /|}"; }
 
 # Master: the PKGBUILD repository clone and the package index over it.

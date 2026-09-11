@@ -36,7 +36,7 @@ end
 
 # not a terminal (a pipe, a file, the tests): one frame
 unless $stdout.tty? && $stdin.tty?
-  puts frame(nil, hint: false)
+  puts frame(nil)
   exit
 end
 
@@ -55,18 +55,10 @@ trap('INT') { restore.call; exit }
 trap('TERM') { restore.call; exit }
 $stdin.raw!
 print "\e[?25l"
-# The first frame skips the journal so the screen comes up at once (a job's
-# first look costs a moment each); the journal columns fill in from the
-# next cycle on, then keep up with the stream.
-first = true
 loop do
-  lines = frame(first ? nil : journal)
-  # the second frame, with the journal columns, comes early
-  wait = first ? [2, interval].min : interval
-  first = false
   print "\e[H\e[2J"
-  puts lines.map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
-  next unless IO.select([$stdin], nil, nil, wait)
+  puts frame(journal).map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
+  next unless IO.select([$stdin], nil, nil, interval)
 
   key = $stdin.read_nonblock(1, exception: false)
   break if key.is_a?(String) && (key.downcase == 'q' || key == "\e" || key == "\u0003")

@@ -28,8 +28,8 @@ def short_worker(worker)
   port ? "#{host}-#{port[0]}#{worker[/(\d+)\z/, 1]}" : worker
 end
 
-# The build unit's name on the worker (archci-worker's rule) and, from its
-# journal streamed to the master, the makepkg phase and last output line.
+# The build unit's name on the worker (archci-worker's rule): the key of its
+# lines in the journal streamed to the master.
 def unit_name(j)
   "archci-build@#{"#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9:_.-]/, '_')}"
 end
@@ -41,23 +41,7 @@ end
 # arrives; a frame only renders. A job that was already running when the
 # session began shows no line until it prints its next one. The phase comes
 # with the worker's heartbeat (archci_phase_filter), not from here.
-
-def parse_entry(line)
-  JSON.parse(line.scrub)
-rescue JSON::ParserError, EncodingError
-  nil
-end
-
-# the entry's unit, as unit_name spells it (the journal appends .service)
-def unit_of(entry)
-  entry['_SYSTEMD_UNIT'].to_s.delete_suffix('.service')
-end
-
-def message_of(entry)
-  m = entry['MESSAGE']
-  (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip
-end
-
+#
 # One journalctl -f for the session; last(units) answers from what it has
 # streamed.
 class JournalFollow
@@ -80,11 +64,18 @@ class JournalFollow
         stdin.close
         out.each_line do |line|
           # journalctl writes UTF-8 whatever the locale (a unit's may be none: US-ASCII)
-          e = parse_entry(line.force_encoding(Encoding::UTF_8)) or next
-          u = unit_of(e)
+          e = begin
+            JSON.parse(line.force_encoding(Encoding::UTF_8).scrub)
+          rescue JSON::ParserError, EncodingError
+            next
+          end
+          # the unit as unit_name spells it (the journal appends .service); a
+          # message that was not valid UTF-8 comes as an array of bytes
+          u = e['_SYSTEMD_UNIT'].to_s.delete_suffix('.service')
           next unless u.start_with?('archci-build@')
 
-          msg = message_of(e)
+          m = e['MESSAGE']
+          msg = (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip
           @lock.synchronize { @last[u] = msg }
         end
       rescue StandardError
@@ -126,9 +117,9 @@ end
 STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
-# journal: a JournalFollow for the last output line, nil for none; hint: the
-# quit hint in the title (not when the frame is printed once)
-def frame(journal, hint: true)
+# journal: a JournalFollow for the last output line, nil for none (stdout not
+# a terminal, which also leaves the quit hint out of the title)
+def frame(journal)
   now = Time.now
   width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
   snap = Archci.snapshot(now)
@@ -139,7 +130,7 @@ def frame(journal, hint: true)
 
   out = []
   out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s%s', now.strftime('%H:%M:%S'), repo,
-                snap['arches'].join(' '), hint ? '   (q or Esc quits)' : '')
+                snap['arches'].join(' '), STYLE ? '   (q or Esc quits)' : '')
   out << format('queue: pending %s  running %s  failed %s  done %s (%s in the last hour)    outstanding: %s update(s), %s unbuilt',
                 *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                   snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })
@@ -179,17 +170,12 @@ def frame(journal, hint: true)
     else format('%.0fG', g)
     end
   end
-  # the build tree: KiB from the worker (raw du -sk; 5.0G before 0.3.30, shown as is)
-  tree = ->(v) { v.nil? ? '-' : (v =~ /\A\d+\z/ ? mem[(v.to_i / 1024.0).round] : v) }
+  # the build tree: KiB from the worker (raw du -sk)
+  tree = ->(v) { v.nil? ? '-' : mem[(v.to_i / 1024.0).round] }
   # cores in use: the CPU time used over the wall time it took, both raw
-  # from the worker (cpu= cores from a worker before 0.3.30), shown like a load
-  cores = lambda do |j|
-    if j['cpu_us'] && j['cpu_dt'].to_i.positive? then load[format('%.2f', j['cpu_us'].to_f / j['cpu_dt'].to_f)]
-    else load[j['cpu']]
-    end
-  end
-  # the last output line from the journal follower, '-' without one: the
-  # first frame, or stdout not a terminal
+  # from the worker, shown like a load
+  cores = ->(j) { j['cpu_dt'].to_i.positive? ? load[format('%.2f', j['cpu_us'].to_f / j['cpu_dt'].to_f)] : '-' }
+  # the last output line from the journal follower, '-' without one
   lasts = journal ? journal.last(running.map { |j| unit_name(j) }) : {}
   # by host, its native workers first, then per emulated arch, instance
   # numbers as numbers: host-1, host-3, host-aarch64-1, host-riscv64-2

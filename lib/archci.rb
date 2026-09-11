@@ -14,7 +14,7 @@ module Archci
   # The heartbeat's stats (the same two lists as archci-common.sh): the host's
   # and the job's, kept with the job file by archci-job heartbeat.
   HOST_STATS = %w[load mem disk cpus vendor archci].freeze
-  JOB_STATS = %w[cpu cpu_us cpu_dt rss peak build phase].freeze
+  JOB_STATS = %w[cpu_us cpu_dt rss peak build phase].freeze
 
   DEFAULTS = {
     'ARCHCI_HOME' => '/var/lib/archci',
