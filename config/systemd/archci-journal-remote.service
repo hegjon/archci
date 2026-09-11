@@ -8,7 +8,9 @@
 [Unit]
 Description=archci: the workers' journals, received from their ssh tunnels
 Documentation=man:systemd-journal-remote(8) man:journal-remote.conf(5)
-After=network.target
+# the workers reach it through sshd only
+Wants=sshd.service
+After=network.target sshd.service
 
 [Service]
 ExecStart=/usr/lib/systemd/systemd-journal-remote --listen-http=127.0.0.1:19533 --output=/var/log/journal/remote/archci-workers.journal
