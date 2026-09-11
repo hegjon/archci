@@ -57,7 +57,7 @@ on_term() {
 		archci_log "shutting down, handing $job_id back to the master"
 		master report "$job_id" abandoned || true
 	fi
-	exit 143
+	exit 0   # a stop is not a failure: the unit ends inactive, not failed
 }
 trap on_term TERM INT
 
