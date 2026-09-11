@@ -1,0 +1,17 @@
+#!/bin/bash
+# archci version -- the worker's command line: only the installed version; a
+# worker is run by its units, nothing on it is run by hand. Installed as
+# /usr/bin/archci by the archci-worker package (bin/archci-worker in the tree).
+set -euo pipefail
+root=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
+source "$root/lib/archci-common.sh"
+
+sub=${1:-help}
+case $sub in
+	help|-h|--help)
+		echo "usage: archci version   (the installed archci version; a worker is run by its units)"
+		exit 0 ;;
+	version|-V|--version) echo "archci $(archci_version)"; exit 0 ;;
+esac
+echo "archci: unknown subcommand '$sub' (a worker has 'archci version' only)" >&2
+exit 2

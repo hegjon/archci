@@ -4,9 +4,9 @@
 # Split package: archci holds what every role shares (lib/, the config, the
 # archci user); archci-master, archci-worker and archci-signer hold one role
 # each (its scripts under /usr/lib/archci/<role>/, run by its units, its
-# state directories); the master and the signer each install their own
-# `archci <name>` command line as /usr/bin/archci (a worker is run by its
-# units only). Keys, R2 config and enabling the role's units stay manual (README
+# state directories); each role installs its own `archci <name>` command
+# line as /usr/bin/archci (a worker's knows `archci version` only: it is run
+# by its units). Keys, R2 config and enabling the role's units stay manual (README
 # "Install").
 #
 # Built from a tagged tarball: the version is the tag. This file is the
@@ -79,7 +79,7 @@ _install_cli() {
   install -Dm755 "bin/archci-$role" "$pkgdir$_libdir/bin/archci-$role"
   install -d "$pkgdir/usr/bin"
   ln -s "$_libdir/bin/archci-$role" "$pkgdir/usr/bin/archci"
-  install -Dm644 config/bash-completion/archci "$pkgdir/usr/share/bash-completion/completions/archci"
+  [[ $role == worker ]] || install -Dm644 config/bash-completion/archci "$pkgdir/usr/share/bash-completion/completions/archci"
 }
 
 package_archci-master() {
@@ -110,6 +110,7 @@ package_archci-worker() {
 
   _install_role worker archci-worker@.service archci-build@.service \
     archci-worker-setup.service archci-logging-remote.service
+  _install_cli worker
   cd "$srcdir/$_src"
   # the archci journal namespace the units log to, and its upload to the master
   install -Dm644 config/systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
