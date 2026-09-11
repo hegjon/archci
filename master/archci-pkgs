@@ -26,6 +26,10 @@
 # so archci-next (once per claim) just reads a file; archci-scan refreshes it
 # after every pull. Versions come from sourcing each PKGBUILD at file scope
 # with CARCH set, the way makepkg reads them; the repository is trusted input.
+# Each directory's line is cached too, in $ARCHCI_HOME/pkgbuilds.cache keyed
+# by the directory's git tree hash (git ls-tree), which changes exactly when
+# its content does: a new commit re-reads only the PKGBUILDs it touched,
+# and a directory at a content seen before is never sourced again.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -46,11 +50,22 @@ head=$(git -C "$clone" rev-parse HEAD)
 index_current() { [[ -f $index && $(head -1 "$index") == "# $head v3" ]]; }
 
 generate() {
-	local dir name version arches pkgnames deps commit source build profile
+	local dir name version arches pkgnames deps commit source build profile mode type hash line newcache
+	local cache=$ARCHCI_HOME/pkgbuilds.cache
+	local -A cached=()
+	if [[ -f $cache ]]; then
+		while read -r hash line; do cached[$hash]=$line; done <"$cache"
+	fi
+	newcache=$(mktemp "$cache.XXXXXX")
 	printf '# %s v3\n' "$head"
-	for dir in "$clone/$ARCHCI_PKGBUILDS_DIR"/*/; do
-		dir=${dir%/}
-		name=${dir##*/}
+	while read -r mode type hash name; do
+		[[ $type == tree ]] || continue
+		dir=$clone/$ARCHCI_PKGBUILDS_DIR/$name
+		if [[ -n ${cached[$hash]:-} ]]; then   # this content was read before
+			printf '%s %s\n' "$name" "${cached[$hash]}"
+			printf '%s %s\n' "$hash" "${cached[$hash]}" >>"$newcache"
+			continue
+		fi
 		[[ -f $dir/PKGBUILD && -f $dir/.omarchy/package.json ]] || continue
 		version='' arches='' pkgnames='' deps=''
 		# shellcheck disable=SC2016  # the single-quoted script runs in the child bash
@@ -70,8 +85,11 @@ generate() {
 			[(.source // "local"), (if .skip_build == true then "skip" else "build" end), (.arch_repo // "-")]
 			| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; continue; }
 		if [[ $repo == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
-		printf '%s %s %s %s %s %s %s %s %s %s\n' "$name" "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build" "$repo" "${pkgnames:-$name}" "${deps:--}"
-	done
+		line="$version $commit ${arches:-x86_64} $profile $source $build $repo ${pkgnames:-$name} ${deps:--}"
+		printf '%s %s\n' "$name" "$line"
+		printf '%s %s\n' "$hash" "$line" >>"$newcache"
+	done < <(git -C "$clone" ls-tree "HEAD:$ARCHCI_PKGBUILDS_DIR")
+	mv "$newcache" "$cache"   # entries for content no longer in the tree are gone with the old file
 }
 
 if ! index_current; then

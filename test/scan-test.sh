@@ -14,6 +14,21 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 [[ $("$next") == "5 omarchy x86_64 acl 1:2.3.2-1 $(pkgcommit acl) extra" ]] || fail "archci-next: $("$next")"
 "$master/archci-pkgs" | grep '^skipped 1-1 .* skip - skipped -$' >/dev/null || fail "archci-pkgs must list skip_build packages as skip, with pkgnames and deps: $("$master/archci-pkgs" skipped)"
 [[ $("$next" | wc -l) == 1 ]] || fail "next prints one line"
+echo "--- the index caches each directory's line by its tree hash"
+cache=$ARCHCI_HOME/pkgbuilds.cache
+[[ $(wc -l <"$cache") == 4 ]] || fail "one cache entry per package directory: $(cat "$cache")"
+# a line served from the cache is not re-read: doctor acl's entry, change another package, and see it used
+sed -i 's/^\([0-9a-f]* \)1:2.3.2-1 /\19:9-9 /' "$cache"
+mkpkgbuild linux 7.2.3.arch1-3
+commit_pkgs "linux bump"
+"$scan" >/dev/null
+"$master/archci-pkgs" acl | grep '^acl 9:9-9 ' >/dev/null || fail "an unchanged directory must come from the cache: $("$master/archci-pkgs" acl)"
+"$master/archci-pkgs" linux | grep '^linux 7.2.3.arch1-3 ' >/dev/null || fail "a changed directory must be re-read: $("$master/archci-pkgs" linux)"
+[[ $(wc -l <"$cache") == 4 ]] || fail "the old entry of a changed directory is dropped: $(cat "$cache")"
+# without the cache everything is re-read
+rm -f "$cache" "$ARCHCI_HOME/pkgbuilds.index"
+"$master/archci-pkgs" acl | grep '^acl 1:2.3.2-1 ' >/dev/null || fail "without the cache the PKGBUILD is read: $("$master/archci-pkgs" acl)"
+mkpkgbuild linux 7.2.3.arch1-2; commit_pkgs "linux back"; "$scan" >/dev/null   # the rest of the test expects the original set
 ! ARCHCI_PKG_SOURCES=local "$next" | grep . >/dev/null || fail "ARCHCI_PKG_SOURCES must filter by package.json source"
 [[ $(ARCHCI_PKG_SOURCES=local ARCHCI_PKG_ALSO=acl "$next") == "5 omarchy x86_64 acl "* ]] || fail "ARCHCI_PKG_ALSO must build a named package regardless of source"
 frame=$("$top")
