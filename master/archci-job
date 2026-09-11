@@ -25,7 +25,7 @@
 #
 # The queue itself (files under queue/, moved between pending, running, done
 # and failed) is lib/archci-queue.sh; its periodic pass, requeueing stale
-# and due jobs, is master/internal/archci-housekeeping (a timer, not a
+# and due jobs, is master/archci-housekeeping (a timer, not a
 # command).
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"

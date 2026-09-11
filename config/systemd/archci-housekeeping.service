@@ -5,4 +5,4 @@ RequiresMountsFor=/var/lib/archci
 [Service]
 Type=oneshot
 User=archci
-ExecStart=/usr/lib/archci/master/internal/archci-housekeeping
+ExecStart=/usr/lib/archci/master/archci-housekeeping

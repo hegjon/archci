@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # archci-queue.sh -- the master's job queue, sourced by archci-job (the
-# commands) and master/internal/archci-housekeeping (the timer's pass).
+# commands) and master/archci-housekeeping (the timer's pass).
 # Requires archci-common.sh.
 #
 # Jobs are files; moving them between queue/{pending,running,done,failed} is

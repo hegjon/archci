@@ -13,7 +13,7 @@ failed=$master/archci-failed
 job=$master/archci-job
 scan=$master/archci-scan
 next=$master/archci-next
-housekeeping=$master/internal/archci-housekeeping
+housekeeping=$master/archci-housekeeping
 top=$master/archci-top
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # mkpkg DIR NAME VERSION [ARCH] -- smallest thing repo-add accepts as a package

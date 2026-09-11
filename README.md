@@ -245,7 +245,7 @@ bin/      archci-master, archci-signer, archci-worker: the role's command line, 
 tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh, archci-queue.sh (bash), archci.rb (ruby): config, the job queue, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top, archci-failed
-          internal/archci-housekeeping: the queue's timer pass, not a command
+          archci-housekeeping: the queue's timer pass, run by its timer, not a command
 worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
 arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf.sed and qemu/ for aarch64 and riscv64

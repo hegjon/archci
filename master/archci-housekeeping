@@ -1,7 +1,7 @@
 #!/bin/bash
 # archci-housekeeping -- the queue's 5-minute pass, run by
-# archci-housekeeping.timer as the archci user; not a command (it lives in
-# master/internal/, which `archci <name>` does not reach). It requeues
+# archci-housekeeping.timer as the archci user; not a command (`archci <name>`
+# knows only the commands in bin/archci-master). It requeues
 # running jobs whose worker stopped heartbeating (ARCHCI_STALE_MINUTES),
 # drops queued and failed jobs a newer commit of their package supersedes,
 # requeues failed jobs whose retry delay is over (ARCHCI_RETRY_MINUTES, up
@@ -11,8 +11,8 @@
 # polls of workers not heard from for a day (hosts/).
 set -euo pipefail
 here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
-source "$here/../../lib/archci-common.sh"
-source "$here/../../lib/archci-queue.sh"
+source "$here/../lib/archci-common.sh"
+source "$here/../lib/archci-queue.sh"
 
 n=0
 now=$(date +%s)
