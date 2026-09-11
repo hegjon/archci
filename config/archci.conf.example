@@ -49,6 +49,8 @@ ARCHCI_RETRY_HOLD_MINUTES=720
 # lag) and waited for, so its dependents are not claimed before the chroot
 # can install it.
 ARCHCI_RELEASE_LAG_MINUTES=20
+# Where the master keeps what it can rebuild: the package index cache.
+ARCHCI_CACHE_DIR=/var/cache/archci
 # The sourcer host fetches the outstanding packages' sources and keeps the
 # upstream tarballs and the source packages (<pkgbase>-<version>.src.tar.gz)
 # on this rclone path (a public R2 bucket): files/ and pkg/ under it. It

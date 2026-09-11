@@ -15,7 +15,7 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 "$master/archci-pkgs" | grep '^skipped 1-1 .* skip - skipped -$' >/dev/null || fail "archci-pkgs must list skip_build packages as skip, with pkgnames and deps: $("$master/archci-pkgs" skipped)"
 [[ $("$next" | wc -l) == 1 ]] || fail "next prints one line"
 echo "--- the index caches each directory's line by its tree hash"
-cache=$ARCHCI_HOME/pkgbuilds.cache
+cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
 [[ $(wc -l <"$cache") == 4 ]] || fail "one cache entry per package directory: $(cat "$cache")"
 # a line served from the cache is not re-read: doctor acl's entry, change another package, and see it used
 sed -i 's/^\([0-9a-f]* \)1:2.3.2-1 /\19:9-9 /' "$cache"

@@ -76,8 +76,9 @@ at file scope with `CARCH` set), the last commit that touched the directory,
 its `arch` array, the devtools profile (`multilib` for `arch_repo: multilib`
 or a `lib32-` name, else `extra`), the package's `source`, and whether
 `skip_build` is set. The index is cached per clone HEAD, so a claim reads
-one file, and each directory's line by its git tree hash, so a new commit
-re-reads only the PKGBUILDs it touched. The backlog is never written down: when a worker asks for work,
+one file, and each directory's line by its git tree hash (in
+`/var/cache/archci/pkgbuilds.cache`), so a new commit re-reads only the PKGBUILDs
+it touched. The backlog is never written down: when a worker asks for work,
 `archci next <arch>` walks the index and compares each package's version with
 `built/<repo>-<arch>/<name>` (`version commit` of the last successful build;
 for an `any` package also the arches it was pooled for, so enabling an arch

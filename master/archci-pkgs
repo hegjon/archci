@@ -26,7 +26,7 @@
 # so archci-next (once per claim) just reads a file; archci-scan refreshes it
 # after every pull. Versions come from sourcing each PKGBUILD at file scope
 # with CARCH set, the way makepkg reads them; the repository is trusted input.
-# Each directory's line is cached too, in $ARCHCI_HOME/pkgbuilds.cache keyed
+# Each directory's line is cached too, in $ARCHCI_CACHE_DIR/pkgbuilds.cache keyed
 # by the directory's git tree hash (git ls-tree), which changes exactly when
 # its content does: a new commit re-reads only the PKGBUILDs it touched,
 # and a directory at a content seen before is never sourced again.
@@ -51,8 +51,9 @@ index_current() { [[ -f $index && $(head -1 "$index") == "# $head v3" ]]; }
 
 generate() {
 	local dir name version arches pkgnames deps commit source build profile mode type hash line newcache
-	local cache=$ARCHCI_HOME/pkgbuilds.cache
+	local cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
 	local -A cached=()
+	mkdir -p "$ARCHCI_CACHE_DIR"
 	if [[ -f $cache ]]; then
 		while read -r hash line; do cached[$hash]=$line; done <"$cache"
 	fi

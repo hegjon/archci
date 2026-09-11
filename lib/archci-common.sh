@@ -53,6 +53,8 @@ archci_load_conf
 : "${ARCHCI_RETRY_MINUTES:=180}"
 : "${ARCHCI_RETRY_HOLD_MINUTES:=720}"
 : "${ARCHCI_RELEASE_LAG_MINUTES:=20}"
+# where the master keeps what it can rebuild (the index cache)
+: "${ARCHCI_CACHE_DIR:=/var/cache/archci}"
 # The sourcer (archci-sourcer): its state, the rclone path it keeps the
 # upstream tarballs (files/) and source packages (pkg/) at, packages fetched
 # per pass, the time one may take, how long a failed fetch waits before

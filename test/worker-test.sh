@@ -19,7 +19,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 for tool in rrsync bsdtar zstd rsync git; do command -v $tool >/dev/null || { echo "skip: $tool missing"; exit 0; }; done
 
 # --- the master: a real queue with one outstanding package -------------------
-export ARCHCI_CONF=/dev/null ARCHCI_HOME=$tmp/home ARCHCI_REPO=omarchy ARCHCI_ARCH=x86_64 JOURNAL_STREAM=1
+export ARCHCI_CONF=/dev/null ARCHCI_HOME=$tmp/home ARCHCI_CACHE_DIR=$tmp/cache ARCHCI_REPO=omarchy ARCHCI_ARCH=x86_64 JOURNAL_STREAM=1
 export ARCHCI_MAX_ATTEMPTS=3 ARCHCI_STALE_MINUTES=30 ARCHCI_RETRY_MINUTES=0 ARCHCI_PKGBUILDS_BRANCH=master
 mkdir -p "$ARCHCI_HOME"/{queue/{pending,running,done,failed},built,logs,lock,incoming,repo}
 pkgs=$tmp/pkgs
