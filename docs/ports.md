@@ -14,9 +14,9 @@ and reapplies them on every sync from Arch, so a fix is a pull request there,
 and the farm builds it once merged. Until then the package stays in
 `queue/failed`.
 
-What a port needs in archci is one directory, `arch/<arch>/`: a
-`makepkg.conf.sed` that derives the port's makepkg.conf from devtools' x86_64
-one at package build time, and under `qemu/` what an x86_64 machine needs to
+What a port needs in archci is one directory, `arch/<arch>/`: the port's
+`makepkg.conf` (and `makepkg.conf.d/`), devtools' x86_64 one with the port's
+flags, kept in step with devtools by hand, and under `qemu/` what an x86_64 machine needs to
 emulate it (binfmt registration, setarch alias, chroot pacman.conf on the
 port's repository with a package cache of its own, since ports rebuild the
 `any` packages under the same file names, and its signing key if
@@ -40,10 +40,10 @@ today; the sections below say where each takes its base system from.
    chroot needs no pacman config of its own. Then install the worker
    package as on any worker: `ARCHCI_ARCH` defaults to `uname -m`, so
    `archci-worker@N` builds aarch64 there. The chroot's
-   `makepkg.conf` is derived from devtools' x86_64 one when the worker
-   package is built (`arch/aarch64/makepkg.conf.sed`: `-march=armv8-a` and
-   `-mbranch-protection=standard` in place of the x86-only flags), so it
-   follows devtools' flags; copy `/usr/lib/archci/arch/aarch64/makepkg.conf`
+   `makepkg.conf` is devtools' x86_64 one with the port's flags
+   (`arch/aarch64/makepkg.conf`: `-march=armv8-a` and
+   `-mbranch-protection=standard` in place of the x86-only flags), kept in
+   step with devtools by hand; copy `/usr/lib/archci/arch/aarch64/makepkg.conf`
    to `/etc/archci/aarch64/makepkg.conf` to change it, and put a
    `/etc/archci/aarch64/extra.conf` there if the chroot should use a
    different pacman config than the host, for example this repo's own
@@ -97,5 +97,5 @@ extra key is needed on the worker.
   `systemctl enable --now archci-worker-riscv64@1`, exactly as for aarch64.
   Emulated riscv64 is slower still than emulated aarch64; native hardware
   (a Milk-V Pioneer, or a rented RISC-V server) is where volume belongs.
-- **Flags:** `arch/riscv64/makepkg.conf.sed` sets `-march=rv64gc -mabi=lp64d`,
+- **Flags:** `arch/riscv64/makepkg.conf` sets `-march=rv64gc -mabi=lp64d`,
   what Arch Linux RISC-V builds for, and drops the x86-only flags.

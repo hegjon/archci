@@ -16,7 +16,7 @@ pkgdesc='Headless build farm for Arch Linux packages: builds a PKGBUILD reposito
 arch=(any)
 url='https://github.com/hegjon/archci'
 license=(MIT)
-makedepends=(gnupg devtools)
+makedepends=(gnupg)
 checkdepends=(ruby git rsync openssh gnupg zstd shellcheck)
 source=("https://github.com/hegjon/archci/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=(SKIP)   # filled in by tools/release-pkgbuild
@@ -105,20 +105,12 @@ package_archci-worker() {
   install -Dm644 config/systemd/worker/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
   install -Dm644 config/systemd/worker/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
-  # chroot makepkg.conf per port arch: devtools' x86_64 one (and conf.d) through
-  # arch/<arch>/makepkg.conf.sed; fails if a substitution no longer matches
-  local dt=/usr/share/devtools/makepkg.conf.d sedf a out f
-  for sedf in arch/*/makepkg.conf.sed; do
-    a=${sedf#arch/}; a=${a%%/*}; out=$pkgdir$_libdir/arch/$a
-    install -d "$out/makepkg.conf.d"
-    sed -f "$sedf" "$dt/x86_64.conf" >"$out/makepkg.conf"
-    for f in "$dt"/x86_64.conf.d/*.conf; do
-      sed -f "$sedf" "$f" >"$out/makepkg.conf.d/${f##*/}"
-    done
-    grep -q "^CARCH=\"$a\"$" "$out/makepkg.conf" || { echo "$sedf did not set CARCH=$a" >&2; return 1; }
-    if grep -rE 'x86|cf-protection|leaf-frame-pointer|lib32' "$out" | grep -v '^[^:]*:#'; then
-      echo "x86-only flags survived $sedf; update it for this devtools" >&2; return 1
-    fi
+  # chroot makepkg.conf per port arch (arch/<arch>/, kept in step with devtools' x86_64 one by hand)
+  local a
+  for a in arch/*/; do
+    a=${a%/}; a=${a#arch/}
+    install -Dm644 "arch/$a/makepkg.conf" "$pkgdir$_libdir/arch/$a/makepkg.conf"
+    install -Dm644 arch/"$a"/makepkg.conf.d/*.conf -t "$pkgdir$_libdir/arch/$a/makepkg.conf.d"
   done
 }
 

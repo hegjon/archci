@@ -248,7 +248,7 @@ master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archc
           archci-housekeeping: the queue's timer pass, run by its timer, not a command
 worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
-arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf.sed and qemu/ for aarch64 and riscv64
+arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf (and .d/) and qemu/ for aarch64 and riscv64
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
   archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
