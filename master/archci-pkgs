@@ -33,8 +33,11 @@
 # data is written onto the PKGBUILD file itself as extended attributes
 # (user.archci.tree, .version, .commit, .arch, .profile, .source, .build,
 # .arch_repo, .pkgnames, .deps; getfattr -d PKGBUILD shows them): a checkout
-# that changes the file drops them with the old inode. Nothing reads them
-# yet. The clone is on btrfs (a requirement), which takes them.
+# that changes the file drops them with the old inode. Both are written on
+# every rebuild; ARCHCI_INDEX_CACHE says which one is read (file, the
+# default, or xattr), and the journal says what the rebuild cost, so the
+# two can be compared. The clone is on btrfs (a requirement), which takes
+# the attributes.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -68,14 +71,40 @@ annotate() {
 	done
 }
 
+# the cached lines: from the cache file, keyed by tree hash ...
+load_cache_file() {
+	local hash line cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
+	[[ -f $cache ]] || return 0
+	while read -r hash line; do cached[$hash]=$line; done <"$cache"
+}
+# ... or from every PKGBUILD's user.archci.* attributes, one getfattr walk
+# over the clone (the line keyed by the tree hash the file carries)
+load_cache_xattr() {
+	local key value hash='' line
+	local -A a=()
+	while IFS= read -r key; do
+		case $key in
+			"# file: "*)   # the previous file's attributes, if complete, make a line
+				if [[ -n $hash && ${#a[@]} == 9 ]]; then
+					cached[$hash]="${a[version]} ${a[commit]} ${a[arch]} ${a[profile]} ${a[source]} ${a[build]} ${a[arch_repo]} ${a[pkgnames]} ${a[deps]}"
+				fi
+				hash=''; a=() ;;
+			user.archci.tree=*) value=${key#*=}; hash=${value//\"/} ;;
+			user.archci.*=*) value=${key#*=}; key=${key%%=*}; a[${key#user.archci.}]=${value//\"/} ;;
+		esac
+	done < <(getfattr -R -d -m '^user\.archci\.' --absolute-names "$clone/$ARCHCI_PKGBUILDS_DIR" 2>/dev/null; echo "# file: end")
+}
+
 generate() {
 	local dir name version arches pkgnames deps commit source build profile mode type hash line newcache
-	local cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
+	local cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache t0 served=0 sourced=0
 	local -A cached=()
 	mkdir -p "$ARCHCI_CACHE_DIR"
-	if [[ -f $cache ]]; then
-		while read -r hash line; do cached[$hash]=$line; done <"$cache"
-	fi
+	t0=$EPOCHREALTIME
+	case $ARCHCI_INDEX_CACHE in
+		xattr) load_cache_xattr ;;
+		*) load_cache_file ;;
+	esac
 	newcache=$(mktemp "$cache.XXXXXX")
 	printf '# %s v3\n' "$head"
 	while read -r mode type hash name; do
@@ -85,6 +114,7 @@ generate() {
 			printf '%s %s\n' "$name" "${cached[$hash]}"
 			printf '%s %s\n' "$hash" "${cached[$hash]}" >>"$newcache"
 			annotate "$dir/PKGBUILD" "$hash" "${cached[$hash]}"
+			(( ++served ))
 			continue
 		fi
 		[[ -f $dir/PKGBUILD && -f $dir/.omarchy/package.json ]] || continue
@@ -110,8 +140,10 @@ generate() {
 		printf '%s %s\n' "$name" "$line"
 		printf '%s %s\n' "$hash" "$line" >>"$newcache"
 		annotate "$dir/PKGBUILD" "$hash" "$line"
+		(( ++sourced ))
 	done < <(git -C "$clone" ls-tree "HEAD:$ARCHCI_PKGBUILDS_DIR")
 	mv "$newcache" "$cache"   # entries for content no longer in the tree are gone with the old file
+	archci_log "index rebuilt: $served from the ${ARCHCI_INDEX_CACHE:-file} cache, $sourced sourced, $(awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.2f", b - a }') s"
 }
 
 if ! index_current; then

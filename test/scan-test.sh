@@ -28,6 +28,11 @@ commit_pkgs "linux bump"
 "$master/archci-pkgs" acl | grep '^acl 9:9-9 ' >/dev/null || fail "an unchanged directory must come from the cache: $("$master/archci-pkgs" acl)"
 "$master/archci-pkgs" linux | grep '^linux 7.2.3.arch1-3 ' >/dev/null || fail "a changed directory must be re-read: $("$master/archci-pkgs" linux)"
 [[ $(wc -l <"$cache") == 4 ]] || fail "the old entry of a changed directory is dropped: $(cat "$cache")"
+# the attributes as the cache (ARCHCI_INDEX_CACHE=xattr): a doctored attribute is what comes out
+setfattr -n user.archci.version -v 8:8-8 "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD"
+rm -f "$ARCHCI_HOME/pkgbuilds.index"
+ARCHCI_INDEX_CACHE=xattr "$master/archci-pkgs" acl | grep '^acl 8:8-8 ' >/dev/null || fail "with ARCHCI_INDEX_CACHE=xattr the line must come from the PKGBUILD's attributes: $(ARCHCI_INDEX_CACHE=xattr "$master/archci-pkgs" acl)"
+setfattr -n user.archci.version -v 1:2.3.2-1 "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD"
 # without the cache everything is re-read
 rm -f "$cache" "$ARCHCI_HOME/pkgbuilds.index"
 "$master/archci-pkgs" acl | grep '^acl 1:2.3.2-1 ' >/dev/null || fail "without the cache the PKGBUILD is read: $("$master/archci-pkgs" acl)"

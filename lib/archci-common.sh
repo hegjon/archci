@@ -55,6 +55,9 @@ archci_load_conf
 : "${ARCHCI_RELEASE_LAG_MINUTES:=20}"
 # where the master keeps what it can rebuild (the index cache)
 : "${ARCHCI_CACHE_DIR:=/var/cache/archci}"
+# where archci-pkgs reads a directory's cached index line from: the cache file
+# (file) or the PKGBUILD's extended attributes (xattr); both are written
+: "${ARCHCI_INDEX_CACHE:=file}"
 # The sourcer (archci-sourcer): its state, the rclone path it keeps the
 # upstream tarballs (files/) and source packages (pkg/) at, packages fetched
 # per pass, the time one may take, how long a failed fetch waits before

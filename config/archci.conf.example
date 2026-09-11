@@ -51,6 +51,10 @@ ARCHCI_RETRY_HOLD_MINUTES=720
 ARCHCI_RELEASE_LAG_MINUTES=20
 # Where the master keeps what it can rebuild: the package index cache.
 ARCHCI_CACHE_DIR=/var/cache/archci
+# Where the index reads a package's cached line from: "file" (pkgbuilds.cache
+# there) or "xattr" (the PKGBUILD's user.archci.* extended attributes). Both
+# are written; the scan's journal says what each rebuild cost.
+ARCHCI_INDEX_CACHE=file
 # The sourcer host fetches the outstanding packages' sources and keeps the
 # upstream tarballs and the source packages (<pkgbase>-<version>.src.tar.gz)
 # on this rclone path (a public R2 bucket): files/ and pkg/ under it. It
