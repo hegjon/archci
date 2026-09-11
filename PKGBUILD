@@ -151,7 +151,7 @@ package_archci-worker-qemu-riscv64() {
 
 package_archci-sourcer() {
   pkgdesc='Headless build farm for Arch Linux packages (sourcer: fetches upstream sources into source packages on R2 for the workers)'
-  depends=("archci=$pkgver-$pkgrel" git rclone gnupg openssh libarchive)
+  depends=("archci=$pkgver-$pkgrel" git rclone gnupg openssh libarchive debugedit)
 
   _install_role sourcer archci-sourcer.service archci-sourcer.timer
   _install_cli sourcer

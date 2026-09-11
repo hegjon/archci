@@ -1,7 +1,8 @@
 #!/bin/bash
 # archci-sourcer [PKGBASE...] -- fetch the sources of the packages the master
 # has outstanding and keep them on R2 for the workers. Runs on the sourcer
-# host, as the archci user, on a timer; the one host of the farm that talks
+# host as root on a timer (the worker key and the rclone config are root's;
+# makepkg and gpg run as the archci user); the one host of the farm that talks
 # to upstream. Each pass asks the master (over ssh, with a worker key, like a
 # worker) which packages lack sources, ARCHCI_SOURCER_BATCH of them in claim
 # order (or the ones named), and for each: exports the PKGBUILD directory at
@@ -18,23 +19,27 @@
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-for tool in makepkg git rclone gpg bsdtar; do
+for tool in makepkg git rclone gpg bsdtar debugedit; do   # (makepkg insists on debugedit whatever it is asked)
 	command -v "$tool" >/dev/null || archci_die "$tool is not installed"
 done
 [[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
 [[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY"
 [[ -n $ARCHCI_R2_SOURCES ]] || archci_die "ARCHCI_R2_SOURCES is not set in $ARCHCI_CONF"
-(( EUID != 0 )) || archci_die "must not run as root (makepkg refuses; the unit runs as archci)"
+(( EUID == 0 )) || archci_die "must run as root (the worker key and the rclone config are root's)"
 export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
 export GIT_TERMINAL_PROMPT=0
 
+user=archci
 home=$ARCHCI_SOURCER_HOME
 mirror=$home/pkgbuilds.git
 srcdest=$home/srcdest
 work=$home/work
-export GNUPGHOME=$home/gnupg
+gnupghome=$home/gnupg
 mkdir -p "$srcdest" "$work"
-install -d -m 700 "$GNUPGHOME"
+install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$gnupghome"
+chown "$user" "$srcdest" "$work"
+# makepkg and gpg, as the archci user (makepkg refuses root)
+as_user() { runuser -u "$user" -- env HOME="$home" GNUPGHOME="$gnupghome" "$@"; }
 
 ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
 	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
@@ -78,17 +83,18 @@ fetch_one() {   # fetch_one PKGBASE VERSION COMMIT
 		rm -rf "$w"
 		return 1
 	fi
-	[[ -f $w/pkg/.SRCINFO ]] || (cd "$w/pkg" && BUILDDIR=$w/build makepkg --printsrcinfo >.SRCINFO 2>/dev/null) || true
+	chown -R "$user" "$w"
+	[[ -f $w/pkg/.SRCINFO ]] || (cd "$w/pkg" && as_user env BUILDDIR="$w/build" makepkg --printsrcinfo >.SRCINFO 2>/dev/null) || true
 	# the keys validpgpkeys names: keys/pgp/ from the repository, then the keyservers
 	if compgen -G "$w/pkg/keys/pgp/*.asc" >/dev/null; then
-		gpg --batch --quiet --import "$w"/pkg/keys/pgp/*.asc 2>/dev/null || true
+		as_user gpg --batch --quiet --import "$w"/pkg/keys/pgp/*.asc 2>/dev/null || true
 	fi
 	if [[ -n $ARCHCI_KEYSERVERS ]]; then
 		local fingerprints keyserver
 		mapfile -t fingerprints < <(sed -n 's/^\tvalidpgpkeys = //p' "$w/pkg/.SRCINFO" 2>/dev/null)
 		if (( ${#fingerprints[@]} )); then
 			for keyserver in $ARCHCI_KEYSERVERS; do
-				timeout 120 gpg --batch --quiet --keyserver "$keyserver" --recv-keys "${fingerprints[@]}" 2>/dev/null || true
+				as_user timeout 120 gpg --batch --quiet --keyserver "$keyserver" --recv-keys "${fingerprints[@]}" 2>/dev/null || true
 			done
 		fi
 	fi
@@ -102,7 +108,7 @@ fetch_one() {   # fetch_one PKGBASE VERSION COMMIT
 	fi
 	log=$w/makepkg.log
 	run_makepkg() {
-		(cd "$w/pkg" && SRCDEST=$srcdest SRCPKGDEST=$w/out BUILDDIR=$w/build timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
+		(cd "$w/pkg" && as_user env SRCDEST="$srcdest" SRCPKGDEST="$w/out" BUILDDIR="$w/build" timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
 			makepkg --allsource --ignorearch) >"$log" 2>&1
 	}
 	if run_makepkg; then rc=0
@@ -148,10 +154,11 @@ report_failed() {   # report_failed PKGBASE COMMIT MESSAGE
 # --- the pass
 if (( $# )); then
 	list=$(master sources-needed --all) || archci_die "could not ask $ARCHCI_MASTER"
-	for p in "$@"; do grep "^$p " <<<"$list" || archci_log "$p: not outstanding, or its sources are in"; done
+	for p in "$@"; do grep "^$p " <<<"$list" || archci_log "$p: not outstanding, or its sources are in"; done >"$work/list" || true
 else
-	master sources-needed || archci_die "could not ask $ARCHCI_MASTER"
-fi | head -n "$(( $# ? 1000 : ARCHCI_SOURCER_BATCH ))" >"$work/list" || true
+	list=$(master sources-needed) || archci_die "could not ask $ARCHCI_MASTER"
+	head -n "$ARCHCI_SOURCER_BATCH" <<<"$list" >"$work/list"
+fi
 n=0
 fetched=0
 while read -r pkgbase version commit; do

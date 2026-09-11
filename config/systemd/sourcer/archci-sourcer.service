@@ -6,7 +6,6 @@ RequiresMountsFor=/var/lib/archci-sourcer
 
 [Service]
 Type=oneshot
-User=archci
 ExecStart=/usr/lib/archci/sourcer/archci-sourcer
 # a pass fetches ARCHCI_SOURCER_BATCH packages, each within ARCHCI_SOURCER_TIMEOUT_MINUTES
 TimeoutStartSec=4h
