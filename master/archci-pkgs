@@ -64,12 +64,14 @@ annotate() {
 	local file=$1 hash=$2 f i
 	[[ ${carries[$file]:-} == "$hash" ]] && return 0
 	read -ra f <<<"$3"
-	setfattr -n user.archci.tree -v "$hash" "$file" || archci_die "cannot set extended attributes on $file (is the clone on btrfs?)"
 	i=0
 	for name in version commit arch profile source build arch_repo pkgnames deps; do
-		setfattr -n "user.archci.$name" -v "${f[i]:--}" "$file"
+		setfattr -n "user.archci.$name" -v "${f[i]:--}" "$file" || archci_die "cannot set extended attributes on $file (is the clone on btrfs?)"
 		(( ++i ))
 	done
+	# the key last: a file interrupted half-way carries the old hash with new
+	# fields, or none, and is read again, never the new hash with old fields
+	setfattr -n user.archci.tree -v "$hash" "$file"
 }
 
 # the cached lines: from the cache file, keyed by tree hash ...
