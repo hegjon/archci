@@ -120,40 +120,46 @@ generate() {
 	while read -r mode type hash name; do
 		[[ $type == tree ]] || continue
 		dir=$clone/$ARCHCI_PKGBUILDS_DIR/$name
-		if [[ -n ${cached[$hash]:-} ]]; then   # this content was read before
-			printf '%s %s\n' "$name" "${cached[$hash]}"
-			printf '%s %s\n' "$hash" "${cached[$hash]}" >>"$newcache"
-			annotate "$dir/PKGBUILD" "$hash" "${cached[$hash]}"
+		# the line: from the cache when this content was read before, else
+		# calculated now
+		if [[ -n ${cached[$hash]:-} ]]; then
+			line=${cached[$hash]}
 			(( ++served ))
-			continue
+		else
+			line=$(calculate "$dir" "$name") || continue
+			(( ++sourced ))
 		fi
-		[[ -f $dir/PKGBUILD && -f $dir/.omarchy/package.json ]] || continue
-		version='' arches='' pkgnames='' deps=''
-		# shellcheck disable=SC2016  # the single-quoted script runs in the child bash
-		read -r version arches pkgnames deps < <(env -i PATH="$PATH" CARCH="$ARCHCI_ANY_ARCH" bash -c '
-			cd "$1" && source ./PKGBUILD >/dev/null 2>&1
-			ds=(); for d in "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}"; do
-				d=${d%%[<>=]*}; [[ -z $d || $d == *.so* ]] && continue; ds+=("$d")
-			done
-			printf "%s %s %s %s\n" "${epoch:+$epoch:}${pkgver:-}-${pkgrel:-}" "$(IFS=,; printf "%s" "${arch[*]:-}")" \
-				"$(IFS=,; printf "%s" "${pkgname[*]:-}")" "$(IFS=,; printf "%s" "${ds[*]:--}")"' _ "$dir") || true
-		if [[ ! $name =~ ^[a-zA-Z0-9@._+-]+$ || ! $version =~ ^[a-zA-Z0-9@._+:~-]+-[a-zA-Z0-9.]+$ ]]; then
-			archci_log "skipping $name: cannot read pkgver/pkgrel from its PKGBUILD"
-			continue
-		fi
-		commit=$(git -C "$clone" log -1 --format=%H -- "$ARCHCI_PKGBUILDS_DIR/$name")
-		read -r source build repo < <(jq -r '
-			[(.source // "local"), (if .skip_build == true then "skip" else "build" end), (.arch_repo // "-")]
-			| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; continue; }
-		if [[ $repo == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
-		line="$version $commit ${arches:-x86_64} $profile $source $build $repo ${pkgnames:-$name} ${deps:--}"
 		printf '%s %s\n' "$name" "$line"
 		printf '%s %s\n' "$hash" "$line" >>"$newcache"
 		annotate "$dir/PKGBUILD" "$hash" "$line"
-		(( ++sourced ))
 	done < <(git -C "$clone" ls-tree "HEAD:$ARCHCI_PKGBUILDS_DIR")
 	mv "$newcache" "$cache"   # entries for content no longer in the tree are gone with the old file
 	archci_log "index rebuilt: $served from the ${ARCHCI_INDEX_CACHE:-file} cache, $sourced sourced, $(awk -v a="$t0" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.2f", b - a }') s"
+}
+
+# calculate DIR NAME -> the directory's line (all but the name), by sourcing
+# its PKGBUILD, reading its package.json and asking git for its last commit
+calculate() {
+	local dir=$1 name=$2 version='' arches='' pkgnames='' deps='' commit source build repo profile
+	[[ -f $dir/PKGBUILD && -f $dir/.omarchy/package.json ]] || return 1
+	# shellcheck disable=SC2016  # the single-quoted script runs in the child bash
+	read -r version arches pkgnames deps < <(env -i PATH="$PATH" CARCH="$ARCHCI_ANY_ARCH" bash -c '
+		cd "$1" && source ./PKGBUILD >/dev/null 2>&1
+		ds=(); for d in "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}"; do
+			d=${d%%[<>=]*}; [[ -z $d || $d == *.so* ]] && continue; ds+=("$d")
+		done
+		printf "%s %s %s %s\n" "${epoch:+$epoch:}${pkgver:-}-${pkgrel:-}" "$(IFS=,; printf "%s" "${arch[*]:-}")" \
+			"$(IFS=,; printf "%s" "${pkgname[*]:-}")" "$(IFS=,; printf "%s" "${ds[*]:--}")"' _ "$dir") || true
+	if [[ ! $name =~ ^[a-zA-Z0-9@._+-]+$ || ! $version =~ ^[a-zA-Z0-9@._+:~-]+-[a-zA-Z0-9.]+$ ]]; then
+		archci_log "skipping $name: cannot read pkgver/pkgrel from its PKGBUILD"
+		return 1
+	fi
+	commit=$(git -C "$clone" log -1 --format=%H -- "$ARCHCI_PKGBUILDS_DIR/$name")
+	read -r source build repo < <(jq -r '
+		[(.source // "local"), (if .skip_build == true then "skip" else "build" end), (.arch_repo // "-")]
+		| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; return 1; }
+	if [[ $repo == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
+	printf '%s %s %s %s %s %s %s %s %s\n' "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build" "$repo" "${pkgnames:-$name}" "${deps:--}"
 }
 
 if ! index_current; then
