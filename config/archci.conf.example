@@ -15,7 +15,7 @@ ARCHCI_HOME=/var/lib/archci
 # another fork (e.g. https://github.com/omacom/omarchy-pkgs.git) change the
 # URL on master and workers; the next scan and build follow it.
 ARCHCI_PKGBUILDS_URL=https://github.com/hegjon/omarchy-pkgs.git
-ARCHCI_PKGBUILDS_BRANCH=master
+ARCHCI_PKGBUILDS_BRANCH=core+extra
 ARCHCI_PKGBUILDS_DIR=pkgbuilds
 # Name of the pacman repository produced: $repo in the client's Server line,
 # the database name, and the repo/<repo>/os/<arch> pool.

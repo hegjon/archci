@@ -38,7 +38,7 @@ archci_load_conf
 # outstanding when the version its PKGBUILD declares is not the one last
 # built. Switching to another fork is this one URL.
 : "${ARCHCI_PKGBUILDS_URL:=https://github.com/hegjon/omarchy-pkgs.git}"
-: "${ARCHCI_PKGBUILDS_BRANCH:=master}"
+: "${ARCHCI_PKGBUILDS_BRANCH:=core+extra}"
 : "${ARCHCI_PKGBUILDS_DIR:=pkgbuilds}"
 # Name of the pacman repository the farm produces ($repo in the client's
 # Server line, the database name, and the repo/<repo>/os/<arch> pool).

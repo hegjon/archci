@@ -20,7 +20,7 @@ module Archci
     'ARCHCI_HOME' => '/var/lib/archci',
     'ARCHCI_ARCH' => Etc.uname[:machine],
     'ARCHCI_PKGBUILDS_URL' => 'https://github.com/hegjon/omarchy-pkgs.git',
-    'ARCHCI_PKGBUILDS_BRANCH' => 'master',
+    'ARCHCI_PKGBUILDS_BRANCH' => 'core+extra',
     'ARCHCI_PKGBUILDS_DIR' => 'pkgbuilds',
     'ARCHCI_REPO' => 'omarchy',
     'ARCHCI_PKG_SOURCES' => '',

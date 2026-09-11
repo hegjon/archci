@@ -365,7 +365,7 @@ filesystem allows. Then:
    `ARCHCI_ARCHES`, and the PKGBUILD repository: `ARCHCI_PKGBUILDS_URL`
    (default `https://github.com/hegjon/omarchy-pkgs.git`; set it to
    `https://github.com/omacom/omarchy-pkgs.git` to follow that fork, on the
-   workers too), `ARCHCI_PKGBUILDS_BRANCH` (`master`), `ARCHCI_REPO`
+   workers too), `ARCHCI_PKGBUILDS_BRANCH` (`core+extra`), `ARCHCI_REPO`
    (`omarchy`, the pacman repository name produced) and optionally
    `ARCHCI_PKG_SOURCES`. The master needs no release credentials; the signer
    publishes the release area.
