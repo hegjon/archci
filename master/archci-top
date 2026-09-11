@@ -154,6 +154,12 @@ def frame(journal)
                 *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                   snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })
   out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{bold(n)}/#{snap['tracked'][k]}" }.join('  '))
+  # the sourcer: source packages in for the outstanding packages, what it
+  # still has to fetch, fetches that failed, and when it last did anything
+  if (s = snap['sources']) && (s['ready'] + s['needed'] + s['failed']).positive?
+    out << format('sources: %s packaged  %s to fetch  %s failed%s', bold(s['ready']), bold(s['needed']), bold(s['failed']),
+                  s['last'] ? "   (last fetch #{elapsed(now - Time.iso8601(s['last']))} ago)" : '')
+  end
   # the signer, as seen through R2 by archci-signer-status: what is signed
   # and released per arch on one line, what waits unsigned in staging on
   # the next

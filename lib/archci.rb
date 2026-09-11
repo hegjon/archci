@@ -336,6 +336,23 @@ module Archci
     any_count = pkgs.count { |p| p['arches'] == ['any'] }
     sets = arches.map { |a| ["#{repo}-#{a}", pkgs.size - any_count] } << ["#{repo}-any", any_count]
     outstanding = self.outstanding
+    # the sourcer's records (sources/<pkgbase>: commit, then file= or
+    # error=): source packages in for their current commit, fetches that
+    # failed at it, and outstanding packages still without one
+    sources = { 'ready' => 0, 'failed' => 0, 'needed' => 0, 'last' => nil }
+    ready = {}
+    Dir.glob(File.join(home, 'sources', '*')).each do |rec|
+      fields = File.readlines(rec, chomp: true).to_h { |l| l.split('=', 2) } rescue next
+      base = File.basename(rec)
+      ready[base] = fields['commit'] if fields['file']
+      sources['failed'] += 1 if fields['error']
+      tried = Time.at(fields['tried'].to_i) if fields['tried']
+      sources['last'] = tried if tried && (sources['last'].nil? || tried > sources['last'])
+    end
+    outstanding.map { |e| [e['pkgbase'], e['commit']] }.uniq.each do |base, commit|
+      if ready[base] == commit then sources['ready'] += 1 else sources['needed'] += 1 end
+    end
+    sources['last'] = sources['last']&.utc&.iso8601
     updates = outstanding.count { |e| e['prio'] == 1 }
     by_name = packages.to_h { |p| [p['pkgbase'], p] }
     job = lambda do |j|
@@ -367,6 +384,7 @@ module Archci
       'queue' => counts,
       'done_last_hour' => done_paths.count { |p| now - File.mtime(p) < 3600 },
       'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
+      'sources' => sources,
       'tracked' => sets.to_h,
       'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
       'hosts' => hosts(running, recent, Dir.glob(File.join(home, 'hosts', '*')).filter_map { |p| read_job(p) }, now),

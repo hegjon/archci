@@ -81,6 +81,7 @@ grep -q '^file=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/sources/libsigc++" 
 grep -q '^error=Failure while downloading' "$ARCHCI_HOME/sources/linux" || fail "sources-failed must record the error"
 [[ -z $("$job" sources-needed) ]] || fail "a package with sources in, or failed lately, is not offered: $("$job" sources-needed)"
 [[ $("$job" sources-needed --all) == "linux "* ]] || fail "sources-needed --all offers the failed one again: $("$job" sources-needed --all)"
+"$top" | grep "^sources: 1 packaged  1 to fetch  1 failed   (last fetch " >/dev/null || fail "top must show the sourcer's state: $("$top" | grep ^sources)"
 ! "$job" sources-ready 'evil;rm' abc123 x.src.tar.gz 2>/dev/null || fail "a bad package name must be refused"
 echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
