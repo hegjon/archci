@@ -243,7 +243,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ```
 bin/      archci: the command line (archci-cli), `archci <name>` runs archci-<name> of an installed role
 tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
-lib/      archci-common.sh, archci-queue.sh (bash), archci.rb and archci-frame.rb (ruby): config, the job queue, paths, the top frame
+lib/      archci-common.sh, archci-queue.sh (bash), archci.rb (ruby): config, the job queue, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top
           internal/archci-housekeeping: the queue's timer pass, not a command
 worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
