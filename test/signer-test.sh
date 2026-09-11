@@ -101,17 +101,17 @@ out=$("$here/../signer/archci-sign" 2>&1)
 
 echo "--- a pass takes ARCHCI_SIGN_BATCH packages, the farm's own first, the rest wait"
 bs=$tmp/batch; mkdir -p "$bs/staging/omarchy/os/x86_64" "$bs/release/omarchy/os/x86_64" "$tmp/bs-signer"
-for n in zzz-late archci-cli aaa-early; do
+for n in zzz-late archci-master aaa-early; do
 	mkpkg "$bs/staging/omarchy/os/x86_64" $n 1-1
 	gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$bs/staging/omarchy/os/x86_64/$n-1-1-x86_64.pkg.tar.zst.buildsig" "$bs/staging/omarchy/os/x86_64/$n-1-1-x86_64.pkg.tar.zst"
 done
 touch -d '-2 hours' "$bs/staging/omarchy/os/x86_64/zzz-late-1-1-x86_64.pkg.tar.zst"   # the oldest, but archci comes first
 out=$(ARCHCI_R2_STAGING=$bs/staging ARCHCI_R2_RELEASE=$bs/release ARCHCI_SIGNER_HOME=$tmp/bs-signer ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
 [[ $out == *"this pass takes 2"* && $out == *"signed 2, rejected 0; 1 left"* ]] || fail "batch of 2 out of 3: $out"
-[[ -f $bs/release/omarchy/os/x86_64/archci-cli-1-1-x86_64.pkg.tar.zst.sig ]] || fail "the farm's own package must be in the first pass"
+[[ -f $bs/release/omarchy/os/x86_64/archci-master-1-1-x86_64.pkg.tar.zst.sig ]] || fail "the farm's own package must be in the first pass"
 [[ -f $bs/release/omarchy/os/x86_64/zzz-late-1-1-x86_64.pkg.tar.zst.sig ]] || fail "then the oldest"
 [[ ! -e $bs/release/omarchy/os/x86_64/aaa-early-1-1-x86_64.pkg.tar.zst && -f $bs/staging/omarchy/os/x86_64/aaa-early-1-1-x86_64.pkg.tar.zst ]] || fail "the third waits in staging"
-[[ ! -e $bs/staging/omarchy/os/x86_64/archci-cli-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "signed packages leave staging with their buildsig"
+[[ ! -e $bs/staging/omarchy/os/x86_64/archci-master-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "signed packages leave staging with their buildsig"
 out=$(ARCHCI_R2_STAGING=$bs/staging ARCHCI_R2_RELEASE=$bs/release ARCHCI_SIGNER_HOME=$tmp/bs-signer ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
 [[ $out == *"signed 1, rejected 0; 0 left"* ]] || fail "the next pass drains the rest: $out"
 bsdtar -xOf "$bs/release/omarchy/os/x86_64/omarchy.db.tar.gz" '*/desc' | grep -c '\.pkg\.tar\.zst$' | grep -x 3 >/dev/null || fail "all three in the release db"
