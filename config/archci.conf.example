@@ -136,6 +136,8 @@ ARCHCI_CACHE_KEEP=1
 # On a port arch (anything but x86_64) also pass --ignorearch, since PKGBUILDs
 # carried from Arch declare arch=(x86_64) only. 0 to build just packages that
 # list the arch (read on the master too: such packages are then not offered).
+# AUR and local packages list the arches they support and are built only
+# there, whatever this says.
 ARCHCI_IGNOREARCH=1
 # Stamped into every package (shown as Packager in pacman -Si). Use your identity.
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"

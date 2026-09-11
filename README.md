@@ -93,9 +93,11 @@ and only gets jobs for it. A package whose PKGBUILD says `arch=(any)` is one
 job, given to workers of `ARCHCI_ANY_ARCH` (default: the first arch listed),
 and the resulting package is pooled into every arch's directory, because
 pacman fetches all packages from the client's own `$repo/os/$arch`. Every
-other package is offered to every enabled arch: a port arch builds PKGBUILDs
-that only list x86_64 with `--ignorearch` (see [docs/ports.md](docs/ports.md)),
-unless `ARCHCI_IGNOREARCH=0` limits it to packages that list the arch.
+other package is offered to the enabled arches its arch array lists; Arch's
+own PKGBUILDs, which list x86_64 only, a port arch builds anyway with
+`--ignorearch` (see [docs/ports.md](docs/ports.md)), unless
+`ARCHCI_IGNOREARCH=0` limits it to packages that list the arch. An AUR or
+local package is built only where its arch array says.
 
 **Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>` once a
 minute, with the host's load, memory, disk and vendor, which the master keeps

@@ -5,8 +5,9 @@ Arch Linux itself releases only x86_64: PKGBUILDs carried from it say
 official mirrors carry no other binaries. archci therefore treats every other
 arch as a port, the way the [Arch Linux Ports](https://ports.archlinux.page/)
 project does: it builds the same package list at the same commits, passes
-`--ignorearch` to makepkg, and takes the base system for the chroot from that
-port's repository. Expect a long tail of packages that need patches (the
+`--ignorearch` to makepkg for Arch's own PKGBUILDs (an AUR or local package
+is built only where its arch array says), and takes the base system for the
+chroot from that port's repository. Expect a long tail of packages that need patches (the
 kernel, bootloaders, x86 assembly). Those patches live in the PKGBUILD
 repository: omarchy-pkgs keeps them in `pkgbuilds/<name>/.omarchy/patches/`
 and reapplies them on every sync from Arch, so a fix is a pull request there,
