@@ -73,12 +73,17 @@ fi
 [[ -f $mkconf ]] || archci_die "no makepkg.conf for $arch (devtools has none; add /etc/archci/$arch/makepkg.conf)"
 base_packages=(base-devel)
 [[ $profile == multilib* ]] && base_packages+=(multilib-devel)
-# The chroot's pacman cache: a port's pacman.conf names one of its own (its
-# "any" packages share names with the host's but not bytes); the host's
-# otherwise. arch-nspawn reads it from the pacman.conf, mkarchroot needs -c.
+# The pacman caches: the copies' is the farm's per repository and arch (the
+# derived pacconf names it: the farm's packages share names with the
+# mirrors' but not bytes), the root's is the mirrors' own (mirrorconf: a
+# port's pacman.conf names one of its own, the host's otherwise), since the
+# root installs from the mirrors alone. arch-nspawn reads the cache from
+# the pacman.conf it is given, mkarchroot needs -c.
 cachedir=$(pacman-conf --config "$pacconf" CacheDir | head -1)
 : "${cachedir:=/var/cache/pacman/pkg/}"
-mkdir -p "$cachedir"
+rootcache=$(pacman-conf --config "$mirrorconf" CacheDir | head -1)
+: "${rootcache:=/var/cache/pacman/pkg/}"
+mkdir -p "$cachedir" "$rootcache"
 copy=archci-$instance
 # the sources by the arch this instance builds as well as its number: the
 # aarch64 and riscv64 instances 1 of one host both build a "guile" at times
@@ -97,8 +102,16 @@ ROOT_POLICY=mirrors-only   # the root upgrades from the mirrors alone; the farm'
 # (the farm's repository first) with its databases synced: the copies
 # resolve dependencies from a fresh view, the root installs nothing from it
 update_root() {
-	arch-nspawn -C "$mirrorconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syuu --noconfirm &&
+	arch-nspawn -C "$mirrorconf" -M "$mkconf" -c "$rootcache" "$chroot/root" pacman -Syuu --noconfirm &&
 		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Sy >/dev/null
+}
+# the root from the mirrors; once more on failure, as for an update (a
+# cached file that fails its checksum is dropped by pacman on the first try)
+create_root() {
+	mkarchroot -C "$mirrorconf" -M "$mkconf" -c "$rootcache" "$chroot/root" "${base_packages[@]}" && return 0
+	say "creating the chroot failed; trying once more"
+	rm -rf --one-file-system "$chroot/root"
+	mkarchroot -C "$mirrorconf" -M "$mkconf" -c "$rootcache" "$chroot/root" "${base_packages[@]}"
 }
 prepare_root() {
 	local have='' policy=''
@@ -114,7 +127,7 @@ prepare_root() {
 		done
 		rm -rf --one-file-system "$chroot"
 		(umask 0022; mkdir -p "$chroot")
-		mkarchroot -C "$mirrorconf" -M "$mkconf" -c "$cachedir" "$chroot/root" "${base_packages[@]}"
+		create_root
 		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Sy >/dev/null
 		printf '%s\n' "$ROOT_POLICY" >"$chroot/root/.archci-root"
 		touch "$chroot/root.updated"
