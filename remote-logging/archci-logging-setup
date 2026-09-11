@@ -1,0 +1,22 @@
+#!/bin/bash
+# archci-logging-setup -- the journal streaming configuration from
+# ARCHCI_JOURNAL_URL, run by archci-logging-setup.service before the tunnel
+# and the upload: the systemd-journal-upload drop-in in /run, and the flag
+# that lets archci-logging-tunnel.service start when the URL is the tunnel's.
+# An empty URL streams nothing: the drop-in is removed and the upload does
+# not start.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+(( EUID == 0 )) || archci_die "must run as root"
+
+install -d -m 755 /run/archci /run/systemd/journal-upload.conf.d
+rm -f /run/archci/logging-tunnel /run/systemd/journal-upload.conf.d/archci.conf
+if [[ -n $ARCHCI_JOURNAL_URL ]]; then
+	printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/run/systemd/journal-upload.conf.d/archci.conf
+	case $ARCHCI_JOURNAL_URL in
+		http://127.0.0.1:*|http://localhost:*) : >/run/archci/logging-tunnel ;;
+	esac
+	archci_log "journal -> $ARCHCI_JOURNAL_URL"
+else
+	archci_log "journal streaming off (ARCHCI_JOURNAL_URL empty)"
+fi

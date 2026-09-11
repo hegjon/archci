@@ -1,7 +1,7 @@
 # First-start preparation of a worker (keys, chroot directory, journal
 # streaming configuration); pulled in by every archci-worker@ instance.
 [Unit]
-Description=archci worker setup: keys and journal streaming configuration
+Description=archci worker setup: keys and the chroot directory
 After=network-online.target
 Wants=network-online.target
 

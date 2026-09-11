@@ -249,13 +249,15 @@ master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archc
 worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
 sourcer/  archci-sourcer: the outstanding packages' sources fetched into source packages on R2 for the workers
+remote-logging/  archci-logging-setup: the journal streaming configuration from ARCHCI_JOURNAL_URL
 arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf (and .d/) and qemu/ for aarch64 and riscv64
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
   archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
   systemd/  archci.sysusers, then one folder per role: master/ (units, timers,
-            the journal receiver and its conf, tmpfiles), worker/ (units, the
-            journal tunnel and namespace, tmpfiles), signer/ (units, timers, tmpfiles)
+            the journal receiver and its conf, tmpfiles), worker/ (units, tmpfiles),
+            signer/ (units, timers, tmpfiles), sourcer/ (unit, timer, tmpfiles),
+            remote-logging/ (the journal tunnel and namespace, the upload drop-in)
   ssh/      sshd_config.d/60-archci.conf: worker keys from /etc/archci/authorized_keys
   pacman/   the hook that reloads sshd when that drop-in is installed
   gnupg/    the signer's release keyring gpg-agent.conf
@@ -312,6 +314,9 @@ role on top of a shared one:
 
 - `archci`: `lib/` under `/usr/lib/archci`, the config as
   `/etc/archci/archci.conf`, and the `archci` user (sysusers)
+- `archci-remote-logging`: the `archci` journal namespace and its streaming
+  to the master through an ssh tunnel over the worker key; the workers and
+  the sourcer depend on it
 - `archci-master`, `archci-worker`, `archci-signer`, `archci-sourcer`: the role's
   scripts under `/usr/lib/archci/<role>/` (run by its units), its units in
   `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies;
@@ -323,8 +328,8 @@ role on top of a shared one:
   instances under qemu user-mode emulation (see [docs/ports.md](docs/ports.md))
 
 What a package cannot ship as a file happens on first start: a worker's
-`archci-worker-setup.service` generates its keys and configures journal
-streaming, the master's sshd is reloaded by a pacman hook, the signer's
+`archci-worker-setup.service` generates its keys, `archci-logging-setup.service`
+configures journal streaming, the master's sshd is reloaded by a pacman hook, the signer's
 keyrings are directories the package creates. What remains is per-site:
 keys to authorize, R2 credentials, and enabling units, listed per role
 below. The signer needs only R2 access; workers need only ssh to the master.
@@ -400,8 +405,9 @@ systemctl enable --now archci-worker@1
 to the master's address first. The first start runs
 `archci-worker-setup.service`: it generates `/etc/archci/worker_key` and the
 builder signing key, makes `/var/lib/archbuild` a btrfs subvolume when the
-filesystem allows, configures journal streaming from `ARCHCI_JOURNAL_URL`,
-and logs the two public keys to authorize:
+filesystem allows, and logs the two public keys to authorize
+(`archci-logging-setup.service`, from archci-remote-logging, configures the
+journal streaming from `ARCHCI_JOURNAL_URL`):
 
 ```
 journalctl -u archci-worker-setup            # the keys and the commands to run

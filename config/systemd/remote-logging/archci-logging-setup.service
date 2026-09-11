@@ -1,0 +1,11 @@
+[Unit]
+Description=archci remote logging: journal streaming configuration from ARCHCI_JOURNAL_URL
+Before=archci-logging-tunnel.service systemd-journal-upload.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/archci/remote-logging/archci-logging-setup
+
+[Install]
+WantedBy=multi-user.target

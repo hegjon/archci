@@ -3,12 +3,14 @@
 #
 # archci: what every role shares (lib/, config, user). archci-master, -worker,
 # -signer, -sourcer: one role each (scripts under /usr/lib/archci/<role>/, units, state
-# dirs, its `archci` command line). Keys, R2 config, enabling units: manual.
+# dirs, its `archci` command line); archci-remote-logging: a host's archci
+# journal streamed to the master (workers, the sourcer). Keys, R2 config,
+# enabling units: manual.
 # Built from the tag's tarball; tools/release-pkgbuild fills in pkgver and the
 # checksum for the copy the farm builds.
 
 pkgbase=archci
-pkgname=(archci archci-master archci-worker archci-signer archci-sourcer
+pkgname=(archci archci-master archci-worker archci-signer archci-sourcer archci-remote-logging
          archci-worker-qemu-aarch64 archci-worker-qemu-riscv64)
 pkgver=0.0.0   # set from the tag by tools/release-pkgbuild
 pkgrel=1
@@ -94,17 +96,12 @@ package_archci-master() {
 
 package_archci-worker() {
   pkgdesc='Headless build farm for Arch Linux packages (worker: builds jobs in clean devtools chroots)'
-  depends=("archci=$pkgver-$pkgrel" devtools rsync openssh gnupg)
+  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg)
   optdepends=('btrfs-progs: snapshot-based clean chroots')
 
-  _install_role worker archci-worker@.service archci-build@.service \
-    archci-worker-setup.service archci-logging-tunnel.service
+  _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service
   _install_cli worker
   cd "$srcdir/$_src"
-  # the archci journal namespace and its upload to the master
-  install -Dm644 config/systemd/worker/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
-  install -Dm644 config/systemd/worker/systemd-journal-upload.service.d/archci.conf \
-    "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
   # chroot makepkg.conf per port arch (arch/<arch>/, kept in step with devtools' x86_64 one by hand)
   local a
   for a in arch/*/; do
@@ -151,10 +148,21 @@ package_archci-worker-qemu-riscv64() {
 
 package_archci-sourcer() {
   pkgdesc='Headless build farm for Arch Linux packages (sourcer: fetches upstream sources into source packages on R2 for the workers)'
-  depends=("archci=$pkgver-$pkgrel" git rclone gnupg openssh libarchive debugedit)
+  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" git rclone gnupg openssh libarchive debugedit)
 
   _install_role sourcer archci-sourcer.service archci-sourcer.timer
   _install_cli sourcer
+}
+
+package_archci-remote-logging() {
+  pkgdesc='Headless build farm for Arch Linux packages (remote logging: the archci journal namespace, streamed to the master through an ssh tunnel)'
+  depends=("archci=$pkgver-$pkgrel" openssh)
+
+  _install_role remote-logging archci-logging-setup.service archci-logging-tunnel.service
+  cd "$srcdir/$_src"
+  install -Dm644 config/systemd/remote-logging/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
+  install -Dm644 config/systemd/remote-logging/systemd-journal-upload.service.d/archci.conf \
+    "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
 }
 
 package_archci-signer() {

@@ -4,10 +4,9 @@
 #
 # Everything a package cannot ship as a file: the worker's ssh key and builder
 # signing key (generated once; their public halves are printed so they can be
-# authorized on the master and the signer), the devtools chroot directory as a
-# btrfs subvolume when possible, and the journal streaming configuration from
-# ARCHCI_JOURNAL_URL: the systemd-journal-upload drop-in in /run, and the flag
-# that lets archci-logging-tunnel.service start when the URL is the tunnel's.
+# authorized on the master and the signer), and the devtools chroot directory
+# as a btrfs subvolume when possible. (The journal streaming is
+# archci-logging-setup's, in archci-remote-logging.)
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 (( EUID == 0 )) || archci_die "must run as root"
@@ -37,16 +36,6 @@ if [[ ! -e $ARCHCI_CHROOTS ]]; then
 	else
 		mkdir -p "$ARCHCI_CHROOTS"
 	fi
-fi
-
-# journal streaming: URL for systemd-journal-upload, tunnel flag for archci-logging-tunnel
-install -d -m 755 /run/archci /run/systemd/journal-upload.conf.d
-rm -f /run/archci/logging-tunnel /run/systemd/journal-upload.conf.d/archci.conf
-if [[ -n $ARCHCI_JOURNAL_URL ]]; then
-	printf '[Upload]\nURL=%s\n' "$ARCHCI_JOURNAL_URL" >/run/systemd/journal-upload.conf.d/archci.conf
-	case $ARCHCI_JOURNAL_URL in
-		http://127.0.0.1:*|http://localhost:*) : >/run/archci/logging-tunnel ;;
-	esac
 fi
 
 cat <<MSG
