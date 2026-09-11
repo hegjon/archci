@@ -2,13 +2,13 @@
 # Maintainer: Jonny Heggheim <hegjon@gmail.com>
 #
 # archci: what every role shares (lib/, config, user). archci-master, -worker,
-# -signer: one role each (scripts under /usr/lib/archci/<role>/, units, state
+# -signer, -sourcer: one role each (scripts under /usr/lib/archci/<role>/, units, state
 # dirs, its `archci` command line). Keys, R2 config, enabling units: manual.
 # Built from the tag's tarball; tools/release-pkgbuild fills in pkgver and the
 # checksum for the copy the farm builds.
 
 pkgbase=archci
-pkgname=(archci archci-master archci-worker archci-signer
+pkgname=(archci archci-master archci-worker archci-signer archci-sourcer
          archci-worker-qemu-aarch64 archci-worker-qemu-riscv64)
 pkgver=0.0.0   # set from the tag by tools/release-pkgbuild
 pkgrel=1
@@ -147,6 +147,14 @@ package_archci-worker-qemu-riscv64() {
   install=archci-worker-qemu-riscv64.install
   backup=(etc/binfmt.d/qemu-riscv64-static.conf etc/archci/riscv64/extra.conf)
   _package_qemu_arch riscv64
+}
+
+package_archci-sourcer() {
+  pkgdesc='Headless build farm for Arch Linux packages (sourcer: fetches upstream sources into source packages on R2 for the workers)'
+  depends=("archci=$pkgver-$pkgrel" git rclone gnupg openssh libarchive)
+
+  _install_role sourcer archci-sourcer.service archci-sourcer.timer
+  _install_cli sourcer
 }
 
 package_archci-signer() {

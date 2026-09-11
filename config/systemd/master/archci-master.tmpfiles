@@ -10,5 +10,7 @@ d /var/lib/archci/logs 0755 archci archci -
 d /var/lib/archci/lock 0755 archci archci -
 d /var/lib/archci/incoming 0755 archci archci -
 d /var/lib/archci/repo 0755 archci archci -
+# what the sourcer reported: sources/<pkgbase>, the source package for the commit or why none
+d /var/lib/archci/sources 0755 archci archci -
 # worker keys sshd reads for the archci user (archci-authorize appends to it)
 f /etc/archci/authorized_keys 0644 root root -

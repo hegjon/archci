@@ -149,15 +149,33 @@ prepare_root
 build_env
 lock_close 9
 
-# --- sources: the package directory of the PKGBUILD repository at exactly
-# the job's commit. One bare mirror per worker host is shared by its
-# instances (fetches serialized by a lock); the directory is exported from it
-# with git archive, so no working tree is ever checked out.
+# --- sources. When the claim names a source package (sources=, made by the
+# sourcer from the PKGBUILD directory at the job's commit: every source
+# downloaded and verified there) and ARCHCI_SOURCES_URL says where the store
+# is, it comes from there and holds all a build needs; nothing is fetched
+# upstream from here.
+# Otherwise the package directory of the PKGBUILD repository at exactly the
+# job's commit: one bare mirror per worker host is shared by its instances
+# (fetches serialized by a lock); the directory is exported from it with git
+# archive, so no working tree is ever checked out.
+from_srcpkg=0
+if [[ -n ${job_sources:-} && -n $ARCHCI_SOURCES_URL ]]; then
+	say "Fetching source package %s from %s" "$job_sources" "$ARCHCI_SOURCES_URL"
+	rm -rf "$srcdir" "$srcdir.src.tar.gz"
+	mkdir -p "$srcdir"
+	curl -fsSL --retry 3 --max-time 1800 -o "$srcdir.src.tar.gz" "$ARCHCI_SOURCES_URL/pkg/$job_sources" ||
+		archci_die "could not fetch $ARCHCI_SOURCES_URL/pkg/$job_sources"
+	bsdtar -xf "$srcdir.src.tar.gz" --strip-components=1 -C "$srcdir" || archci_die "$job_sources does not unpack"
+	rm -f "$srcdir.src.tar.gz"
+	[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $job_sources"
+	chmod -R a+rX "$srcdir"
+	from_srcpkg=1
+fi
 subdir=$ARCHCI_PKGBUILDS_DIR/$job_pkgbase
-say "Fetching %s at %s from %s" "$subdir" "$job_commit" "$ARCHCI_PKGBUILDS_URL"
-export GIT_TERMINAL_PROMPT=0
 mirror=$ARCHCI_WORKER_HOME/pkgbuilds.git
-(
+export GIT_TERMINAL_PROMPT=0
+(( from_srcpkg )) || say "Fetching %s at %s from %s" "$subdir" "$job_commit" "$ARCHCI_PKGBUILDS_URL"
+(( from_srcpkg )) || (
 	exec 7>"$mirror.lock"
 	flock 7
 	if [[ ! -d $mirror ]]; then
@@ -172,20 +190,25 @@ mirror=$ARCHCI_WORKER_HOME/pkgbuilds.git
 	fi
 	git -C "$mirror" cat-file -e "$job_commit^{commit}" 2>/dev/null
 ) || archci_die "commit $job_commit is not in $ARCHCI_PKGBUILDS_URL"
-rm -rf "$srcdir"
-mkdir -p "$srcdir"
-depth=$(( $(printf '%s' "$subdir" | tr -cd / | wc -c) + 1 ))
-git -C "$mirror" archive --format=tar "$job_commit" "$subdir" | tar -x --strip-components="$depth" -C "$srcdir" ||
-	archci_die "no $subdir in $ARCHCI_PKGBUILDS_URL at $job_commit"
-[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $subdir at $job_commit"
-chmod -R a+rX "$srcdir"
+if (( ! from_srcpkg )); then
+	rm -rf "$srcdir"
+	mkdir -p "$srcdir"
+	depth=$(( $(printf '%s' "$subdir" | tr -cd / | wc -c) + 1 ))
+	git -C "$mirror" archive --format=tar "$job_commit" "$subdir" | tar -x --strip-components="$depth" -C "$srcdir" ||
+		archci_die "no $subdir in $ARCHCI_PKGBUILDS_URL at $job_commit"
+	[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $subdir at $job_commit"
+	chmod -R a+rX "$srcdir"
+fi
 
 # --- build
 mkdir -p "$outdir" "$ARCHCI_WORKER_HOME/srcdest"
 chown "$ARCHCI_BUILD_USER" "$ARCHCI_WORKER_HOME/srcdest" "$outdir"
 export PKGDEST=$outdir LOGDEST=$outdir SRCPKGDEST=$outdir
 export SRCDEST=$ARCHCI_WORKER_HOME/srcdest
-SOURCE_DATE_EPOCH=$(git -C "$mirror" log -1 --format=%ct "$job_commit")
+# the commit's time, from the mirror; from a source package, the job's creation
+if (( from_srcpkg )); then SOURCE_DATE_EPOCH=$(date -d "${job_created:-now}" +%s)
+else SOURCE_DATE_EPOCH=$(git -C "$mirror" log -1 --format=%ct "$job_commit")
+fi
 export SOURCE_DATE_EPOCH
 export BUILDTOOL=archci BUILDTOOLVER=1
 export PACKAGER=$ARCHCI_PACKAGER
@@ -233,6 +256,8 @@ mcp_args=(-c -u -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
 # ARCHCI_MAKEPKG_ARGS is passed to makepkg after -- (default: none).
 extra_makepkg_args=()
 [[ -n $ARCHCI_MAKEPKG_ARGS ]] && read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
+# a source package carries its VCS sources as snapshots: build them as they are
+(( from_srcpkg )) && extra_makepkg_args+=(--holdver)
 # PKGBUILDs carried from Arch declare arch=(x86_64) unless a patch in the
 # repository adds the port arch; a port arch builds them anyway (the Arch
 # Linux Ports RFC keeps the arch array as is and has the tooling ignore it).

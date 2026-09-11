@@ -241,13 +241,14 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ## Source layout
 
 ```
-bin/      archci-master, archci-signer, archci-worker: the role's command line, installed as /usr/bin/archci; `archci <name>` runs archci-<name> of the role (a worker's: version only)
+bin/      archci-master, archci-signer, archci-sourcer, archci-worker: the role's command line, installed as /usr/bin/archci; `archci <name>` runs archci-<name> of the role (a worker's: version only)
 tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh, archci-queue.sh (bash), archci.rb (ruby): config, the job queue, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top, archci-failed
           archci-housekeeping: the queue's timer pass, run by its timer, not a command
 worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
+sourcer/  archci-sourcer: the outstanding packages' sources fetched into source packages on R2 for the workers
 arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf (and .d/) and qemu/ for aarch64 and riscv64
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
@@ -268,6 +269,7 @@ one package per role (see Install).
 ```
 pkgbuilds/                  clone of the PKGBUILD repository (ARCHCI_PKGBUILDS_BRANCH)
 pkgbuilds.index             package index over it, keyed by the clone's HEAD (archci-pkgs)
+sources/<pkgbase>           what the sourcer reported: the commit, then file=<src.tar.gz> or error=<why>
 queue/{pending,running,done,failed}/<jobid>.job
 built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
                             package also the arches it was pooled for
@@ -310,7 +312,7 @@ role on top of a shared one:
 
 - `archci`: `lib/` under `/usr/lib/archci`, the config as
   `/etc/archci/archci.conf`, and the `archci` user (sysusers)
-- `archci-master`, `archci-worker`, `archci-signer`: the role's
+- `archci-master`, `archci-worker`, `archci-signer`, `archci-sourcer`: the role's
   scripts under `/usr/lib/archci/<role>/` (run by its units), its units in
   `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies;
   each also installs its `archci <name>` command line as `/usr/bin/archci`,
@@ -436,6 +438,37 @@ of this on first boot, so workers are created and destroyed with
 `doctl compute droplet create/delete`. The same worker key can be shared by
 all droplets; workers are identified by hostname, which on DO is the droplet
 name. The master may run `archci-worker@1` too if `master` resolves to itself.
+
+### Sourcer
+
+The one host that talks to upstream. On a droplet of its own, or next to an
+idle worker (the packages do not conflict):
+
+```
+pacman -S archci-sourcer
+```
+
+It speaks to the master like a worker: a key at `ARCHCI_WORKER_KEY`
+(`ssh-keygen -t ed25519 -N '' -f /etc/archci/worker_key`, then
+`archci authorize` on the master with its public key) and `ARCHCI_MASTER`
+in `/etc/archci/archci.conf`. It keeps what it fetches on an R2 bucket with
+public access: `ARCHCI_R2_SOURCES` (its rclone path, written with
+`ARCHCI_RCLONE_CONFIG`) holds the upstream tarballs under `files/` and the
+source packages under `pkg/`. Then:
+
+```
+systemctl enable --now archci-sourcer.timer
+```
+
+Every 5 minutes it asks the master which outstanding packages lack sources
+and takes `ARCHCI_SOURCER_BATCH` of them in claim order: `makepkg
+--allsource` on the PKGBUILD at the index's commit, every source of every
+arch downloaded (the tarball cache first), checksummed and
+signature-checked, and packed as `<pkgbase>-<version>.src.tar.gz`. It
+reports each to the master, which hands the file name to the worker that
+claims the package. Workers need `ARCHCI_SOURCES_URL`, the bucket's public
+URL, to take it from there; without it they fetch upstream as before.
+`archci sourcer PKGBASE...` fetches named packages now.
 
 ### Signer
 

@@ -53,6 +53,17 @@ archci_load_conf
 : "${ARCHCI_RETRY_MINUTES:=180}"
 : "${ARCHCI_RETRY_HOLD_MINUTES:=720}"
 : "${ARCHCI_RELEASE_LAG_MINUTES:=10}"
+# The sourcer (archci-sourcer): its state, the rclone path it keeps the
+# upstream tarballs (files/) and source packages (pkg/) at, packages fetched
+# per pass, the time one may take, how long a failed fetch waits before
+# another try. Workers read the source packages at ARCHCI_SOURCES_URL (the
+# store's public URL; empty: they fetch upstream themselves).
+: "${ARCHCI_SOURCER_HOME:=/var/lib/archci-sourcer}"
+: "${ARCHCI_R2_SOURCES:=}"
+: "${ARCHCI_SOURCES_URL:=}"
+: "${ARCHCI_SOURCER_BATCH:=5}"
+: "${ARCHCI_SOURCER_TIMEOUT_MINUTES:=30}"
+: "${ARCHCI_SOURCER_RETRY_HOURS:=6}"
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 : "${ARCHCI_REMOTE_JOURNAL:=/var/log/journal/remote}"

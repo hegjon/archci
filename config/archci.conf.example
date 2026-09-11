@@ -49,6 +49,22 @@ ARCHCI_RETRY_HOLD_MINUTES=720
 # lag) and waited for, so its dependents are not claimed before the chroot
 # can install it.
 ARCHCI_RELEASE_LAG_MINUTES=10
+# The sourcer host fetches the outstanding packages' sources and keeps the
+# upstream tarballs and the source packages (<pkgbase>-<version>.src.tar.gz)
+# on this rclone path (a public R2 bucket): files/ and pkg/ under it. It
+# needs ARCHCI_MASTER and a worker key like a worker, and ARCHCI_RCLONE_CONFIG.
+ARCHCI_R2_SOURCES=""
+# The store's public URL: a worker whose claim names a source package takes
+# it from <URL>/pkg/ and fetches nothing upstream. Empty: workers fetch
+# upstream themselves.
+ARCHCI_SOURCES_URL=""
+# The sourcer's state (mirror of the PKGBUILD repository, scratch), how many
+# packages a pass fetches, the time one may take, and how long a failed
+# fetch waits before the master offers it again.
+ARCHCI_SOURCER_HOME=/var/lib/archci-sourcer
+ARCHCI_SOURCER_BATCH=5
+ARCHCI_SOURCER_TIMEOUT_MINUTES=30
+ARCHCI_SOURCER_RETRY_HOURS=6
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 ARCHCI_REMOTE_JOURNAL=/var/log/journal/remote
 # Finished job records are pruned from queue/done after this many days.

@@ -72,9 +72,20 @@ sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"
 
+echo "--- the sourcer: what lacks sources, what it reports, and a claim naming the source package"
+[[ $("$next" --all) == *"libsigc++ 2.12.2-1 $(pkgcommit libsigc++)"* ]] || fail "archci-next --all must list the outstanding packages with their commits: $("$next" --all)"
+[[ $("$job" sources-needed | grep -c .) == 2 ]] || fail "sources-needed must list every outstanding package lacking sources: $("$job" sources-needed)"
+"$job" sources-ready libsigc++ "$(pkgcommit libsigc++)" libsigc++-2.12.2-1.src.tar.gz
+"$job" sources-failed linux "$(pkgcommit linux)" "Failure while downloading https://example/linux.tar.xz"
+grep -q '^file=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/sources/libsigc++" || fail "sources-ready must record the file"
+grep -q '^error=Failure while downloading' "$ARCHCI_HOME/sources/linux" || fail "sources-failed must record the error"
+[[ -z $("$job" sources-needed) ]] || fail "a package with sources in, or failed lately, is not offered: $("$job" sources-needed)"
+[[ $("$job" sources-needed --all) == "linux "* ]] || fail "sources-needed --all offers the failed one again: $("$job" sources-needed --all)"
+! "$job" sources-ready 'evil;rm' abc123 x.src.tar.gz 2>/dev/null || fail "a bad package name must be refused"
 echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
+grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim must name the source package: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
 "$job" report "$id" failure
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
 mkdir -p "$ARCHCI_HOME/logs/omarchy/libsigc++/2.12.2-1/x86_64"

@@ -6,6 +6,8 @@
 # Output: "<prio> <repo> <arch> <pkgbase> <version> <commit> <profile>", where
 # <arch> is the job's arch: the worker's, or "any". Used by archci-job claim
 # when queue/pending holds nothing for the worker; safe to run by hand.
+# archci-next --all -- every outstanding package once, "<pkgbase> <version>
+# <commit>", in claim order across the arches; what archci-sources fetches.
 # archci-next --waiting PKGBASE ARCH -- the dependencies from this repository
 # a job for PKGBASE on ARCH ("any" for an any package) still waits for, one
 # line, empty for none. Used by archci-housekeeping to hold a failed job's
@@ -14,6 +16,10 @@ require_relative '../lib/archci'
 
 if ARGV[0] == '--waiting'
   puts Archci.waiting_for(ARGV[1], ARGV[2]).join(' ')
+  exit
+end
+if ARGV[0] == '--all'
+  Archci.outstanding.map { |e| e.values_at('pkgbase', 'version', 'commit') }.uniq.each { |l| puts l.join(' ') }
   exit
 end
 

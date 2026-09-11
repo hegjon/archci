@@ -22,6 +22,14 @@
 #                             PKGBUILD repository clone), priority P (default
 #                             0), for ARCH (default ARCHCI_ARCH; "any" for an
 #                             arch-independent package)
+#   sources-needed [--all]    the outstanding packages without a source
+#                             package for their commit, "pkgbase version
+#                             commit" (for the sourcer; --all: the ones that
+#                             failed lately too)
+#   sources-ready PKGBASE COMMIT FILE
+#   sources-failed PKGBASE COMMIT WHY...
+#                             what the sourcer made, or why not: recorded in
+#                             sources/PKGBASE; a claim hands the worker the file
 #
 # The queue itself (files under queue/, moved between pending, running, done
 # and failed) is lib/archci-queue.sh; its periodic pass, requeueing stale
@@ -81,12 +89,49 @@ cmd_claim() {
 	fi
 	mv "$Q_PENDING/$name" "$Q_RUNNING/$name"
 	archci_read_job "$Q_RUNNING/$name" || archci_die "corrupt job file $name"
+	# the source package the sourcer made for this commit, if it did: the
+	# worker builds from it instead of fetching upstream
+	local rec=$ARCHCI_HOME/sources/$job_pkgbase srcpkg=''
+	if [[ -f $rec ]] && grep -qx "commit=$job_commit" "$rec"; then srcpkg=$(sed -n 's/^file=//p' "$rec"); fi
 	rewrite_job "$Q_RUNNING/$name" "$Q_RUNNING/$name" \
-		"worker=$worker" "claimed=$(archci_now)"
+		"worker=$worker" "claimed=$(archci_now)" ${srcpkg:+"sources=$srcpkg"}
 	set_attempt "$Q_RUNNING/$name" $((job_attempt + 1))
 	mkdir -p "$ARCHCI_HOME/incoming/${name%.job}"
 	archci_log "claim ${name%.job} -> $worker (attempt $((job_attempt + 1)))"
 	cat "$Q_RUNNING/$name"
+}
+
+# --- the sourcer's side: which packages lack sources, and what it made.
+# Records under sources/<pkgbase>: the commit, then file=<src.tar.gz> or
+# error=<why>, and when (tried=). A claim hands the worker the file name.
+cmd_sources_needed() {   # [--all]: every outstanding package without a current source package, "pkgbase version commit"
+	local pkgbase version commit rec now
+	now=$(date +%s)
+	"$ARCHCI_MASTER_DIR/archci-next" --all | while read -r pkgbase version commit; do
+		rec=$ARCHCI_HOME/sources/$pkgbase
+		if [[ -f $rec ]] && grep -qx "commit=$commit" "$rec"; then
+			grep -q '^file=' "$rec" && continue                                   # in
+			# failed lately: not offered again yet
+			(( now - $(sed -n 's/^tried=//p' "$rec") < ARCHCI_SOURCER_RETRY_HOURS * 3600 )) && [[ $1 != --all ]] && continue
+		fi
+		printf '%s %s %s\n' "$pkgbase" "$version" "$commit"
+	done
+}
+cmd_sources_record() {   # sources-ready|sources-failed PKGBASE COMMIT VALUE...
+	local what=$1 pkgbase=$2 commit=$3 rec
+	shift 3
+	[[ $pkgbase =~ ^[A-Za-z0-9@._+-]+$ && $commit =~ ^[0-9a-f]{7,40}$ ]] || archci_die "bad package or commit"
+	mkdir -p "$ARCHCI_HOME/sources"
+	rec=$ARCHCI_HOME/sources/$pkgbase
+	if [[ $what == sources-ready ]]; then
+		[[ $1 =~ ^[A-Za-z0-9@._+:-]+\.src\.tar\.gz$ ]] || archci_die "bad source package name"
+		printf 'commit=%s\nfile=%s\ntried=%s\n' "$commit" "$1" "$(date +%s)" >"$rec.tmp"
+		archci_log "$pkgbase: sources in, $1"
+	else
+		printf 'commit=%s\nerror=%s\ntried=%s\n' "$commit" "$(printf '%s' "$*" | tr -d '\n' | cut -c1-200)" "$(date +%s)" >"$rec.tmp"
+		archci_log "$pkgbase: sources failed: $*"
+	fi
+	mv "$rec.tmp" "$rec"
 }
 
 cmd_heartbeat() {
@@ -226,6 +271,8 @@ case $cmd in
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
 	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; cmd_retry "$1" ;;
+	sources-needed) cmd_sources_needed "${1:-}" ;;
+	sources-ready|sources-failed) (( $# >= 3 )) || archci_die "usage: archci-job sources-ready|sources-failed PKGBASE COMMIT VALUE..."; cmd_sources_record "$cmd" "$@" ;;
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
 	*) sed -n '2,18p' "$0" >&2; exit 2 ;;
 esac

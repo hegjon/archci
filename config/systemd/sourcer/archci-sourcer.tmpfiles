@@ -1,0 +1,4 @@
+# sourcer state (ARCHCI_SOURCER_HOME): the PKGBUILD mirror, scratch, the keyring
+d /var/lib/archci-sourcer 0755 archci archci -
+d /var/lib/archci-sourcer/srcdest 0755 archci archci -
+d /var/lib/archci-sourcer/work 0755 archci archci -

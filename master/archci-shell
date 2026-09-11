@@ -11,7 +11,7 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 read -ra argv <<<"${SSH_ORIGINAL_COMMAND:-}"
 case ${argv[0]:-} in
-	claim|heartbeat|report) exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
+	claim|heartbeat|report|sources-needed|sources-ready|sources-failed) exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
 	# -no-lock: rrsync 3.5 otherwise holds a lock on incoming/ for the whole
 	# transfer, and every other worker's upload fails while one is running
 	# (a debug package can take minutes to arrive).

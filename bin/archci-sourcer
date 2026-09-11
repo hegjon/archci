@@ -1,0 +1,31 @@
+#!/bin/bash
+# archci SUBCOMMAND [ARGS...] -- the sourcer's command line: `archci <name>` runs
+# archci-<name> under /usr/lib/archci/sourcer/ (`archci sourcer`, a pass now, or
+# `archci sourcer PKGBASE...` for these packages). `archci` alone, or `archci
+# help`, lists them. Installed as /usr/bin/archci by the archci-sourcer package
+# (bin/archci-sourcer in the tree); the timer runs the script where it lives.
+set -euo pipefail
+root=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
+source "$root/lib/archci-common.sh"
+
+# the commands: "name what it does"
+commands=(
+	"sourcer fetch the outstanding packages' sources to the store (the timer's pass; PKGBASE... for these)"
+)
+
+sub=${1:-help}
+shift || true
+case $sub in
+	help|-h|--help)
+		echo "usage: archci SUBCOMMAND [ARGS...]   (archci version: the installed version)"
+		echo
+		echo "sourcer:"
+		for c in "${commands[@]}"; do printf '  %-18s %s\n' "${c%% *}" "${c#* }"; done
+		exit 0 ;;
+	version|-V|--version) echo "archci $(archci_version)"; exit 0 ;;
+esac
+for c in "${commands[@]}"; do
+	[[ ${c%% *} == "$sub" ]] && exec "$root/sourcer/archci-$sub" "$@"
+done
+echo "archci: unknown subcommand '$sub' ('archci help' lists the sourcer's)" >&2
+exit 2

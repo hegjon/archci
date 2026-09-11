@@ -1,0 +1,163 @@
+#!/bin/bash
+# archci-sourcer [PKGBASE...] -- fetch the sources of the packages the master
+# has outstanding and keep them on R2 for the workers. Runs on the sourcer
+# host, as the archci user, on a timer; the one host of the farm that talks
+# to upstream. Each pass asks the master (over ssh, with a worker key, like a
+# worker) which packages lack sources, ARCHCI_SOURCER_BATCH of them in claim
+# order (or the ones named), and for each: exports the PKGBUILD directory at
+# the index's commit from a bare mirror of the PKGBUILD repository, imports
+# the keys it names and refreshes them from the keyservers, fills SRCDEST
+# from the tarball cache on R2 (files/, by name), runs `makepkg --allsource`
+# (every source of every arch downloaded, checksummed, signature-checked,
+# packed as <pkgbase>-<version>.src.tar.gz), pushes the files it had to
+# download to the cache and the source package to pkg/ on ARCHCI_R2_SOURCES,
+# and reports "sources-ready" to the master, which then hands the file name
+# to the worker that claims the package (sources=). A fetch that fails is
+# reported with its first error; the master offers it again after
+# ARCHCI_SOURCER_RETRY_HOURS.
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+
+for tool in makepkg git rclone gpg bsdtar; do
+	command -v "$tool" >/dev/null || archci_die "$tool is not installed"
+done
+[[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
+[[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY"
+[[ -n $ARCHCI_R2_SOURCES ]] || archci_die "ARCHCI_R2_SOURCES is not set in $ARCHCI_CONF"
+(( EUID != 0 )) || archci_die "must not run as root (makepkg refuses; the unit runs as archci)"
+export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
+export GIT_TERMINAL_PROMPT=0
+
+home=$ARCHCI_SOURCER_HOME
+mirror=$home/pkgbuilds.git
+srcdest=$home/srcdest
+work=$home/work
+export GNUPGHOME=$home/gnupg
+mkdir -p "$srcdest" "$work"
+install -d -m 700 "$GNUPGHOME"
+
+ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
+	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
+	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
+master() { ssh "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }
+
+# --- the PKGBUILD repository: one bare mirror, the directory exported at the commit
+export_pkgbuild() {   # export_pkgbuild PKGBASE COMMIT DIR
+	local subdir=$ARCHCI_PKGBUILDS_DIR/$1 commit=$2 dir=$3 depth
+	[[ -d $mirror ]] || git clone -q --bare "$ARCHCI_PKGBUILDS_URL" "$mirror"
+	git -C "$mirror" remote set-url origin "$ARCHCI_PKGBUILDS_URL"
+	if ! git -C "$mirror" cat-file -e "$commit^{commit}" 2>/dev/null; then
+		git -C "$mirror" fetch -q origin "$commit" 2>/dev/null ||
+			git -C "$mirror" fetch -q origin "+refs/heads/$ARCHCI_PKGBUILDS_BRANCH:refs/heads/$ARCHCI_PKGBUILDS_BRANCH"
+	fi
+	git -C "$mirror" cat-file -e "$commit^{commit}" 2>/dev/null || return 1
+	depth=$(( $(printf '%s' "$subdir" | tr -cd / | wc -c) + 1 ))
+	git -C "$mirror" archive --format=tar "$commit" "$subdir" 2>/dev/null | tar -x --strip-components="$depth" -C "$dir" || return 1
+	[[ -f $dir/PKGBUILD ]]
+}
+
+# --- the file names a PKGBUILD downloads (every arch; VCS sources are clones, not files)
+source_files() {   # source_files DIR
+	sed -n 's/^\tsource\(_[a-z0-9_]*\)\? = //p' "$1/.SRCINFO" 2>/dev/null | while read -r src; do
+		case $src in
+			git+*|git://*|hg+*|svn+*|bzr+*|fossil+*) continue ;;
+			*::*) printf '%s\n' "${src%%::*}" ;;
+			*://*) printf '%s\n' "${src##*/}" ;;
+			*) continue ;;   # a file in the package directory itself
+		esac
+	done | sort -u
+}
+
+# --- one package
+fetch_one() {   # fetch_one PKGBASE VERSION COMMIT
+	local pkgbase=$1 version=$2 commit=$3 w=$work/$pkgbase log rc f err cached=() names name
+	rm -rf "$w" "${srcdest:?}"/*
+	mkdir -p "$w"/{pkg,out,build}
+	if ! export_pkgbuild "$pkgbase" "$commit" "$w/pkg"; then
+		report_failed "$pkgbase" "$commit" "no $ARCHCI_PKGBUILDS_DIR/$pkgbase at $commit in $ARCHCI_PKGBUILDS_URL"
+		rm -rf "$w"
+		return 1
+	fi
+	[[ -f $w/pkg/.SRCINFO ]] || (cd "$w/pkg" && BUILDDIR=$w/build makepkg --printsrcinfo >.SRCINFO 2>/dev/null) || true
+	# the keys validpgpkeys names: keys/pgp/ from the repository, then the keyservers
+	if compgen -G "$w/pkg/keys/pgp/*.asc" >/dev/null; then
+		gpg --batch --quiet --import "$w"/pkg/keys/pgp/*.asc 2>/dev/null || true
+	fi
+	if [[ -n $ARCHCI_KEYSERVERS ]]; then
+		local fingerprints keyserver
+		mapfile -t fingerprints < <(sed -n 's/^\tvalidpgpkeys = //p' "$w/pkg/.SRCINFO" 2>/dev/null)
+		if (( ${#fingerprints[@]} )); then
+			for keyserver in $ARCHCI_KEYSERVERS; do
+				timeout 120 gpg --batch --quiet --keyserver "$keyserver" --recv-keys "${fingerprints[@]}" 2>/dev/null || true
+			done
+		fi
+	fi
+	# the tarball cache: what it has of this package's files goes into SRCDEST
+	# first, so makepkg downloads only what the farm has never seen
+	mapfile -t names < <(source_files "$w/pkg")
+	if (( ${#names[@]} )); then
+		printf '%s\n' "${names[@]}" >"$w/names"
+		rclone copy --files-from "$w/names" "$ARCHCI_R2_SOURCES/files" "$srcdest" 2>/dev/null || true
+		for name in "${names[@]}"; do [[ -f $srcdest/$name ]] && cached+=("$name"); done
+	fi
+	log=$w/makepkg.log
+	run_makepkg() {
+		(cd "$w/pkg" && SRCDEST=$srcdest SRCPKGDEST=$w/out BUILDDIR=$w/build timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
+			makepkg --allsource --ignorearch) >"$log" 2>&1
+	}
+	if run_makepkg; then rc=0
+	else
+		rc=$?
+		# a cached file of the same name from another package: drop the cache's
+		# copies and let makepkg fetch them all upstream
+		if (( rc != 124 && ${#cached[@]} )) && grep -q "did not pass the validity check" "$log"; then
+			for name in "${cached[@]}"; do rm -f "$srcdest/$name"; done
+			cached=()
+			archci_log "$pkgbase $version: a cached file failed its checksum; fetching upstream"
+			if run_makepkg; then rc=0; else rc=$?; fi
+		fi
+	fi
+	f=$(find "$w/out" -maxdepth 1 -name '*.src.tar.gz' -print -quit)
+	if (( rc == 0 )) && [[ -n $f ]]; then
+		# the files makepkg downloaded (verified now) go to the cache, the source package to pkg/
+		: >"$w/new"
+		for name in "${names[@]}"; do
+			[[ -f $srcdest/$name ]] || continue
+			[[ " ${cached[*]} " == *" $name "* ]] || printf '%s\n' "$name" >>"$w/new"
+		done
+		if [[ -s $w/new ]]; then
+			rclone copy --files-from "$w/new" "$srcdest" "$ARCHCI_R2_SOURCES/files" || { report_failed "$pkgbase" "$commit" "could not push the files to $ARCHCI_R2_SOURCES"; rm -rf "$w"; return 1; }
+		fi
+		rclone copyto "$f" "$ARCHCI_R2_SOURCES/pkg/${f##*/}" || { report_failed "$pkgbase" "$commit" "could not push ${f##*/} to $ARCHCI_R2_SOURCES"; rm -rf "$w"; return 1; }
+		master sources-ready "$pkgbase" "$commit" "${f##*/}" >/dev/null || archci_log "WARNING: the master did not take sources-ready for $pkgbase"
+		archci_log "$pkgbase $version: ${f##*/} ($(du -h "$f" | cut -f1)) on $ARCHCI_R2_SOURCES, $(wc -l <"$w/new") file(s) new to the cache"
+	else
+		err=$(grep -E 'ERROR|error:|FAILED|Could not' "$log" | grep -v 'gpg:' | head -1 | cut -c1-160)
+		(( rc == 124 )) && err="timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
+		report_failed "$pkgbase" "$commit" "${err:-makepkg exited with $rc}"
+	fi
+	rm -rf "$w" "${srcdest:?}"/*
+	(( rc == 0 ))
+}
+
+report_failed() {   # report_failed PKGBASE COMMIT MESSAGE
+	archci_log "$1: sources failed: $3"
+	master sources-failed "$1" "$2" "$3" >/dev/null || archci_log "WARNING: the master did not take sources-failed for $1"
+}
+
+# --- the pass
+if (( $# )); then
+	list=$(master sources-needed --all) || archci_die "could not ask $ARCHCI_MASTER"
+	for p in "$@"; do grep "^$p " <<<"$list" || archci_log "$p: not outstanding, or its sources are in"; done
+else
+	master sources-needed || archci_die "could not ask $ARCHCI_MASTER"
+fi | head -n "$(( $# ? 1000 : ARCHCI_SOURCER_BATCH ))" >"$work/list" || true
+n=0
+fetched=0
+while read -r pkgbase version commit; do
+	[[ -n $commit ]] || continue
+	(( ++n ))
+	fetch_one "$pkgbase" "$version" "$commit" && (( ++fetched )) || true
+done <"$work/list"
+rm -f "$work/list"
+(( n == 0 )) || archci_log "pass done: $fetched of $n fetched"
