@@ -1,0 +1,33 @@
+#!/bin/bash
+# archci SUBCOMMAND [ARGS...] -- the signer's command line: `archci <name>` runs
+# archci-<name> under /usr/lib/archci/signer/ (`archci sign --unlock`).
+# `archci` alone, or `archci help`, lists them. Installed as /usr/bin/archci by
+# the archci-signer package (bin/archci-signer in the tree); the units run the
+# scripts where they live.
+set -euo pipefail
+root=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
+source "$root/lib/archci-common.sh"
+
+# the commands: "name what it does"
+commands=(
+	"authorize-builder trust a worker's builder key on the signer"
+	"sign release-sign the packages the master staged to R2"
+	"sign-health warn in the journal when release signing is stalled"
+)
+
+sub=${1:-help}
+shift || true
+case $sub in
+	help|-h|--help)
+		echo "usage: archci SUBCOMMAND [ARGS...]   (archci version: the installed version)"
+		echo
+		echo "signer:"
+		for c in "${commands[@]}"; do printf '  %-18s %s\n' "${c%% *}" "${c#* }"; done
+		exit 0 ;;
+	version|-V|--version) echo "archci $(archci_version)"; exit 0 ;;
+esac
+for c in "${commands[@]}"; do
+	[[ ${c%% *} == "$sub" ]] && exec "$root/signer/archci-$sub" "$@"
+done
+echo "archci: unknown subcommand '$sub' ('archci help' lists the signer's)" >&2
+exit 2

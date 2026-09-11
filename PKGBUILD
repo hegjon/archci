@@ -4,9 +4,9 @@
 # Split package: archci holds what every role shares (lib/, the config, the
 # archci user); archci-master, archci-worker and archci-signer hold one role
 # each (its scripts under /usr/lib/archci/<role>/, run by its units, its
-# state directories); archci-cli is the `archci <name>` command line the
-# master and the signer are operated with (a worker is run by its units
-# only). Keys, R2 config and enabling the role's units stay manual (README
+# state directories); the master and the signer each install their own
+# `archci <name>` command line as /usr/bin/archci (a worker is run by its
+# units only). Keys, R2 config and enabling the role's units stay manual (README
 # "Install").
 #
 # Built from a tagged tarball: the version is the tag. This file is the
@@ -14,7 +14,7 @@
 # the tag, the tarball's checksum) into the PKGBUILD repository.
 
 pkgbase=archci
-pkgname=(archci archci-cli archci-master archci-worker archci-signer
+pkgname=(archci archci-master archci-worker archci-signer
          archci-worker-qemu-aarch64 archci-worker-qemu-riscv64)
 pkgver=0.0.0   # set from the tag by tools/release-pkgbuild
 pkgrel=1
@@ -63,6 +63,7 @@ package_archci() {
   # the live config is a stub (only what differs from the defaults goes in),
   # so an upgrade rarely has a .pacnew to offer; the annotated full sample
   # is documentation
+  printf '%s\n' "$pkgver-$pkgrel" >"$pkgdir$_libdir/VERSION"   # what `archci version` and the heartbeats say
   install -Dm644 config/archci.conf "$pkgdir/etc/archci/archci.conf"
   install -Dm644 config/archci.conf.example "$pkgdir/usr/share/doc/archci/archci.conf.example"
   install -Dm644 config/systemd/archci.sysusers "$pkgdir/usr/lib/sysusers.d/archci.conf"
@@ -71,22 +72,19 @@ package_archci() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgbase/LICENSE"
 }
 
-package_archci-cli() {
-  pkgdesc='Headless build farm for Arch Linux packages (the archci command line: operate the master or the signer)'
-  depends=("archci=$pkgver-$pkgrel" bash-completion)
-
+# the role's `archci <name>` command line (bin/archci-<role>) as /usr/bin/archci, with the completion
+_install_cli() {
+  local role=$1
   cd "$srcdir/$_src"
-  # the entry point: `archci <name>` runs archci-<name> of whichever role is installed
-  install -Dm755 bin/archci "$pkgdir$_libdir/bin/archci"
-  printf '%s\n' "$pkgver-$pkgrel" >"$pkgdir$_libdir/VERSION"   # what `archci version` prints
+  install -Dm755 "bin/archci-$role" "$pkgdir$_libdir/bin/archci-$role"
   install -d "$pkgdir/usr/bin"
-  ln -s "$_libdir/bin/archci" "$pkgdir/usr/bin/archci"
+  ln -s "$_libdir/bin/archci-$role" "$pkgdir/usr/bin/archci"
   install -Dm644 config/bash-completion/archci "$pkgdir/usr/share/bash-completion/completions/archci"
 }
 
 package_archci-master() {
   pkgdesc='Headless build farm for Arch Linux packages (master: sync the PKGBUILD repository, hand out jobs, stage results)'
-  depends=("archci-cli=$pkgver-$pkgrel" ruby jq rsync openssh rclone)
+  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone)
   # the master never holds the release key (README "Signing"): not on one machine
   conflicts=(archci-signer)
   optdepends=('btrfs-progs: btrfs subvolumes for the state directories'
@@ -95,6 +93,7 @@ package_archci-master() {
   _install_role master archci-scan.service archci-scan.timer \
     archci-housekeeping.service archci-housekeeping.timer archci-stage.service archci-stage.timer \
     archci-signer-status.service archci-signer-status.timer
+  _install_cli master
   cd "$srcdir/$_src"
   install -Dm644 config/systemd/archci-journal-remote.service \
     "$pkgdir/usr/lib/systemd/system/archci-journal-remote.service"
@@ -186,12 +185,13 @@ package_archci-worker-qemu-riscv64() {
 
 package_archci-signer() {
   pkgdesc='Headless build farm for Arch Linux packages (signer: verify builder signatures, release-sign, publish)'
-  depends=("archci-cli=$pkgver-$pkgrel" rclone gnupg)
+  depends=("archci=$pkgver-$pkgrel" bash-completion rclone gnupg)
   conflicts=(archci-master)
   backup=(etc/archci/release-gnupg/gpg-agent.conf)
 
   _install_role signer archci-sign.service archci-sign.timer \
     archci-sign-health.service archci-sign-health.timer
+  _install_cli signer
   cd "$srcdir/$_src"
   install -Dm600 config/gnupg/release-gpg-agent.conf "$pkgdir/etc/archci/release-gnupg/gpg-agent.conf"
   chmod 700 "$pkgdir/etc/archci/release-gnupg"

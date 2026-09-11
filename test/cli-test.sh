@@ -8,7 +8,7 @@ source "$here/fixture.sh"
 id=$(claim_id worker-1 x86_64)   # a running job for the completion to offer
 
 echo "--- archci <name> runs archci-<name> of an installed role"
-archci=$here/../bin/archci
+archci=$here/../bin/archci-master
 help=$("$archci" help)   # grep -q on a pipe would SIGPIPE the writer under pipefail
 grep -q '^  job  *the queue: enqueue, retry, requeue, report' <<<"$help" || fail "archci help must list job with its description"
 grep -q '^  top  *the farm live' <<<"$help" || fail "archci help must list top with its description"
@@ -26,7 +26,7 @@ complete_words() {   # complete_words WORD... -> COMPREPLY for the last (possibl
 	_archci; printf '%s\n' "${COMPREPLY[@]}"
 }
 source "$here/../config/bash-completion/archci"
-PATH=$here/../bin:$PATH
+mkdir -p "$tmp/bin"; ln -s "$archci" "$tmp/bin/archci"; PATH=$tmp/bin:$PATH   # the completion runs `archci help`, as /usr/bin/archci
 complete_words archci "" | grep -x job >/dev/null || fail "completion must offer the installed subcommands; archci help says: $("$archci" help 2>&1 | head -5)"
 complete_words archci "" | grep -x version >/dev/null || fail "completion must offer version"
 complete_words archci to | grep -x top >/dev/null || fail "completion must narrow on the prefix"

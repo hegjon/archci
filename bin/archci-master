@@ -1,0 +1,38 @@
+#!/bin/bash
+# archci SUBCOMMAND [ARGS...] -- the master's command line: `archci <name>` runs
+# archci-<name> under /usr/lib/archci/master/ (`archci job retry --all`, `archci top`).
+# `archci` alone, or `archci help`, lists them. Installed as /usr/bin/archci by
+# the archci-master package (bin/archci-master in the tree); the units run the
+# scripts where they live.
+set -euo pipefail
+root=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
+source "$root/lib/archci-common.sh"
+
+# the commands: "name what it does"
+commands=(
+	"authorize let a worker key talk to this master, or stop it"
+	"job the queue: enqueue, retry, requeue, report (runs as the archci user)"
+	"next the next package a worker of ARCH would build"
+	"pkgs the packages in the PKGBUILD repository clone"
+	"scan sync the PKGBUILD repository and report what is outstanding"
+	"signer-status what the master can see of the signer, through R2"
+	"stage push pooled (unsigned) packages to the R2 staging area"
+	"top the farm live: queue, hosts, jobs, failures (one frame into a pipe)"
+)
+
+sub=${1:-help}
+shift || true
+case $sub in
+	help|-h|--help)
+		echo "usage: archci SUBCOMMAND [ARGS...]   (archci version: the installed version)"
+		echo
+		echo "master:"
+		for c in "${commands[@]}"; do printf '  %-18s %s\n' "${c%% *}" "${c#* }"; done
+		exit 0 ;;
+	version|-V|--version) echo "archci $(archci_version)"; exit 0 ;;
+esac
+for c in "${commands[@]}"; do
+	[[ ${c%% *} == "$sub" ]] && exec "$root/master/archci-$sub" "$@"
+done
+echo "archci: unknown subcommand '$sub' ('archci help' lists the master's)" >&2
+exit 2

@@ -244,8 +244,8 @@ archci_read_job() {
 # archci_worker_stats -> "load=<1 min> mem=<used %> disk=<chroots %> cpus=<n>",
 # what a worker sends with each heartbeat (archci-job heartbeat validates the
 # tokens and keeps them in the job file).
-# archci_version -> the installed archci version: VERSION (archci-cli writes
-# it), else what pacman knows, else the checkout's git describe.
+# archci_version -> the installed archci version: VERSION (the archci package
+# writes it), else what pacman knows, else the checkout's git describe.
 archci_version() {
 	local v
 	if [[ -r $ARCHCI_ROOT/VERSION ]]; then cat "$ARCHCI_ROOT/VERSION"

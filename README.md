@@ -241,7 +241,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 ## Source layout
 
 ```
-bin/      archci: the command line (archci-cli), `archci <name>` runs archci-<name> of an installed role
+bin/      archci-master, archci-signer: the role's command line, installed as /usr/bin/archci; `archci <name>` runs archci-<name> of the role
 tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh, archci-queue.sh (bash), archci.rb (ruby): config, the job queue, paths
 master/   archci-scan, archci-pkgs, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top
@@ -311,10 +311,10 @@ role on top of a shared one:
   `/etc/archci/archci.conf`, and the `archci` user (sysusers)
 - `archci-master`, `archci-worker`, `archci-signer`: the role's
   scripts under `/usr/lib/archci/<role>/` (run by its units), its units in
-  `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies
-- `archci-cli`: the `archci <name>` command line (and its bash completion)
-  the master and the signer are operated with; pulled in by those two. A
-  worker has no commands to run by hand, so it gets none
+  `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies;
+  the master and the signer also install their `archci <name>` command line
+  as `/usr/bin/archci`, with its bash completion. A worker has no commands
+  to run by hand, so it gets none
 - `archci-worker-qemu-aarch64`, `archci-worker-qemu-riscv64`: add-ons
   for an x86_64 worker: aarch64 or riscv64 worker
   instances under qemu user-mode emulation (see [docs/ports.md](docs/ports.md))
