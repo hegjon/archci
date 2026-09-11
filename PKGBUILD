@@ -33,9 +33,9 @@ _install_role() {
   (cd "$role" && find . -type f -exec install -Dm755 '{}' "$pkgdir$_libdir/$role/{}" \;)
   install -d "$pkgdir/usr/lib/systemd/system"
   for f in "$@"; do
-    install -m644 "config/systemd/$f" "$pkgdir/usr/lib/systemd/system/$f"
+    install -m644 "config/systemd/$role/$f" "$pkgdir/usr/lib/systemd/system/$f"
   done
-  install -Dm644 "config/systemd/archci-$role.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/archci-$role.conf"
+  install -Dm644 "config/systemd/$role/archci-$role.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/archci-$role.conf"
 }
 
 # the test suite: throwaway directories, no network
@@ -84,9 +84,9 @@ package_archci-master() {
     archci-signer-status.service archci-signer-status.timer
   _install_cli master
   cd "$srcdir/$_src"
-  install -Dm644 config/systemd/archci-journal-remote.service \
+  install -Dm644 config/systemd/master/archci-journal-remote.service \
     "$pkgdir/usr/lib/systemd/system/archci-journal-remote.service"
-  install -Dm644 config/systemd/journal-remote.conf "$pkgdir/usr/lib/systemd/journal-remote.conf.d/archci.conf"
+  install -Dm644 config/systemd/master/journal-remote.conf "$pkgdir/usr/lib/systemd/journal-remote.conf.d/archci.conf"
   # worker keys: /etc/archci/authorized_keys; the hook reloads sshd
   install -Dm644 config/ssh/sshd_config.d/60-archci.conf "$pkgdir/etc/ssh/sshd_config.d/60-archci.conf"
   install -Dm644 config/pacman/archci-sshd.hook "$pkgdir/usr/share/libalpm/hooks/archci-sshd.hook"
@@ -102,8 +102,8 @@ package_archci-worker() {
   _install_cli worker
   cd "$srcdir/$_src"
   # the archci journal namespace and its upload to the master
-  install -Dm644 config/systemd/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
-  install -Dm644 config/systemd/systemd-journal-upload.service.d/archci.conf \
+  install -Dm644 config/systemd/worker/journald@archci.conf "$pkgdir/usr/lib/systemd/journald@archci.conf.d/archci.conf"
+  install -Dm644 config/systemd/worker/systemd-journal-upload.service.d/archci.conf \
     "$pkgdir/usr/lib/systemd/system/systemd-journal-upload.service.d/archci.conf"
   # chroot makepkg.conf per port arch: devtools' x86_64 one (and conf.d) through
   # arch/<arch>/makepkg.conf.sed; fails if a substitution no longer matches
@@ -127,7 +127,7 @@ package_archci-worker() {
 _package_qemu_arch() {
   local a=$1
   cd "$srcdir/$_src"
-  install -Dm644 "config/systemd/archci-worker-$a@.service" "$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service"
+  install -Dm644 "config/systemd/worker/archci-worker-$a@.service" "$pkgdir/usr/lib/systemd/system/archci-worker-$a@.service"
   cd "arch/$a/qemu"
   install -Dm644 "binfmt.d/qemu-$a-static.conf" "$pkgdir/etc/binfmt.d/qemu-$a-static.conf"
   install -Dm644 "setarch-aliases.d/$a" "$pkgdir/usr/share/devtools/setarch-aliases.d/$a"

@@ -252,8 +252,9 @@ arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
   archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
-  systemd/  units and timers per role, the worker's journal tunnel and
-            namespace, tmpfiles and sysusers, journal-remote drop-ins (master)
+  systemd/  archci.sysusers, then one folder per role: master/ (units, timers,
+            the journal receiver and its conf, tmpfiles), worker/ (units, the
+            journal tunnel and namespace, tmpfiles), signer/ (units, timers, tmpfiles)
   ssh/      sshd_config.d/60-archci.conf: worker keys from /etc/archci/authorized_keys
   pacman/   the hook that reloads sshd when that drop-in is installed
   gnupg/    the signer's release keyring gpg-agent.conf
