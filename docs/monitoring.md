@@ -6,8 +6,8 @@ through an ssh tunnel over the worker key: `archci-logging-remote.service`
 holds `ssh -N -L 127.0.0.1:19533:127.0.0.1:19533 archci@master` open, and
 the upload goes to `http://127.0.0.1:19533`, the default `ARCHCI_JOURNAL_URL`
 (`""` streams nothing; `archci-worker-setup` configures both on every worker
-start). The master's `systemd-journal-remote` listens on loopback only (the
-master package's service drop-in binds 127.0.0.1:19533), so the plain-HTTP journal port is never
+start). The master's receiver, `archci-journal-remote.service` running
+`systemd-journal-remote`, binds 127.0.0.1:19533 only, so the plain-HTTP journal port is never
 exposed, inside the VPC or out, and a worker needs nothing but ssh to the
 master, from anywhere. The master allows a worker key to forward to this one
 port and nothing else (`archci-authorize` writes `port-forwarding,permitopen=...`

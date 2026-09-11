@@ -342,7 +342,7 @@ template does this).
 ```
 pacman -S archci-master
 systemctl enable --now archci-scan.timer archci-housekeeping.timer archci-stage.timer archci-signer-status.timer
-systemctl enable --now systemd-journal-remote.service  # worker journals
+systemctl enable --now archci-journal-remote         # worker journals
 ```
 
 The package creates the `archci` user and the state directories under

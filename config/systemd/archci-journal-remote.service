@@ -1,0 +1,42 @@
+# The master's receiver for the workers' journals: systemd-journal-remote on
+# plain HTTP at 127.0.0.1:19533, the one port number the workers' tunnels
+# (archci-logging-remote.service), sshd's PermitOpen and ARCHCI_JOURNAL_URL
+# name too. Only the tunnels reach it. A unit of archci's own rather than
+# the stock systemd-journal-remote.service, whose socket activation cannot
+# be dropped from a drop-in; the stock socket stays disabled. Sizes and
+# splitting: /usr/lib/systemd/journal-remote.conf.d/archci.conf.
+[Unit]
+Description=archci: the workers' journals, received from their ssh tunnels
+Documentation=man:systemd-journal-remote(8) man:journal-remote.conf(5)
+After=network.target
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-journal-remote --listen-http=127.0.0.1:19533 --output=/var/log/journal/remote/archci-workers.journal
+User=systemd-journal-remote
+LogsDirectory=journal/remote
+Restart=on-failure
+WatchdogSec=3min
+LimitNOFILE=524288
+# the stock unit's hardening, less its private network (it binds the port itself)
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

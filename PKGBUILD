@@ -96,8 +96,8 @@ package_archci-master() {
     archci-housekeeping.service archci-housekeeping.timer archci-stage.service archci-stage.timer \
     archci-signer-status.service archci-signer-status.timer
   cd "$srcdir/$_src"
-  install -Dm644 config/systemd/systemd-journal-remote.service.d/archci.conf \
-    "$pkgdir/usr/lib/systemd/system/systemd-journal-remote.service.d/archci.conf"
+  install -Dm644 config/systemd/archci-journal-remote.service \
+    "$pkgdir/usr/lib/systemd/system/archci-journal-remote.service"
   install -Dm644 config/systemd/journal-remote.conf "$pkgdir/usr/lib/systemd/journal-remote.conf.d/archci.conf"
   # sshd reads worker keys from /etc/archci/authorized_keys; a hook reloads sshd
   install -Dm644 config/ssh/sshd_config.d/60-archci.conf "$pkgdir/etc/ssh/sshd_config.d/60-archci.conf"
