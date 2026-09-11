@@ -259,8 +259,10 @@ trap('TERM') { restore.call; exit }
 $stdin.raw!
 print "\e[?25l"
 loop do
-  print "\e[H\e[2J"
-  puts frame(journal).map { |l| "#{l}\r" }   # raw mode: \n alone does not return the cursor
+  lines = frame(journal)   # taken before drawing: the screen keeps the last frame meanwhile
+  # home, each line cleared to its end, the rest of the screen cleared after the
+  # last: redrawn in place, no blank between frames (raw mode: \r\n, not \n)
+  print "\e[H", lines.map { |l| "#{l}\e[K\r\n" }.join, "\e[J"
   next unless IO.select([$stdin], nil, nil, interval)
 
   key = $stdin.read_nonblock(1, exception: false)
