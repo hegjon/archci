@@ -129,10 +129,11 @@ for the job's commit, and is printed. The worker then:
    oneshot template unit, with a blocking `systemctl start`. The build has its
    own unit, cgroup and journal, runs at low CPU and I/O priority (`Nice=15`,
    inherited by everything inside the chroot, so sshd and the worker loop
-   stay responsive on a busy build machine), and the unit's `TimeoutStartSec` (12 h, change
-   with `systemctl edit archci-build@.service`) is the timeout. A build whose
-   output stops for `ARCHCI_BUILD_MAX_IDLE_MINUTES` (90) is killed earlier: a hung
-   test suite otherwise holds the worker for the whole 12 h,
+   stay responsive on a busy build machine), and the unit's `TimeoutStartSec` (48 h, change
+   with `systemctl edit archci-build@.service`) is the ceiling. A build whose
+   output stops for `ARCHCI_BUILD_MAX_IDLE_MINUTES` (90) is killed long before
+   that: a hung test suite otherwise holds the worker for the whole 48 h, while
+   an emulated build that keeps compiling (emacs took over 12 h) is left alone,
 3. inside that unit, builds with `makechrootpkg -c -l archci-N` in
    `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
    btrfs subvolume and each build gets a fresh snapshot of it. The root is

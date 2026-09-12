@@ -28,5 +28,8 @@ Nice=15
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 # Build timeout (a oneshot is "starting" until it exits; RuntimeMaxSec= would be ignored).
+# A ceiling for a build that keeps producing output: an emulated emacs, with its
+# native compilation, ran past 12 h while still compiling. A build that goes
+# quiet is killed far sooner by ARCHCI_BUILD_MAX_IDLE_MINUTES.
 # Change with: systemctl edit archci-build@.service
-TimeoutStartSec=12h
+TimeoutStartSec=48h
