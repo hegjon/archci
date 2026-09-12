@@ -126,6 +126,8 @@ archci_load_conf
 # Versions of each package kept in the package caches the builds use (the
 # rest is deleted at the hourly chroot update); 0 keeps everything.
 : "${ARCHCI_CACHE_KEEP:=1}"
+# the worker's own source cache: files not used for this many days are deleted
+: "${ARCHCI_SRCDEST_KEEP_DAYS:=7}"
 # Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.

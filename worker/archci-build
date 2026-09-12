@@ -233,6 +233,10 @@ fi
 
 # --- build
 mkdir -p "$outdir" "$ARCHCI_WORKER_HOME/srcdest"
+# the worker's own source cache (builds without a source package fill it):
+# files not used for ARCHCI_SRCDEST_KEEP_DAYS go, a 25 GB droplet filled
+# with 13 GB of them in three days
+find "$ARCHCI_WORKER_HOME/srcdest" -mindepth 1 -atime +"$ARCHCI_SRCDEST_KEEP_DAYS" -delete 2>/dev/null || true
 chown "$ARCHCI_BUILD_USER" "$ARCHCI_WORKER_HOME/srcdest" "$outdir"
 export PKGDEST=$outdir LOGDEST=$outdir SRCPKGDEST=$outdir
 # the sources: the worker's own cache, or the source package's directory
