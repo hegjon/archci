@@ -337,11 +337,16 @@ build_once
 # file (--noconfirm) but fails the install; the second try fetches the right one.
 # A file the release no longer has (the signer pruned the version the
 # database still named when the copy synced) is the same kind of moment.
-# pacman drops only the bad files of the one transaction it gave up on, so
-# a cache with several stale names takes a try per round: three at most.
+# pacman drops only the bad files of the one transaction it gave up on, and
+# every mirror copy of a name the farm has since built is stale the same way
+# (pacman downloads everything into the one cache, whichever repository it
+# came from), so the first failure empties the farm's cache for this repo
+# and arch: what a build needs is fetched again, once, and no later round
+# trips over the next stale name. Three tries at most.
 tries=1
 while (( rc && tries < 3 )) && grep -Eq "invalid or corrupted package|failed retrieving file" "$outdir/makechrootpkg.log"; do
-	echo "==> a package failed its checksum or was gone from the release (a mirror's copy of a name the farm now builds, or a version the signer just replaced); building again"
+	echo "==> a package failed its checksum or was gone from the release (a mirror's copy of a name the farm now builds, or a version the signer just replaced); emptying $cachedir and building again"
+	find "$cachedir" -maxdepth 1 -type f \( -name '*.pkg.tar.*' -o -name '*.sig' \) -delete 2>/dev/null || true
 	(( ++tries ))
 	build_once
 done
