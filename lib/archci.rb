@@ -146,8 +146,8 @@ module Archci
   # an idle worker's poll, or the last beat a finished job kept. A worker
   # whose last poll is older than POLL_TTL is gone. The native arch is what a
   # worker without an arch in its name builds ("any" jobs are the any
-  # arch's). The sourcer claims and runs src jobs: its host is listed with
-  # no worker. Order: the master, the sourcers, then the workers by name.
+  # arch's). The sourcer claims and runs src jobs: a worker of the src arch,
+  # counted as one. Order: the master, the sourcers, then the workers by name.
   POLL_TTL = 600
 
   def self.hosts(running, recent, polls, now)
@@ -165,7 +165,8 @@ module Archci
       host, port = worker_host(j['worker'])
       h = hosts[host] ||= { 'host' => host, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
                             **HOST_STATS.to_h { |k| [k, nil] } }
-      if j['arch'] == 'src' then h['sourcer'] = true else h['workers'] |= [j['worker']] end
+      h['sourcer'] = true if j['arch'] == 'src'
+      h['workers'] |= [j['worker']]
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       h['vendor'] ||= j['vendor']   # constant for a host: any worker that sent it will do

@@ -49,8 +49,46 @@ end
 
 # The build unit's name on the worker (archci-worker's rule): the key of its
 # lines in the journal streamed to the master.
+# the journal key of a running job's output: a build's unit (archci-worker's
+# rule for the name), or the sourcer service on the job's host for a src job
 def unit_name(j)
+  return "archci-sourcer@#{j['worker']}" if j['arch'] == 'src'
+
   "archci-build@#{"#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9:_.-]/, '_')}"
+end
+
+# a journal entry (json, as JournalFollow asks for it) -> [key, message] as
+# unit_name spells the key, or nil for an entry of no build or fetch: the
+# unit with .service dropped, the sourcer's keyed by its host (one job at a
+# time there) and only what the service itself prints (makepkg's output;
+# runuser's pam lines land in the same unit by syslog); a message that was
+# not valid UTF-8 comes as an array of bytes
+def journal_entry(e)
+  u = e['_SYSTEMD_UNIT'].to_s.delete_suffix('.service')
+  key = if u.start_with?('archci-build@') then u
+        elsif u == 'archci-sourcer' && e['SYSLOG_IDENTIFIER'] == 'archci-sourcer' then "archci-sourcer@#{e['_HOSTNAME']}"
+        end
+  return nil unless key
+
+  m = e['MESSAGE']
+  [key, (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip]
+end
+
+JOURNAL_FIELDS = '--output-fields=MESSAGE,_SYSTEMD_UNIT,_HOSTNAME,SYSLOG_IDENTIFIER'
+
+# One frame into a pipe: the last lines from the newest entries, read once.
+class JournalSnapshot
+  def initialize(dir, entries = 500)
+    @last = {}
+    out, = Open3.capture2('journalctl', '-D', dir, '--no-pager', '-o', 'json', JOURNAL_FIELDS, '-n', entries.to_s, err: File::NULL)
+    out.each_line do |line|
+      e = JSON.parse(line.force_encoding(Encoding::UTF_8).scrub) rescue next
+      key, msg = journal_entry(e)
+      @last[key] = msg if key
+    end
+  end
+
+  def last(units) = units.to_h { |u| [u, @last[u].to_s] }
 end
 
 # The remote journal holds every worker's every build (a gigabyte or more,
@@ -77,8 +115,7 @@ class JournalFollow
   def follow
     loop do
       begin
-        stdin, out, waiter = Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-o', 'json',
-                                          '--output-fields=MESSAGE,_SYSTEMD_UNIT', '-f', '-n', '100', err: File::NULL)
+        stdin, out, waiter = Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-o', 'json', JOURNAL_FIELDS, '-f', '-n', '100', err: File::NULL)
         @pid = waiter.pid
         stdin.close
         out.each_line do |line|
@@ -88,14 +125,10 @@ class JournalFollow
           rescue JSON::ParserError, EncodingError
             next
           end
-          # the unit as unit_name spells it (the journal appends .service); a
-          # message that was not valid UTF-8 comes as an array of bytes
-          u = e['_SYSTEMD_UNIT'].to_s.delete_suffix('.service')
-          next unless u.start_with?('archci-build@')
+          key, msg = journal_entry(e)
+          next unless key
 
-          m = e['MESSAGE']
-          msg = (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip
-          @lock.synchronize { @last[u] = msg }
+          @lock.synchronize { @last[key] = msg }
         end
       rescue StandardError
         nil
@@ -136,8 +169,8 @@ end
 STYLE = $stdout.tty?
 def bold(s) = STYLE ? "\e[1m#{s}\e[0m" : s
 
-# journal: a JournalFollow for the last output line, nil for none (stdout not
-# a terminal, which also leaves the quit hint out of the title)
+# journal: a JournalFollow (or, for one frame into a pipe, a JournalSnapshot)
+# for the last output line, nil for none
 def frame(journal)
   now = Time.now
   width = (ENV['COLUMNS'] || `tput cols 2>/dev/null`.to_i.nonzero? || 120).to_i
@@ -244,14 +277,16 @@ ARGV.each_with_index do |a, i|
   end
 end
 
-# not a terminal (a pipe, a file, the tests): one frame
+dir = Archci.config['ARCHCI_REMOTE_JOURNAL']
+dir = nil unless dir && File.directory?(dir)
+
+# not a terminal (a pipe, a file, the tests): one frame, the last lines read once
 unless $stdout.tty? && $stdin.tty?
-  puts frame(nil)
+  puts frame(dir && JournalSnapshot.new(dir))
   exit
 end
 
-dir = Archci.config['ARCHCI_REMOTE_JOURNAL']
-journal = dir && File.directory?(dir) ? JournalFollow.new(dir) : nil
+journal = dir && JournalFollow.new(dir)
 
 # Redraw every interval; between frames wait for a key. The terminal is put in
 # raw mode so a single q ends the program, which also turns Ctrl-C into a

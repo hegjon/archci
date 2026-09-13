@@ -114,11 +114,16 @@ fetch_one() {
 		fi
 	fi
 	mapfile -t names < <(source_files "$w/pkg")
+	# makepkg's output: the log that goes to the master with the results, and
+	# the journal (streamed to the master too), where archci top reads the
+	# last line from
+	say() { printf '%s\n' "$*" | tee -a "$log"; }
 	run_makepkg() {
 		(cd "$w/pkg" && as_user env SRCDEST="$srcdest" SRCPKGDEST="$w/out" BUILDDIR="$w/build" timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
-			makepkg --allsource --ignorearch) >>"$log" 2>&1
+			makepkg --allsource --ignorearch) 2>&1 | tee -a "$log"
 	}
-	echo "==> Fetching the sources of $job_pkgbase $job_version (${#names[@]} file(s) named)" >"$log"
+	: >"$log"
+	say "==> Fetching the sources of $job_pkgbase $job_version (${#names[@]} file(s) named)"
 	if run_makepkg; then rc=0
 	else
 		rc=$?
@@ -126,21 +131,21 @@ fetch_one() {
 		# drop this package's names from it and let makepkg fetch them upstream
 		if (( rc != 124 )) && grep -q "did not pass the validity check" "$log"; then
 			for name in "${names[@]}"; do rm -f "$srcdest/$name"; done
-			echo "==> a cached file failed its checksum; fetching upstream" >>"$log"
+			say "==> a cached file failed its checksum; fetching upstream"
 			if run_makepkg; then rc=0; else rc=$?; fi
 		fi
 	fi
-	(( rc == 124 )) && echo "==> timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min" >>"$log"
+	(( rc == 124 )) && say "==> timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
 	f=$(find "$w/out" -maxdepth 1 -name '*.src.tar.gz' -print -quit)
 	if (( rc == 0 )) && [[ -n $f ]]; then
 		mv "$f" "$out/${f##*/}"
 		if gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --detach-sign -u "$ARCHCI_BUILDER_KEY" -o "$out/${f##*/}.buildsig" "$out/${f##*/}"; then
-			echo "==> made and builder-signed ${f##*/} ($(du -h "$out/${f##*/}" | cut -f1))" >>"$log"
+			say "==> made and builder-signed ${f##*/} ($(du -h "$out/${f##*/}" | cut -f1))"
 		else
-			echo "==> could not sign ${f##*/} with the builder key" >>"$log"; rc=1
+			say "==> could not sign ${f##*/} with the builder key"; rc=1
 		fi
 	elif (( rc == 0 )); then
-		echo "==> makepkg made no source package" >>"$log"; rc=1
+		say "==> makepkg made no source package"; rc=1
 	fi
 	rm -rf "$w"
 	(( rc == 0 ))

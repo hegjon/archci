@@ -76,7 +76,7 @@ echo "--- sources as src jobs: the sourcer claims them, hands in a source packag
 [[ $("$next" src) == "5 omarchy src acl 1:2.3.2-1 $(pkgcommit acl) "* ]] || fail "archci-next src must offer the first package without a source package: $("$next" src)"
 sid=$(claim_id sourcer src load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.13-1)
 [[ $sid == *omarchy,acl,1:2.3.2-1,src ]] || fail "the sourcer's claim must be a src job: $sid"
-"$top" | grep "^sourcer  *DigitalOcean  *src  *0.10  *30  *5  *1  *-  *1  0.4.13-1$" >/dev/null || fail "archci-top must list the sourcer host, no workers, one job active: $("$top" | grep ^sourcer)"
+"$top" | grep "^sourcer  *DigitalOcean  *src  *0.10  *30  *5  *1  *1  *1  0.4.13-1$" >/dev/null || fail "archci-top must list the sourcer host as one worker, one job active: $("$top" | grep ^sourcer)"
 inc=$ARCHCI_HOME/incoming/$sid
 echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"
 "$job" report "$sid" success
@@ -209,7 +209,7 @@ touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/s
 # worker, ahead of the workers; a malformed stat is refused
 out=$("$job" claim srcr src load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.13-1)
 [[ -z $out ]] || "$job" report "$(sed -n 's/^id=//p' <<<"$out")" abandoned   # handed back: the host is idle again
-"$top" | grep "^srcr  *DigitalOcean  *src  *0.10  *30  *5  *1  *-  *0  0.4.13-1$" >/dev/null || fail "archci-top must list the idle sourcer host with - for its workers: $("$top" | grep ^srcr)"
+"$top" | grep "^srcr  *DigitalOcean  *src  *0.10  *30  *5  *1  *1  *0  0.4.13-1$" >/dev/null || fail "archci-top must list the idle sourcer host as one worker: $("$top" | grep ^srcr)"
 order=$("$top" | sed -n '/^HOST/,/^$/p' | awk '/^srcr |^sourcer |^idle-host |^worker /{printf "%s ", $1}')
 [[ $order == "sourcer srcr worker " ]] || fail "the sourcers must come before the workers in the hosts table: $order"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected

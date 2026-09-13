@@ -11,6 +11,8 @@ StartLimitIntervalSec=0
 ExecStart=/usr/lib/archci/sourcer/archci-sourcer
 # to the archci journal namespace, which is what streams to the master
 LogNamespace=archci
+# makepkg's output must not be dropped by journald's rate limit.
+LogRateLimitIntervalSec=0
 Restart=always
 RestartSec=30
 # On stop the loop reports the job as abandoned, so the master requeues it at once.
