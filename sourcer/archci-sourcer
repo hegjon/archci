@@ -58,11 +58,6 @@ chown "$user" "$srcdest"
 # makepkg and gpg, as the archci user (makepkg refuses root)
 as_user() { runuser -u "$user" -- env HOME="$home" GNUPGHOME="$gnupghome" "$@"; }
 
-ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
-	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
-	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
-master() { ssh -n "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }   # -n: never a file's lines on stdin
-
 # --- the PKGBUILD repository: one bare mirror, the directory exported at the commit
 export_pkgbuild() {   # export_pkgbuild PKGBASE COMMIT DIR
 	local subdir=$ARCHCI_PKGBUILDS_DIR/$1 commit=$2 dir=$3 depth
@@ -159,40 +154,20 @@ on_term() {
 	trap - TERM INT
 	if [[ -n $job_id && $reported == 0 ]]; then
 		archci_log "shutting down, handing $job_id back to the master"
-		master report "$job_id" abandoned || true
+		archci_master report "$job_id" abandoned || true
 	fi
 	exit 0
 }
 trap on_term TERM INT
 
 archci_log "sourcer $me started, master $ARCHCI_MASTER"
-down=0
 while true; do
 	if [[ $(stat -c '%i %Y %s' "${code_files[@]}" 2>/dev/null | tr '\n' ' ') != "$code_sig" ]]; then
 		archci_log "archci-sourcer or its library changed on disk; restarting on the new code"
 		exec "$self"
 	fi
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-	if ! master claim "$me" src $(archci_worker_stats "$home") >"$claim"; then
-		(( down )) || archci_log "master unreachable, retrying every ${ARCHCI_IDLE_SLEEP}s"
-		down=1
-		rm -f "$claim"
-		sleep "$ARCHCI_IDLE_SLEEP"
-		continue
-	fi
-	(( down )) && archci_log "master reachable again"
-	down=0
-	if [[ ! -s $claim ]]; then
-		rm -f "$claim"
-		sleep "$ARCHCI_IDLE_SLEEP"
-		continue
-	fi
-	if ! archci_read_job "$claim"; then
-		archci_log "master sent an unreadable job, ignoring"
-		rm -f "$claim"
-		sleep "$ARCHCI_IDLE_SLEEP"
-		continue
-	fi
+	archci_claim "$me" src "$claim" $(archci_worker_stats "$home") || { sleep "$ARCHCI_IDLE_SLEEP"; continue; }
 	reported=0
 	jobdir=$jobsdir/$(printf '%s' "$job_id" | tr -c 'A-Za-z0-9:_.,-' '_')
 	rm -rf "$jobdir"
@@ -203,7 +178,7 @@ while true; do
 		trap - TERM INT
 		while sleep "$ARCHCI_HEARTBEAT_SECONDS"; do
 			# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-			master heartbeat "$job_id" $(archci_worker_stats "$home") phase=fetch >/dev/null 2>&1 || true
+			archci_master heartbeat "$job_id" $(archci_worker_stats "$home") phase=fetch >/dev/null 2>&1 || true
 		done
 	) &
 	heartbeat=$!
@@ -214,31 +189,8 @@ while true; do
 	wait "$heartbeat" 2>/dev/null || true
 	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min: $(tail -n 1 "$jobdir/out/build.log" 2>/dev/null | cut -c1-160)"
 
-	# deliver, as the worker does: kept and retried while the master is away
-	uploaded=0 try=0
-	while true; do
-		(( ++try ))
-		rc=0; master heartbeat "$job_id" phase=upload || rc=$?
-		if (( rc == 255 )); then
-			(( try == 1 )) && archci_log "master unreachable, keeping $job_id's results until it is back"
-			sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
-		elif (( rc )); then
-			archci_log "$job_id is no longer ours; dropping its results"; break
-		fi
-		if (( ! uploaded )); then
-			if rsync -a --timeout=300 -e "ssh ${ssh_opts[*]}" "$jobdir/out/" "$ARCHCI_MASTER:$job_id/"; then
-				uploaded=1
-			else
-				archci_log "upload of $job_id failed (try $try)"
-				sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
-			fi
-		fi
-		rc=0; master report "$job_id" "$status" || rc=$?
-		(( rc == 0 )) && { reported=1; break; }
-		(( rc == 255 )) || { archci_log "the master refused the report for $job_id; dropping it"; break; }
-		archci_log "could not report $job_id (try $try)"
-		sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"
-	done
+	# the results to the master (kept and retried while it is away)
+	archci_deliver "$job_id" "$jobdir/out" "$status" && reported=1
 	rm -rf "$jobdir"
 	job_id=
 done

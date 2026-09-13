@@ -38,11 +38,6 @@ fi
 worker="${HOSTNAME%%.*}-$instance"
 archci_valid_worker "$worker" || archci_die "hostname makes an invalid worker id: $worker"
 
-ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
-	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
-	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
-master() { ssh "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }
-
 jobsdir=$ARCHCI_WORKER_HOME/jobs
 claim=$jobsdir/claim-$instance.tmp
 mkdir -p "$jobsdir"
@@ -55,7 +50,7 @@ on_term() {
 	[[ -n $unit ]] && systemctl stop "$unit.service" 2>/dev/null || true
 	if [[ -n $job_id && $reported == 0 ]]; then
 		archci_log "shutting down, handing $job_id back to the master"
-		master report "$job_id" abandoned || true
+		archci_master report "$job_id" abandoned || true
 	fi
 	exit 0   # a stop is not a failure: the unit ends inactive, not failed
 }
@@ -63,35 +58,13 @@ trap on_term TERM INT
 
 archci_valid_arch "$ARCHCI_ARCH" || archci_die "invalid ARCHCI_ARCH: $ARCHCI_ARCH"
 archci_log "worker $worker ($ARCHCI_ARCH) started, master $ARCHCI_MASTER"
-down=0
 while true; do
 	if [[ $(stat -c '%i %Y %s' "${code_files[@]}" 2>/dev/null | tr '\n' ' ') != "$code_sig" ]]; then
 		archci_log "archci-worker or its library changed on disk; restarting on the new code"
 		exec "$self" "${orig_args[@]}"
 	fi
-	# the poll carries the host's stats, so the master's hosts table stays
-	# current while this worker is idle (heartbeats only flow during a build)
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-	if ! master claim "$worker" "$ARCHCI_ARCH" $(archci_worker_stats) >"$claim"; then
-		(( down )) || archci_log "master unreachable, retrying every ${ARCHCI_IDLE_SLEEP}s"   # once, not once a minute all weekend
-		down=1
-		rm -f "$claim"
-		sleep "$ARCHCI_IDLE_SLEEP"
-		continue
-	fi
-	(( down )) && archci_log "master reachable again"
-	down=0
-	if [[ ! -s $claim ]]; then
-		rm -f "$claim"
-		sleep "$ARCHCI_IDLE_SLEEP"
-		continue
-	fi
-	if ! archci_read_job "$claim"; then
-		archci_log "master sent an unreadable job, ignoring"
-		rm -f "$claim"
-		sleep "$ARCHCI_IDLE_SLEEP"
-		continue
-	fi
+	archci_claim "$worker" "$ARCHCI_ARCH" "$claim" $(archci_worker_stats) || { sleep "$ARCHCI_IDLE_SLEEP"; continue; }
 	reported=0
 	# Unit instance and job directory share a name made of safe unit-name characters.
 	name=$(printf '%s' "$job_repo-$job_pkgbase-$job_version-$job_arch-a$job_attempt" | tr -c 'A-Za-z0-9:_.-' '_')
@@ -125,7 +98,7 @@ while true; do
 			jobstats=$(archci_job_stats "$jobdir" "$unit")
 			wait=$(( ${#jobstats} ? ARCHCI_HEARTBEAT_SECONDS : 10 ))
 			# shellcheck disable=SC2046,SC2086  # the stats are separate key=value words on purpose
-			if master heartbeat "$job_id" $(archci_worker_stats) $jobstats; then
+			if archci_master heartbeat "$job_id" $(archci_worker_stats) $jobstats; then
 				(( hb_down )) && archci_log "heartbeat for $job_id reaches the master again"
 				hb_down=0
 			else
@@ -149,38 +122,8 @@ while true; do
 	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min (journalctl --namespace=archci -u $unit)"
 	unit=
 
-	# Upload the results, then report. While the master is unreachable (a
-	# reboot, a night, a weekend) the finished build is kept and retried every
-	# 30 s for as long as it takes; a heartbeat first keeps the master's
-	# housekeeping from requeueing the job as stale when it comes back. Only ssh
-	# failures (exit 255) mean "unreachable": a heartbeat or report the master
-	# itself refuses says the job is no longer ours (taken by housekeeping, or re-claimed by
-	# another worker), and only then are the results dropped.
-	uploaded=0 try=0 dropped=0
-	while true; do
-		(( ++try ))
-		rc=0; master heartbeat "$job_id" phase=upload || rc=$?
-		if (( rc == 255 )); then
-			(( try == 1 )) && archci_log "master unreachable, keeping $job_id's results until it is back"
-			sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
-		elif (( rc )); then
-			archci_log "$job_id is no longer ours; dropping its results"; dropped=1; break
-		fi
-		if (( ! uploaded )); then
-			if rsync -a --timeout=300 -e "ssh ${ssh_opts[*]}" "$outdir/" "$ARCHCI_MASTER:$job_id/"; then
-				uploaded=1
-			else
-				archci_log "upload of $job_id failed (try $try)"
-				sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
-			fi
-		fi
-		rc=0; master report "$job_id" "$status" || rc=$?
-		(( rc == 0 )) && { reported=1; break; }
-		(( rc == 255 )) || { archci_log "the master refused the report for $job_id; dropping it"; dropped=1; break; }
-		archci_log "could not report $job_id (try $try)"
-		sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"
-	done
-	(( reported && try > 1 )) && archci_log "$job_id delivered after $try tries"
+	# the results to the master (kept and retried while it is away)
+	archci_deliver "$job_id" "$outdir" "$status" && reported=1
 	rm -rf "$jobdir"
 	job_id=
 done

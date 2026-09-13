@@ -461,3 +461,75 @@ archci_profile() {
 		*) echo extra ;;
 	esac
 }
+
+# --- the job protocol over ssh: what the worker and the sourcer share -----
+# archci_master CMD... -- run a job-protocol command (claim, heartbeat,
+# report: archci-shell on the master) with the worker key; -n: never stdin.
+ARCHCI_SSH_OPTS=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
+	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
+	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
+archci_master() { ssh -n "${ARCHCI_SSH_OPTS[@]}" "$ARCHCI_MASTER" "$@"; }
+
+# archci_claim WORKER ARCH FILE [K=V...] -- one claim, the host stats sent
+# along (they keep the master's hosts table current while idle). 0: a job,
+# read into the job_* variables and left in FILE. 1: nothing to do, or the
+# master is unreachable (said once per outage, not once a minute all
+# weekend) or sent nonsense; the caller sleeps ARCHCI_IDLE_SLEEP and asks
+# again.
+_archci_down=0
+archci_claim() {
+	local worker=$1 arch=$2 file=$3
+	shift 3
+	if ! archci_master claim "$worker" "$arch" "$@" >"$file"; then
+		(( _archci_down )) || archci_log "master unreachable, retrying every ${ARCHCI_IDLE_SLEEP}s"
+		_archci_down=1
+		rm -f "$file"
+		return 1
+	fi
+	(( _archci_down )) && archci_log "master reachable again"
+	_archci_down=0
+	[[ -s $file ]] || { rm -f "$file"; return 1; }
+	archci_read_job "$file" && return 0
+	archci_log "master sent an unreadable job, ignoring"
+	rm -f "$file"
+	return 1
+}
+
+# archci_deliver ID DIR STATUS -- upload DIR, the job's results, into the
+# master's incoming/ID/ and report STATUS. While the master is unreachable
+# (a reboot, a night, a weekend) the results are kept and retried every
+# ARCHCI_DELIVERY_RETRY_SECONDS for as long as it takes; a heartbeat first
+# keeps the master's housekeeping from requeueing the job as stale when it
+# comes back. Only ssh failures (exit 255) mean "unreachable": a heartbeat
+# or report the master itself refuses says the job is no longer ours (taken
+# by housekeeping, or re-claimed elsewhere), and only then are the results
+# dropped. 0: reported; 1: dropped.
+archci_deliver() {
+	local id=$1 dir=$2 status=$3 uploaded=0 try=0 rc
+	while true; do
+		(( ++try ))
+		rc=0; archci_master heartbeat "$id" phase=upload || rc=$?
+		if (( rc == 255 )); then
+			(( try == 1 )) && archci_log "master unreachable, keeping $id's results until it is back"
+			sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
+		elif (( rc )); then
+			archci_log "$id is no longer ours; dropping its results"; return 1
+		fi
+		if (( ! uploaded )); then
+			if rsync -a --timeout=300 -e "ssh ${ARCHCI_SSH_OPTS[*]}" "$dir/" "$ARCHCI_MASTER:$id/"; then
+				uploaded=1
+			else
+				archci_log "upload of $id failed (try $try)"
+				sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
+			fi
+		fi
+		rc=0; archci_master report "$id" "$status" || rc=$?
+		if (( rc == 0 )); then
+			(( try > 1 )) && archci_log "$id delivered after $try tries"
+			return 0
+		fi
+		(( rc == 255 )) || { archci_log "the master refused the report for $id; dropping it"; return 1; }
+		archci_log "could not report $id (try $try)"
+		sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"
+	done
+}
