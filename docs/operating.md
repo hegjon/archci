@@ -46,6 +46,9 @@ archci version                      the installed archci version
 archci top | cat                    one frame, without the last-output column: instant
 archci failed                       the failed builds, two panes: the list, and the one picked with its log
 archci failed | cat                 the list, each with the first error line of its log
+archci jobs                         every job as a tree, a package and its src, x86_64, aarch64, ... jobs, filtered as you type (/);
+                                    the job picked shows its story (worker, attempt, sources, network, stats), its file (i), its log
+archci jobs failed aarch64 | cat    the tree into a pipe, the jobs filtered by words (state, package, version, arch, worker, origin)
 archci next                         what the next claim would build
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results

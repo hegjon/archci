@@ -19,6 +19,7 @@ commands=(
 	"stage push pooled (unsigned) packages to the R2 staging area"
 	"top the farm live: queue, hosts, jobs, failures (one frame into a pipe)"
 	"failed the failed builds and each one's story: the job, its retry, its log (a list into a pipe)"
+	"jobs every job as a tree per package, pending to failed, filtered as you type, with its story and log (WORD... filters a list into a pipe)"
 )
 
 sub=${1:-help}
