@@ -14,10 +14,11 @@ lock_queue() {
 
 # Move FILE to DIR, dropping bookkeeping fields and appending EXTRA lines. A
 # job that ends (done/, failed/) keeps its last heartbeat stats and when that
-# beat arrived (the file's mtime): the host's last known state for the UIs.
+# beat arrived (the file's mtime): the host's last known state for the UIs;
+# one requeued loses its sources= too, which the next claim decides afresh.
 rewrite_job() {
 	local file=$1 dest=$2 tmp beat=() drop
-	drop="worker|claimed|status|finished|final|heartbeat|$(archci_stats_re)"
+	drop="worker|claimed|sources|status|finished|final|heartbeat|$(archci_stats_re)"
 	shift 2
 	if [[ $dest == "$Q_DONE"/* || $dest == "$Q_FAILED"/* ]]; then
 		drop='worker|claimed|status|finished|final|heartbeat'

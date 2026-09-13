@@ -119,6 +119,7 @@ grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must n
 echo libsigc++-2.12.2-1.src.tar.gz >"$ARCHCI_HOME/released/omarchy-src"
 id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
 grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "listed as released, the claim names the source package at once: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
+(( $(grep -c '^sources=' "$ARCHCI_HOME/queue/running/$id.job") == 1 )) || fail "a claim after a requeue must name the source package once, not once per claim: $(grep '^sources=' "$ARCHCI_HOME/queue/running/$id.job")"
 "$job" report "$id" abandoned
 rm -r "$ARCHCI_HOME/released"
 "$job" enqueue linux 0 src >/dev/null
