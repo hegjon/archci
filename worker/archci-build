@@ -225,6 +225,8 @@ if [[ -d $srcdir/vendor ]]; then
 		echo "# written by archci-build: the source package's vendored dependencies, replayed offline"
 		for k in "${kinds[@]}"; do archci_vendor_env "$k" replay /startdir/vendor | sed 's/^/export /'; done
 	} >"$vendor_conf/pacman/makepkg.conf"
+	for k in "${kinds[@]}"; do archci_vendor_replay_files "$k" "$srcdir/vendor"; done
+	chown -R "$ARCHCI_BUILD_USER" "$srcdir/vendor"
 	say "Vendored dependencies from the source package: %s (replayed offline)" "${kinds[*]}"
 fi
 subdir=$ARCHCI_PKGBUILDS_DIR/$job_pkgbase

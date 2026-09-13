@@ -33,6 +33,9 @@ echo "--- archci_vendor_env: capture directs the cache, replay forbids the netwo
 [[ $(archci_vendor_env npm replay /v | head -2 | tr '\n' ' ') == "npm_config_cache=/v/npm npm_config_offline=true " ]] || fail "npm replay: $(archci_vendor_env npm replay /v)"
 [[ $(archci_vendor_env pip capture /v) == "PIP_CACHE_DIR=/v/pip" ]] || fail "pip capture: $(archci_vendor_env pip capture /v)"
 [[ $(archci_vendor_env maven replay /v | tr '\n' ' ') == "MAVEN_OPTS=-Dmaven.repo.local=/v/maven MAVEN_ARGS=--offline GRADLE_USER_HOME=/v/gradle " ]] || fail "maven replay: $(archci_vendor_env maven replay /v)"
+mkdir -p "$tmp/rv/maven"; archci_vendor_replay_files maven "$tmp/rv"
+grep -qx 'gradle.startParameter.offline = true' "$tmp/rv/maven/gradle/init.d/archci-offline.gradle" || fail "the maven replay must write gradle's offline init script"
+archci_vendor_replay_files rust "$tmp/rv"; [[ ! -e $tmp/rv/rust ]] || fail "rust needs no replay files"
 for k in rust go npm pip maven; do archci_vendor_supported "$k" || fail "$k is supported"; done
 ! archci_vendor_supported perl || fail "an unknown kind is not"
 [[ -z $(archci_vendor_env perl capture /v) ]] || fail "an unknown kind has no environment"

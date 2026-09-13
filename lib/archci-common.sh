@@ -512,9 +512,10 @@ archci_pkg_wanted() {
 # (the module cache), npm (npm's cache; yarn, pnpm and bun keep their own
 # and are best effort), pip (pip's cache: its index pages are served from
 # it offline only while fresh; best effort) and maven (maven's local
-# repository and gradle's user home; gradle has no offline switch in the
-# environment: best effort). A package whose fetch the capture cannot
-# serve builds with the network through package.json "network": true.
+# repository with --offline on replay, and gradle's user home with an init
+# script that sets its offline flag, archci_vendor_replay_files). A package
+# whose fetch the capture cannot serve builds with the network through
+# package.json "network": true.
 # archci_vendor_kinds PKGBUILD -> the kinds the PKGBUILD fetches, one per line
 archci_vendor_kinds() {
 	local f=$1
@@ -545,6 +546,18 @@ archci_vendor_env() {
 		pip:replay)   printf 'PIP_CACHE_DIR=%s/pip\n' "$dir" ;;
 		maven:capture) printf 'MAVEN_OPTS=-Dmaven.repo.local=%s/maven\nGRADLE_USER_HOME=%s/gradle\n' "$dir" "$dir" ;;
 		maven:replay)  printf 'MAVEN_OPTS=-Dmaven.repo.local=%s/maven\nMAVEN_ARGS=--offline\nGRADLE_USER_HOME=%s/gradle\n' "$dir" "$dir" ;;
+		*) ;;
+	esac
+}
+# archci_vendor_replay_files KIND DIR -- what a replay needs written into
+# DIR/<kind> beyond the environment: gradle's offline flag has no
+# environment switch, so an init script in its user home sets it (gradle
+# runs every init.d/*.gradle there, for every build)
+archci_vendor_replay_files() {
+	case $1 in
+		maven)
+			mkdir -p "$2/maven/gradle/init.d"
+			printf '// written by archci-build: the build has no network\ngradle.startParameter.offline = true\n' >"$2/maven/gradle/init.d/archci-offline.gradle" ;;
 		*) ;;
 	esac
 }
