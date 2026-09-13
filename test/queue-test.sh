@@ -177,6 +177,14 @@ grep -q '^seen=20' "$ARCHCI_HOME/hosts/idle-host-1" || fail "hosts/ entry must s
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! ARCHCI_ARCHES="x86_64 riscv64" "$job" claim idle-host-1 riscv64 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
 touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
+# the sourcer's heartbeat: a poll keeps the host's stats without taking work,
+# and role=sourcer lists the host with no worker
+out=$("$job" poll srcr x86_64 load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.9-1 role=sourcer 2>&1) || fail "a poll must be accepted: $out"
+[[ -z $out ]] || fail "a poll must print nothing: $out"
+grep -q '^role=sourcer$' "$ARCHCI_HOME/hosts/srcr" || fail "the poll's stats must be kept in hosts/"
+"$top" | grep "^srcr  *DigitalOcean  *x86_64  *0.10  *30  *5  *1  *0  *0  0.4.9-1$" >/dev/null || fail "archci-top must list the sourcer host with no workers: $("$top" | grep srcr)"
+# shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
+! "$job" poll srcr x86_64 'role=$(true)' 2>/dev/null || fail "a malformed poll stat must be refused"
 "$top" | grep "^idle-host " >/dev/null && fail "a worker that stopped polling must drop out of the hosts table"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/hosts/idle-host-1 ]] || fail "housekeeping must keep a poll younger than a day"

@@ -46,6 +46,16 @@ ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
 	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
 master() { ssh -n "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }   # -n: never the pass's list on stdin
 
+# The host's stats to the master (archci-job poll) every
+# ARCHCI_HEARTBEAT_SECONDS while the pass runs, as an idle worker's claim
+# sends them, so archci top lists this host; role=sourcer keeps it out of the
+# worker count. A beat that fails is the master's problem, not the pass's.
+# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
+beat() { master poll "${HOSTNAME%%.*}" "$(uname -m)" $(archci_worker_stats "$home") role=sourcer >/dev/null 2>&1 || true; }
+( while true; do beat; sleep "$ARCHCI_HEARTBEAT_SECONDS"; done ) &
+beats=$!
+trap 'kill "$beats" 2>/dev/null || true' EXIT
+
 # --- the PKGBUILD repository: one bare mirror, the directory exported at the commit
 export_pkgbuild() {   # export_pkgbuild PKGBASE COMMIT DIR
 	local subdir=$ARCHCI_PKGBUILDS_DIR/$1 commit=$2 dir=$3 depth

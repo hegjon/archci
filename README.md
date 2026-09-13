@@ -184,8 +184,11 @@ downloaded, checksummed and signature-checked, packed as
 source package to `pkg/`, and reports `sources-ready` or `sources-failed`;
 the master records it under `sources/<pkgbase>` and hands the name to the
 next claim. It is the one host that talks to upstream; a worker with
-`ARCHCI_SOURCES_URL` set fetches nothing else. `archci top` shows how many
-are packaged, still to fetch and failed.
+`ARCHCI_SOURCES_URL` set fetches nothing else. While a pass runs the sourcer
+sends the master its load, memory and disk every minute (`poll`, what an
+idle worker's claim carries), so `archci top` lists the sourcer host beside
+the workers, with no worker of its own, and shows how many packages are
+packaged, still to fetch and failed.
 
 **Master.** The master holds no signing key and builds no database. On `report
 success` the packages and their builder signatures are pooled into

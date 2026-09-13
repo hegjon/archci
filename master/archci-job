@@ -9,6 +9,9 @@
 #                             The host stats sent along (ARCHCI_HOST_STATS) are
 #                             kept in hosts/WORKER: the host as last polled,
 #                             for the UIs while the worker is idle
+#   poll WORKER ARCH [K=V...] keep WORKER's host stats in hosts/WORKER without
+#                             handing it work: the sourcer's heartbeat (its
+#                             role=sourcer keeps it out of the worker count)
 #   heartbeat ID [K=V...]     mark a running job as still alive; the worker's
 #                             host stats (ARCHCI_HOST_STATS) and the job's
 #                             (ARCHCI_JOB_STATS) are kept with the job
@@ -40,21 +43,36 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-queue.sh"
 
 # ---------------------------------------------------------------------------
-cmd_claim() {
+# record_poll WORKER ARCH [K=V...] -- hosts/WORKER: the host as last heard
+# from, with the stats it sent (ARCHCI_HOST_STATS, and role= for a host that
+# is not a worker), for the UIs
+record_poll() {
 	local worker=$1 warch=$2 stat hostre
+	shift 2
+	hostre="${ARCHCI_HOST_STATS// /|}|role"
+	for stat in "$@"; do
+		[[ $stat =~ ^($hostre)=[A-Za-z0-9./-]{1,32}$ ]] || archci_die "bad host stat: $stat"
+	done
+	mkdir -p "$ARCHCI_HOME/hosts"
+	{ printf 'worker=%s\narch=%s\nseen=%s\n' "$worker" "$warch" "$(archci_now)"; printf '%s\n' "$@"; } >"$ARCHCI_HOME/hosts/$worker.tmp"
+	mv "$ARCHCI_HOME/hosts/$worker.tmp" "$ARCHCI_HOME/hosts/$worker"
+}
+
+cmd_poll() {
+	local worker=$1 warch=$2
+	shift 2
+	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
+	archci_valid_arch "$warch" || archci_die "invalid arch: $warch"
+	record_poll "$worker" "$warch" "$@"
+}
+
+cmd_claim() {
+	local worker=$1 warch=$2
 	shift 2
 	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
 	archci_valid_arch "$warch" || archci_die "invalid arch: $warch"
 	archci_enabled_arch "$warch" || archci_die "arch $warch is not enabled on this master (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
-	if (( $# )); then
-		hostre=${ARCHCI_HOST_STATS// /|}
-		for stat in "$@"; do
-			[[ $stat =~ ^($hostre)=[A-Za-z0-9./-]{1,32}$ ]] || archci_die "bad host stat: $stat"
-		done
-		mkdir -p "$ARCHCI_HOME/hosts"
-		{ printf 'worker=%s\narch=%s\nseen=%s\n' "$worker" "$warch" "$(archci_now)"; printf '%s\n' "$@"; } >"$ARCHCI_HOME/hosts/$worker.tmp"
-		mv "$ARCHCI_HOME/hosts/$worker.tmp" "$ARCHCI_HOME/hosts/$worker"
-	fi
+	(( $# )) && record_poll "$worker" "$warch" "$@"
 	lock_queue
 	# A worker runs one job at a time, so a claim while one of its jobs is
 	# still running means that job died with the worker's previous process
@@ -267,6 +285,7 @@ cmd=${1:-}
 shift || true
 case $cmd in
 	claim)     (( $# >= 2 )) || archci_die "usage: archci-job claim WORKER ARCH [K=V...]"; cmd_claim "$@" ;;
+	poll)      (( $# >= 2 )) || archci_die "usage: archci-job poll WORKER ARCH [K=V...]"; cmd_poll "$@" ;;
 	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; cmd_heartbeat "$@" ;;
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
@@ -274,5 +293,5 @@ case $cmd in
 	sources-needed) cmd_sources_needed "${1:-}" ;;
 	sources-ready|sources-failed) (( $# >= 3 )) || archci_die "usage: archci-job sources-ready|sources-failed PKGBASE COMMIT VALUE..."; cmd_sources_record "$cmd" "$@" ;;
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
-	*) sed -n '2,18p' "$0" >&2; exit 2 ;;
+	*) sed -n '2,21p' "$0" >&2; exit 2 ;;
 esac

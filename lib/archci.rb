@@ -125,11 +125,13 @@ module Archci
   end
 
   # One entry per host seen among RUNNING and RECENT jobs and the workers'
-  # POLLS (hosts/<worker>, written by every claim), from the newest stats any
-  # of its workers sent: a running job's heartbeat, an idle worker's poll, or
-  # the last beat a finished job kept. A worker whose last poll is older than
-  # POLL_TTL is gone. The native arch is what a worker without an arch in its
-  # name builds ("any" jobs are the any arch's).
+  # POLLS (hosts/<worker>, written by every claim and by archci-job poll),
+  # from the newest stats any of its workers sent: a running job's heartbeat,
+  # an idle worker's poll, or the last beat a finished job kept. A worker
+  # whose last poll is older than POLL_TTL is gone. The native arch is what a
+  # worker without an arch in its name builds ("any" jobs are the any
+  # arch's). A poll with role=sourcer is the sourcer's heartbeat: the host is
+  # listed, with no worker.
   POLL_TTL = 600
 
   def self.hosts(running, recent, polls, now)
@@ -147,7 +149,7 @@ module Archci
       host, port = worker_host(j['worker'])
       h = hosts[host] ||= { 'host' => host, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
                             **HOST_STATS.to_h { |k| [k, nil] } }
-      h['workers'] |= [j['worker']]
+      h['workers'] |= [j['worker']] unless j['role'] == 'sourcer'
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       h['vendor'] ||= j['vendor']   # constant for a host: any worker that sent it will do
