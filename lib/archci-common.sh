@@ -499,6 +499,55 @@ archci_pkg_wanted() {
 	[[ -z $ARCHCI_PKG_REPOS || " $ARCHCI_PKG_REPOS " == *" $origin "* ]]
 }
 
+# --- vendored dependencies -------------------------------------------------
+# A PKGBUILD that fetches a language ecosystem's packages in prepare()
+# (Arch's convention: cargo fetch --locked, go mod download, npm ci, ...)
+# needs the network at build time. The sourcer captures that fetch in its
+# chroot: makepkg -o runs prepare() with the ecosystem's cache directed into
+# vendor/<kind>/ (archci_vendor_env capture), which goes into the source
+# package; the worker replays it offline: the same cache, and the ecosystem
+# told to fetch nothing (archci_vendor_env replay). Kinds: rust is captured
+# and replayed today; go, npm, pip and maven are detected and named
+# (archci_vendor_kinds), their capture and replay come later, and their
+# packages fetch at build time until then.
+# archci_vendor_kinds PKGBUILD -> the kinds the PKGBUILD fetches, one per line
+archci_vendor_kinds() {
+	local f=$1
+	grep -qE '(^|[^a-z])cargo (fetch|vendor)( |$)' "$f" && echo rust
+	grep -qE '(^|[^a-z])go mod (download|vendor)( |$)' "$f" && echo go
+	grep -qE '(^|[^a-z])(npm (ci|install)|yarn install|pnpm install|bun install)( |$)' "$f" && echo npm
+	grep -qE '(^|[^a-z])pip (download|install)( |$)' "$f" && echo pip
+	grep -qE '(^|[^a-z])(mvn|gradle)( |$)' "$f" && echo maven
+	return 0
+}
+# archci_vendor_supported KIND -> can the kind be captured and replayed?
+archci_vendor_supported() { [[ $1 == rust ]]; }
+# archci_vendor_env KIND capture|replay DIR -> the environment for the kind's
+# tools, KEY=VALUE per line: capture directs the fetch into DIR/<kind>,
+# replay points the build at it and forbids the network. Nothing for a kind
+# not supported yet:
+#   go     GOMODCACHE=DIR/go; replay GOPROXY=off GOFLAGS=-mod=mod
+#   npm    npm_config_cache=DIR/npm; replay npm_config_offline=true
+#   pip    a wheelhouse in DIR/pip (pip download); replay PIP_NO_INDEX=1 PIP_FIND_LINKS=DIR/pip
+#   maven  -Dmaven.repo.local=DIR/maven and gradle --offline: flags, not environment
+archci_vendor_env() {
+	local kind=$1 phase=$2 dir=$3
+	case $kind:$phase in
+		rust:capture) printf 'CARGO_HOME=%s/rust\n' "$dir" ;;
+		rust:replay)  printf 'CARGO_HOME=%s/rust\nCARGO_NET_OFFLINE=true\n' "$dir" ;;
+		*) ;;
+	esac
+}
+# archci_srcpkg_add_vendor SRCPKG PKGBASE DIR -- put DIR into the source
+# package (a plain tar, gzipped, its entries under PKGBASE/) as
+# PKGBASE/vendor/, root's, in place
+archci_srcpkg_add_vendor() {
+	local srcpkg=$1 pkgbase=$2 dir=$3 tar=$1.tar
+	gzip -dc "$srcpkg" >"$tar" || return 1
+	tar -rf "$tar" -C "$(dirname "$dir")" --owner=0 --group=0 --transform="s|^$(basename "$dir")|$pkgbase/vendor|" "$(basename "$dir")" || return 1
+	gzip -c "$tar" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tar"
+}
+
 # --- the job protocol over ssh: what the worker and the sourcer share -----
 # archci_master CMD... -- run a job-protocol command (claim, heartbeat,
 # report: archci-shell on the master) with the worker key; -n: never stdin.

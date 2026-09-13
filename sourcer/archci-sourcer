@@ -141,22 +141,34 @@ prepare_copy() {
 	sed -e '/^\(BUILDDIR\|SRCDEST\|SRCPKGDEST\|PACKAGER\)=/d' -i "$copy/etc/makepkg.conf"
 	printf '%s\n' BUILDDIR=/build SRCDEST=/srcdest SRCPKGDEST=/srcpkgdest "PACKAGER=${ARCHCI_PACKAGER@Q}" >>"$copy/etc/makepkg.conf"
 	printf '[safe]\n\tdirectory = *\n' | tee "$copy/etc/gitconfig" >"$copy/etc/makepkg.d/gitconfig" 2>/dev/null || true
-	# the fetch, as the build user: the keys the PKGBUILD names (keys/pgp/,
-	# then the keyservers), .SRCINFO for the host, then every source
+	printf 'builduser ALL = NOPASSWD: /usr/bin/pacman\n' >"$copy/etc/sudoers.d/builduser-pacman"
+	chmod 440 "$copy/etc/sudoers.d/builduser-pacman"
+	# the fetch, as the build user. "sources": the keys the PKGBUILD names
+	# (keys/pgp/, then the keyservers), .SRCINFO for the host, then every
+	# source. "vendor VAR=VALUE...": the dependencies makepkg -o's prepare()
+	# fetches, with the ecosystems' caches directed by the environment given
+	# (archci_vendor_env capture), the makedepends installed first.
 	cat >"$copy/chrootfetch" <<-SCRIPT
 		#!/bin/bash
 		. /etc/profile
+		mode=\$1; shift
+		if [[ \$mode == vendor ]]; then pacman -Sy --noconfirm >/dev/null 2>&1 || true; fi
 		exec runuser -u builduser -- bash -c '
 			set -e
+			mode=\$1; shift
 			export HOME=/build GNUPGHOME=/build/.gnupg
 			cd /startdir
+			if [[ \$mode == vendor ]]; then
+				export "\$@"
+				exec makepkg -o -s --noconfirm --ignorearch
+			fi
 			if compgen -G "keys/pgp/*.asc" >/dev/null; then gpg --batch --quiet --import keys/pgp/*.asc 2>/dev/null || true; fi
 			makepkg --printsrcinfo >.SRCINFO 2>/dev/null || true
 			mapfile -t fp < <(sed -n "s/^\\\\tvalidpgpkeys = //p" .SRCINFO)
 			if (( \${#fp[@]} )); then
 				for ks in $ARCHCI_KEYSERVERS; do timeout 120 gpg --batch --quiet --keyserver "\$ks" --recv-keys "\${fp[@]}" 2>/dev/null || true; done
 			fi
-			exec makepkg --allsource --ignorearch'
+			exec makepkg --allsource --ignorearch' _ "\$mode" "\$@"
 	SCRIPT
 	chmod 755 "$copy/chrootfetch"
 }
@@ -216,12 +228,14 @@ fetch_one() {
 	prepare_copy || { say "==> could not make the chroot copy $copy"; return 1; }
 	# (no -C/-M here: arch-nspawn would copy them over the copy's own
 	# pacman.conf and makepkg.conf, which prepare_copy just wrote to)
-	run_fetch() {
+	in_copy() {   # in_copy MODE ARGS... -- /chrootfetch in the copy, within the fetch's time
 		timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
 			arch-nspawn -c "$cachedir" "$copy" \
-				--bind="$w/pkg:/startdir" --bind="$srcdest:/srcdest" --bind="$w/out:/srcpkgdest" --bind="$gnupghome:/build/.gnupg" \
-				--tmpfs=/tmp:mode=1777,strictatime,nodev,nosuid,size=50% --machine="$machine" /chrootfetch 2>&1 | tee -a "$log"
+				--bind="$w/pkg:/startdir" --bind="$srcdest:/srcdest" --bind="$w/out:/srcpkgdest" --bind="$gnupghome:/build/.gnupg" --bind="$w/vendor:/vendor" \
+				--tmpfs=/tmp:mode=1777,strictatime,nodev,nosuid,size=50% --machine="$machine" /chrootfetch "$@" 2>&1 | tee -a "$log"
 	}
+	run_fetch() { in_copy sources; }
+	install -d -o "$uid" -g "$gid" "$w/vendor"
 	say "==> Fetching the sources of $job_pkgbase $job_version in $copy"
 	if run_fetch; then rc=0
 	else
@@ -237,6 +251,36 @@ fetch_one() {
 	fi
 	(( rc == 124 )) && say "==> timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
 	f=$(find "$w/out" -maxdepth 1 -name '*.src.tar.gz' -print -quit)
+	# the dependencies prepare() fetches (archci_vendor_kinds): captured
+	# into vendor/ by a makepkg -o in the same copy, the makedepends
+	# installed, and put into the source package as <pkgbase>/vendor/<kind>;
+	# a kind not captured yet is fetched at build time
+	if (( rc == 0 )) && [[ -n $f ]]; then
+		local kinds=() capture=() env=() k
+		mapfile -t kinds < <(archci_vendor_kinds "$w/pkg/PKGBUILD")
+		for k in "${kinds[@]}"; do
+			if archci_vendor_supported "$k"; then capture+=("$k"); mapfile -t -O "${#env[@]}" env < <(archci_vendor_env "$k" capture /vendor)
+			else say "==> $k dependencies are fetched at build time (their capture is not written yet)"
+			fi
+		done
+		if (( ${#capture[@]} )); then
+			say "==> Capturing the ${capture[*]} dependencies prepare() fetches (makepkg -o, ${env[*]})"
+			# once more on failure: a cached package that fails its signature
+			# is dropped by pacman on the first try (as for the chroot itself)
+			if in_copy vendor "${env[@]}" || { say "==> the capture failed; trying once more"; in_copy vendor "${env[@]}"; }; then
+				# what a cache keeps that a replay does not need: cargo's lock, and crates it extracted
+				rm -rf "$w/vendor/rust/.package-cache" "$w/vendor/rust/registry/src"
+				if archci_srcpkg_add_vendor "$f" "$job_pkgbase" "$w/vendor"; then
+					say "==> vendored: $(du -sh "$w/vendor" | cut -f1) of ${capture[*]} dependencies in the source package"
+				else
+					say "==> could not add vendor/ to ${f##*/}"; rc=1
+				fi
+			else
+				rc=$?; (( rc == 124 )) && say "==> the capture timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
+				say "==> capturing the ${capture[*]} dependencies failed"
+			fi
+		fi
+	fi
 	if (( rc == 0 )) && [[ -n $f ]]; then
 		mv "$f" "$out/${f##*/}"
 		if gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --detach-sign -u "$ARCHCI_BUILDER_KEY" -o "$out/${f##*/}.buildsig" "$out/${f##*/}"; then

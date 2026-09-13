@@ -207,6 +207,26 @@ if [[ -n ${job_sources:-} && -n $ARCHCI_RELEASE_URL ]]; then
 	chmod -R a+rX "$srcdir"
 	from_srcpkg=1
 fi
+# The dependencies the sourcer captured (vendor/<kind>/ in the source
+# package, see archci_vendor_env): replayed offline through the build
+# user's own makepkg.conf, bound read-only into the copy as
+# /build/.config/pacman/makepkg.conf (makepkg reads it after /etc's; the
+# PKGBUILD directory is /startdir there, read-write, as cargo wants its
+# home), so prepare()'s fetch is served from the cache and the ecosystem
+# fetches nothing.
+vendor_conf=''
+if [[ -d $srcdir/vendor ]]; then
+	vendor_conf=${jobfile%/*}/vendorconf
+	rm -rf "$vendor_conf"
+	mkdir -p "$vendor_conf/pacman"
+	kinds=()
+	for d in "$srcdir"/vendor/*/; do [[ -d $d ]] && kinds+=("$(basename "$d")"); done
+	{
+		echo "# written by archci-build: the source package's vendored dependencies, replayed offline"
+		for k in "${kinds[@]}"; do archci_vendor_env "$k" replay /startdir/vendor | sed 's/^/export /'; done
+	} >"$vendor_conf/pacman/makepkg.conf"
+	say "Vendored dependencies from the source package: %s (replayed offline)" "${kinds[*]}"
+fi
 subdir=$ARCHCI_PKGBUILDS_DIR/$job_pkgbase
 mirror=$ARCHCI_WORKER_HOME/pkgbuilds.git
 export GIT_TERMINAL_PROMPT=0
@@ -301,6 +321,7 @@ extra_makepkg_args=()
 [[ -n $ARCHCI_MAKEPKG_ARGS ]] && read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
 # a source package carries its VCS sources as snapshots: build them as they are
 (( from_srcpkg )) && extra_makepkg_args+=(--holdver)
+[[ -n $vendor_conf ]] && mcp_args+=(-D "$vendor_conf:/build/.config")
 # PKGBUILDs carried from Arch declare arch=(x86_64) unless a patch in the
 # repository adds the port arch; a port arch builds them anyway (the Arch
 # Linux Ports RFC keeps the arch array as is and has the tooling ignore it).
