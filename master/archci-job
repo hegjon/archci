@@ -8,15 +8,19 @@
 #                             package (archci-next ARCH), chosen just in time.
 #                             The host stats sent along (ARCHCI_HOST_STATS) are
 #                             kept in hosts/WORKER: the host as last polled,
-#                             for the UIs while the worker is idle
-#   poll WORKER ARCH [K=V...] keep WORKER's host stats in hosts/WORKER without
-#                             handing it work: the sourcer's heartbeat (its
-#                             role=sourcer keeps it out of the worker count)
+#                             for the UIs while the worker is idle. ARCH src
+#                             is the sourcer's: a job to fetch a package's
+#                             sources into a source package
 #   heartbeat ID [K=V...]     mark a running job as still alive; the worker's
 #                             host stats (ARCHCI_HOST_STATS) and the job's
 #                             (ARCHCI_JOB_STATS) are kept with the job
 #   report ID STATUS          finish a job: success | failure | abandoned
-#                             (results are expected in incoming/ID/)
+#                             (results are expected in incoming/ID/: the
+#                             packages and their .buildsig; for a src job the
+#                             source package and its .buildsig, pooled under
+#                             <repo>/os/src for archci-stage like a package,
+#                             and the built record names it to the package's
+#                             build claims)
 #   requeue ID                move a running/failed job back to pending
 #   retry ID | -a|--all       reset the attempt counter and requeue: one job,
 #                             or every failed job (final ones included)
@@ -24,15 +28,7 @@
 #                             queue the package's current version (from the
 #                             PKGBUILD repository clone), priority P (default
 #                             0), for ARCH (default ARCHCI_ARCH; "any" for an
-#                             arch-independent package)
-#   sources-needed [--all]    the outstanding packages without a source
-#                             package for their commit, "pkgbase version
-#                             commit" (for the sourcer; --all: the ones that
-#                             failed lately too)
-#   sources-ready PKGBASE COMMIT FILE
-#   sources-failed PKGBASE COMMIT WHY...
-#                             what the sourcer made, or why not: recorded in
-#                             sources/PKGBASE; a claim hands the worker the file
+#                             arch-independent package; "src" for its sources)
 #
 # The queue itself (files under queue/, moved between pending, running, done
 # and failed) is lib/archci-queue.sh; its periodic pass, requeueing stale
@@ -44,26 +40,17 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-queue.sh"
 
 # ---------------------------------------------------------------------------
 # record_poll WORKER ARCH [K=V...] -- hosts/WORKER: the host as last heard
-# from, with the stats it sent (ARCHCI_HOST_STATS, and role= for a host that
-# is not a worker), for the UIs
+# from, with the stats it sent (ARCHCI_HOST_STATS), for the UIs
 record_poll() {
 	local worker=$1 warch=$2 stat hostre
 	shift 2
-	hostre="${ARCHCI_HOST_STATS// /|}|role"
+	hostre=${ARCHCI_HOST_STATS// /|}
 	for stat in "$@"; do
 		[[ $stat =~ ^($hostre)=[A-Za-z0-9./-]{1,32}$ ]] || archci_die "bad host stat: $stat"
 	done
 	mkdir -p "$ARCHCI_HOME/hosts"
 	{ printf 'worker=%s\narch=%s\nseen=%s\n' "$worker" "$warch" "$(archci_now)"; printf '%s\n' "$@"; } >"$ARCHCI_HOME/hosts/$worker.tmp"
 	mv "$ARCHCI_HOME/hosts/$worker.tmp" "$ARCHCI_HOME/hosts/$worker"
-}
-
-cmd_poll() {
-	local worker=$1 warch=$2
-	shift 2
-	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
-	archci_valid_arch "$warch" || archci_die "invalid arch: $warch"
-	record_poll "$worker" "$warch" "$@"
 }
 
 cmd_claim() {
@@ -107,49 +94,20 @@ cmd_claim() {
 	fi
 	mv "$Q_PENDING/$name" "$Q_RUNNING/$name"
 	archci_read_job "$Q_RUNNING/$name" || archci_die "corrupt job file $name"
-	# the source package the sourcer made for this commit, if it did: the
-	# worker builds from it instead of fetching upstream
-	local rec=$ARCHCI_HOME/sources/$job_pkgbase srcpkg=''
-	if [[ -f $rec ]] && grep -qx "commit=$job_commit" "$rec"; then srcpkg=$(sed -n 's/^file=//p' "$rec"); fi
+	# the source package the sourcer made for this commit, once it has been
+	# out long enough for the signer to have released it: the worker builds
+	# from it instead of fetching upstream
+	local rec=$ARCHCI_HOME/built/$job_repo-src/$job_pkgbase srcpkg='' v c f
+	if [[ $job_arch != src && -f $rec ]] && (( $(date +%s) - $(stat -c %Y "$rec") >= ARCHCI_RELEASE_LAG_MINUTES * 60 )); then
+		read -r v c f <"$rec"
+		[[ $c == "$job_commit" && -n $f ]] && srcpkg=$f
+	fi
 	rewrite_job "$Q_RUNNING/$name" "$Q_RUNNING/$name" \
 		"worker=$worker" "claimed=$(archci_now)" ${srcpkg:+"sources=$srcpkg"}
 	set_attempt "$Q_RUNNING/$name" $((job_attempt + 1))
 	mkdir -p "$ARCHCI_HOME/incoming/${name%.job}"
 	archci_log "claim ${name%.job} -> $worker (attempt $((job_attempt + 1)))"
 	cat "$Q_RUNNING/$name"
-}
-
-# --- the sourcer's side: which packages lack sources, and what it made.
-# Records under sources/<pkgbase>: the commit, then file=<src.tar.gz> or
-# error=<why>, and when (tried=). A claim hands the worker the file name.
-cmd_sources_needed() {   # [--all]: every outstanding package without a current source package, "pkgbase version commit"
-	local pkgbase version commit rec now
-	now=$(date +%s)
-	"$ARCHCI_MASTER_DIR/archci-next" --all | while read -r pkgbase version commit; do
-		rec=$ARCHCI_HOME/sources/$pkgbase
-		if [[ -f $rec ]] && grep -qx "commit=$commit" "$rec"; then
-			grep -q '^file=' "$rec" && continue                                   # in
-			# failed lately: not offered again yet
-			(( now - $(sed -n 's/^tried=//p' "$rec") < ARCHCI_SOURCER_RETRY_HOURS * 3600 )) && [[ $1 != --all ]] && continue
-		fi
-		printf '%s %s %s\n' "$pkgbase" "$version" "$commit"
-	done
-}
-cmd_sources_record() {   # sources-ready|sources-failed PKGBASE COMMIT VALUE...
-	local what=$1 pkgbase=$2 commit=$3 rec
-	shift 3
-	[[ $pkgbase =~ ^[A-Za-z0-9@._+-]+$ && $commit =~ ^[0-9a-f]{7,40}$ ]] || archci_die "bad package or commit"
-	mkdir -p "$ARCHCI_HOME/sources"
-	rec=$ARCHCI_HOME/sources/$pkgbase
-	if [[ $what == sources-ready ]]; then
-		[[ $1 =~ ^[A-Za-z0-9@._+:-]+\.src\.tar\.gz$ ]] || archci_die "bad source package name"
-		printf 'commit=%s\nfile=%s\ntried=%s\n' "$commit" "$1" "$(date +%s)" >"$rec.tmp"
-		archci_log "$pkgbase: sources in, $1"
-	else
-		printf 'commit=%s\nerror=%s\ntried=%s\n' "$commit" "$(printf '%s' "$*" | tr -d '\n' | cut -c1-200)" "$(date +%s)" >"$rec.tmp"
-		archci_log "$pkgbase: sources failed: $*"
-	fi
-	mv "$rec.tmp" "$rec"
 }
 
 cmd_heartbeat() {
@@ -183,6 +141,25 @@ ingest() {
 	archci_log "$id: pooled $n package(s) for [$job_repo]"
 }
 
+# A src job's results: the source package (named by the job: pkgbase and
+# version, as makepkg names it) and its builder signature, pooled under
+# <repo>/os/src for archci-stage as a package is; the built record names the
+# file, which a build claim hands to the worker once it is released.
+ingest_src() {
+	local id=$1 inc=$2 f=$job_pkgbase-$job_version.src.tar.gz dir=$ARCHCI_HOME/repo/$job_repo/os/src
+	[[ -f $inc/$f && -f $inc/$f.buildsig ]] || { archci_log "$id: no $f with its .buildsig in the upload"; return 1; }
+	(
+		exec 8>"$ARCHCI_HOME/lock/repo.lock"
+		flock 8
+		mkdir -p "$dir"
+		mv "$inc/$f" "$dir/$f" && mv "$inc/$f.buildsig" "$dir/$f.buildsig"
+	) || return 1
+	mkdir -p "$ARCHCI_HOME/built/$job_repo-src"
+	printf '%s %s %s\n' "$job_version" "$job_commit" "$f" >"$ARCHCI_HOME/built/$job_repo-src/$job_pkgbase"
+	touch "$ARCHCI_HOME/stage.needed"
+	archci_log "$id: pooled $f for [$job_repo]"
+}
+
 cmd_report() {
 	local id=$1 status=$2 file inc logdir
 	archci_valid_id "$id" || archci_die "invalid job id"
@@ -212,8 +189,10 @@ cmd_report() {
 		[[ -f $mlog ]] && mv "$mlog" "$logdir/attempt-$job_attempt-${mlog##*/}"
 	done
 
-	if [[ $status == success ]] && ! ingest "$id" "$inc"; then
-		status=failure
+	if [[ $status == success ]]; then
+		if [[ $job_arch == src ]]; then ingest_src "$id" "$inc" || status=failure
+		else ingest "$id" "$inc" || status=failure
+		fi
 	fi
 	if [[ $status == success ]]; then
 		rewrite_job "$file" "$Q_DONE/$id.job" "worker=$job_worker" "status=success" "finished=$(archci_now)"
@@ -267,7 +246,8 @@ cmd_enqueue() {
 	[[ -n $line ]] || archci_die "no package $pkgbase in the PKGBUILD repository (run archci-scan first?)"
 	read -r name version commit parch profile _ <<<"$line"
 	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected index line: $line"
-	if [[ $parch == any ]]; then
+	if [[ $arch == src ]]; then :   # its sources: any package's
+	elif [[ $parch == any ]]; then
 		[[ $arch == any ]] || archci_die "$pkgbase is an arch-independent package; enqueue it with ARCH=any"
 	else
 		[[ $arch != any ]] || archci_die "$pkgbase is not an arch-independent package (arch=$parch)"
@@ -285,13 +265,10 @@ cmd=${1:-}
 shift || true
 case $cmd in
 	claim)     (( $# >= 2 )) || archci_die "usage: archci-job claim WORKER ARCH [K=V...]"; cmd_claim "$@" ;;
-	poll)      (( $# >= 2 )) || archci_die "usage: archci-job poll WORKER ARCH [K=V...]"; cmd_poll "$@" ;;
 	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; cmd_heartbeat "$@" ;;
 	report)    (( $# == 2 )) || archci_die "usage: archci-job report ID STATUS";    cmd_report "$1" "$2" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
 	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; cmd_retry "$1" ;;
-	sources-needed) cmd_sources_needed "${1:-}" ;;
-	sources-ready|sources-failed) (( $# >= 3 )) || archci_die "usage: archci-job sources-ready|sources-failed PKGBASE COMMIT VALUE..."; cmd_sources_record "$cmd" "$@" ;;
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
-	*) sed -n '2,21p' "$0" >&2; exit 2 ;;
+	*) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" >&2; exit 2 ;;
 esac

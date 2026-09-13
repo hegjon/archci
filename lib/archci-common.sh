@@ -58,17 +58,20 @@ archci_load_conf
 # where archci-pkgindex reads a directory's cached index line from: the cache file
 # (file) or the PKGBUILD's extended attributes (xattr); both are written
 : "${ARCHCI_INDEX_CACHE:=file}"
-# The sourcer (archci-sourcer): its state, the rclone path it keeps the
-# upstream tarballs (files/) and source packages (pkg/) at, packages fetched
-# per pass, the time one may take, how long a failed fetch waits before
-# another try. Workers read the source packages at ARCHCI_SOURCES_URL (the
-# store's public URL; empty: they fetch upstream themselves).
+# Sources. "src" is a job arch: the sourcer claims src jobs the way a
+# worker claims builds, fetches every source the package's PKGBUILD names
+# into a source package (<pkgbase>-<version>.src.tar.gz), builder-signs it
+# and hands it in like a build's packages; it is pooled under
+# <repo>/os/src, staged, release-signed and published beside the arches,
+# and a build claim names it (sources=) once it has been out for
+# ARCHCI_RELEASE_LAG_MINUTES; a worker with ARCHCI_RELEASE_URL takes it from
+# there, checks the release signature, and fetches nothing upstream.
+# ARCHCI_SOURCES_REQUIRED=1 holds a build until that is so; 0 lets a build
+# fetch upstream meanwhile. The sourcer's state: ARCHCI_SOURCER_HOME (the
+# PKGBUILD mirror, SRCDEST, jobs), and the time one fetch may take.
 : "${ARCHCI_SOURCER_HOME:=/var/lib/archci-sourcer}"
-: "${ARCHCI_R2_SOURCES:=}"
-: "${ARCHCI_SOURCES_URL:=}"
-: "${ARCHCI_SOURCER_BATCH:=5}"
+: "${ARCHCI_SOURCES_REQUIRED:=0}"
 : "${ARCHCI_SOURCER_TIMEOUT_MINUTES:=30}"
-: "${ARCHCI_SOURCER_RETRY_HOURS:=6}"
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 : "${ARCHCI_REMOTE_JOURNAL:=/var/lib/archci/journal}"
@@ -179,8 +182,8 @@ archci_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 archci_valid_id()     { [[ $1 =~ ^[0-9]-[0-9]+-[a-z0-9-]+,[a-zA-Z0-9@._+-]+,[a-zA-Z0-9@._+:~-]+,[a-z0-9_]+$ ]]; }
 archci_valid_worker() { [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; }
 archci_valid_arch()   { [[ $1 =~ ^[a-z0-9_]{1,32}$ ]]; }
-# Is ARCH one of ARCHCI_ARCHES?
-archci_enabled_arch() { [[ " $ARCHCI_ARCHES " == *" $1 "* ]]; }
+# Is ARCH one of ARCHCI_ARCHES, or src (source packages, the sourcer's jobs)?
+archci_enabled_arch() { [[ " $ARCHCI_ARCHES " == *" $1 "* || $1 == src ]]; }
 # May a worker of arch WORKER_ARCH build a job of arch JOB_ARCH?
 archci_can_build()    { [[ $2 == "$1" || ( $2 == any && $1 == "$ARCHCI_ANY_ARCH" ) ]]; }
 

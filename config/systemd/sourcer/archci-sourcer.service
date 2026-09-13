@@ -1,15 +1,20 @@
 [Unit]
-Description=archci: fetch the outstanding packages' sources to the store for the workers
+Description=archci sourcer: fetch the sources of the master's src jobs
 After=network-online.target
 Wants=network-online.target
 # Journal streaming to the master, when configured (archci-remote-logging).
 Wants=archci-logging-tunnel.service systemd-journal-upload.service
 RequiresMountsFor=/var/lib/archci-sourcer
+StartLimitIntervalSec=0
 
 [Service]
-Type=oneshot
 ExecStart=/usr/lib/archci/sourcer/archci-sourcer
 # to the archci journal namespace, which is what streams to the master
 LogNamespace=archci
-# a pass fetches ARCHCI_SOURCER_BATCH packages, each within ARCHCI_SOURCER_TIMEOUT_MINUTES
-TimeoutStartSec=4h
+Restart=always
+RestartSec=30
+# On stop the loop reports the job as abandoned, so the master requeues it at once.
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

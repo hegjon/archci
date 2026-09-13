@@ -1,8 +1,10 @@
 #!/bin/bash
-# archci-authorize PUBKEY | --revoke PUBKEY|COMMENT -- let a worker key talk
-# to this master, or stop it.
+# archci-authorize [--sourcer] PUBKEY | --revoke PUBKEY|COMMENT -- let a
+# worker key, or with --sourcer the sourcer's key, talk to this master, or
+# stop it.
 #
-# Appends the key, restricted to the job protocol by a forced command, to
+# Appends the key, restricted to the job protocol by a forced command (the
+# sourcer's to src jobs: archci-shell sourcer), to
 # /etc/archci/authorized_keys (root-owned; sshd reads it for the archci user
 # through /etc/ssh/sshd_config.d/60-archci.conf, which the master package
 # installs). The key may also forward to the journal-remote
@@ -16,7 +18,7 @@
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-usage="usage: archci authorize PUBKEY-FILE | 'ssh-ed25519 AAAA... comment' | --revoke PUBKEY-FILE|KEY|COMMENT"
+usage="usage: archci authorize [--sourcer] PUBKEY-FILE | 'ssh-ed25519 AAAA... comment' | --revoke PUBKEY-FILE|KEY|COMMENT"
 akf=${ARCHCI_AUTHORIZED_KEYS:-/etc/archci/authorized_keys}
 keyre='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9-]+@openssh.com) [A-Za-z0-9+/=]+'
 
@@ -47,6 +49,11 @@ if [[ ${1:-} == --revoke ]]; then
 	exit 0
 fi
 
+shell=$ARCHCI_MASTER_DIR/archci-shell
+if [[ ${1:-} == --sourcer ]]; then
+	shell="$shell sourcer"
+	shift
+fi
 key=${1:-}
 [[ -n $key ]] || archci_die "$usage"
 [[ -f $key ]] && key=$(<"$key")
@@ -62,7 +69,7 @@ if [[ ! -e $akf && -f $old ]]; then
 	archci_log "moved the keys from $old to $akf"
 fi
 [[ -e $akf ]] || : >"$akf"
-line=$(printf 'command="%s",restrict,port-forwarding,permitopen="127.0.0.1:19533" %s' "$ARCHCI_MASTER_DIR/archci-shell" "$key")
+line=$(printf 'command="%s",restrict,port-forwarding,permitopen="127.0.0.1:19533" %s' "$shell" "$key")
 if grep -qxF "$line" "$akf"; then
 	archci_log "key already authorized"
 elif grep -qF "${BASH_REMATCH[0]}" "$akf"; then

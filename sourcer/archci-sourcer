@@ -1,60 +1,67 @@
 #!/bin/bash
-# archci-sourcer [PKGBASE...] -- fetch the sources of the packages the master
-# has outstanding and keep them on R2 for the workers. Runs on the sourcer
-# host as root on a timer (the worker key and the rclone config are root's;
-# makepkg and gpg run as the archci user); the one host of the farm that talks
-# to upstream. Each pass asks the master (over ssh, with a worker key, like a
-# worker) which packages lack sources, ARCHCI_SOURCER_BATCH of them in claim
-# order (or the ones named), and for each: exports the PKGBUILD directory at
-# the index's commit from a bare mirror of the PKGBUILD repository, imports
-# the keys it names and refreshes them from the keyservers, fills SRCDEST
-# from the tarball cache on R2 (files/, by name), runs `makepkg --allsource`
-# (every source of every arch downloaded, checksummed, signature-checked,
-# packed as <pkgbase>-<version>.src.tar.gz), pushes the files it had to
-# download to the cache and the source package to pkg/ on ARCHCI_R2_SOURCES,
-# and reports "sources-ready" to the master, which then hands the file name
-# to the worker that claims the package (sources=). A fetch that fails is
-# reported with its first error; the master offers it again after
-# ARCHCI_SOURCER_RETRY_HOURS.
+# archci-sourcer -- claim src jobs from the master and fetch each one's
+# sources into a source package. Runs on the sourcer host as root, as a
+# service (archci-sourcer.service; the worker key is root's; makepkg and gpg
+# run as the archci user); the one host of the farm that talks to upstream.
+# It is a worker for the arch "src": it claims with the worker key (`claim
+# <host> src`, once a minute while idle), and for each job exports the
+# PKGBUILD directory at the job's commit from a bare mirror of the PKGBUILD
+# repository, imports the keys it names and refreshes them from the
+# keyservers, runs `makepkg --allsource` (every source of every arch
+# downloaded, checksummed, signature-checked, packed as
+# <pkgbase>-<version>.src.tar.gz; SRCDEST is kept between jobs, pruned like
+# a worker's), signs the source package with this host's builder key
+# (archci-worker-setup's; made here if missing, to authorize on the signer
+# with archci authorize-builder) and hands it in like a build's packages
+# (rsync into incoming/, then `report`). The master pools it under
+# <repo>/os/src, the signer releases it beside the arches, and a build claim
+# then names it to the worker (sources=). A fetch that fails is a failed
+# job: its makepkg log is the attempt's log, and housekeeping retries it
+# like a build.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-for tool in makepkg git rclone gpg bsdtar debugedit; do   # (makepkg insists on debugedit whatever it is asked)
+# A package upgrade replaces this script and the library under a running
+# sourcer; the loop notices and re-executes itself between jobs.
+self=$(readlink -f "${BASH_SOURCE[0]}")
+code_files=("$self" "$ARCHCI_ROOT/lib/archci-common.sh")
+code_sig=$(stat -c '%i %Y %s' "${code_files[@]}" | tr '\n' ' ')
+
+for tool in makepkg git gpg bsdtar debugedit rsync; do   # (makepkg insists on debugedit whatever it is asked)
 	command -v "$tool" >/dev/null || archci_die "$tool is not installed"
 done
 [[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
 [[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY"
-[[ -n $ARCHCI_R2_SOURCES ]] || archci_die "ARCHCI_R2_SOURCES is not set in $ARCHCI_CONF"
-(( EUID == 0 )) || archci_die "must run as root (the worker key and the rclone config are root's)"
-export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
+(( EUID == 0 )) || archci_die "must run as root (the worker key is root's)"
 export GIT_TERMINAL_PROMPT=0
+me=${HOSTNAME%%.*}
+archci_valid_worker "$me" || archci_die "hostname makes an invalid worker id: $me"
+# the builder key signs every source package, as a worker's signs its
+# packages; the signer takes only keys it was given (archci authorize-builder)
+install -d -m 700 "$ARCHCI_BUILDER_GNUPGHOME"
+if ! gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --list-secret-keys "archci-builder@$me" >/dev/null 2>&1; then
+	gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --pinentry-mode loopback --passphrase "" \
+		--quick-generate-key "archci builder $me <archci-builder@$me>" ed25519 sign never
+	gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --armor --export "archci-builder@$me" >/etc/archci/builder_key.pub
+	archci_log "generated the builder key in $ARCHCI_BUILDER_GNUPGHOME; on the signer: archci authorize-builder builder_key.pub (this host's /etc/archci/builder_key.pub)"
+fi
 
 user=archci
 home=$ARCHCI_SOURCER_HOME
 mirror=$home/pkgbuilds.git
 srcdest=$home/srcdest
-work=$home/work
+jobsdir=$home/jobs
 gnupghome=$home/gnupg
-mkdir -p "$srcdest" "$work"
+mkdir -p "$srcdest" "$jobsdir"
 install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$gnupghome"
-chown "$user" "$srcdest" "$work"
+chown "$user" "$srcdest"
 # makepkg and gpg, as the archci user (makepkg refuses root)
 as_user() { runuser -u "$user" -- env HOME="$home" GNUPGHOME="$gnupghome" "$@"; }
 
 ssh_opts=(-i "$ARCHCI_WORKER_KEY" -o BatchMode=yes -o ConnectTimeout=30
 	-o ServerAliveInterval=30 -o ServerAliveCountMax=4
 	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
-master() { ssh -n "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }   # -n: never the pass's list on stdin
-
-# The host's stats to the master (archci-job poll) every
-# ARCHCI_HEARTBEAT_SECONDS while the pass runs, as an idle worker's claim
-# sends them, so archci top lists this host; role=sourcer keeps it out of the
-# worker count. A beat that fails is the master's problem, not the pass's.
-# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-beat() { master poll "${HOSTNAME%%.*}" "$(uname -m)" $(archci_worker_stats "$home") role=sourcer >/dev/null 2>&1 || true; }
-( while true; do beat; sleep "$ARCHCI_HEARTBEAT_SECONDS"; done ) &
-beats=$!
-trap 'kill "$beats" 2>/dev/null || true' EXIT
+master() { ssh -n "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }   # -n: never a file's lines on stdin
 
 # --- the PKGBUILD repository: one bare mirror, the directory exported at the commit
 export_pkgbuild() {   # export_pkgbuild PKGBASE COMMIT DIR
@@ -83,14 +90,17 @@ source_files() {   # source_files DIR
 	done | sort -u
 }
 
-# --- one package
-fetch_one() {   # fetch_one PKGBASE VERSION COMMIT
-	local pkgbase=$1 version=$2 commit=$3 w=$work/$pkgbase log rc f err cached=() names name
-	rm -rf "$w" "${srcdest:?}"/*
-	mkdir -p "$w"/{pkg,out,build}
-	if ! export_pkgbuild "$pkgbase" "$commit" "$w/pkg"; then
-		report_failed "$pkgbase" "$commit" "no $ARCHCI_PKGBUILDS_DIR/$pkgbase at $commit in $ARCHCI_PKGBUILDS_URL"
-		rm -rf "$w"
+# --- one job: fetch_one JOBDIR (the job's fields are read); its results in
+# JOBDIR/out: the source package, its .buildsig and build.log
+fetch_one() {
+	local jobdir=$1 w=$1/work out=$1/out log=$1/out/build.log rc f names name
+	rm -rf "$w"
+	mkdir -p "$w"/{pkg,out,build} "$out"
+	# SRCDEST is kept between jobs (a pkgrel bump downloads nothing); files
+	# not used for ARCHCI_SRCDEST_KEEP_DAYS go
+	find "$srcdest" -mindepth 1 -atime +"$ARCHCI_SRCDEST_KEEP_DAYS" -delete 2>/dev/null || true
+	if ! export_pkgbuild "$job_pkgbase" "$job_commit" "$w/pkg"; then
+		echo "==> no $ARCHCI_PKGBUILDS_DIR/$job_pkgbase at $job_commit in $ARCHCI_PKGBUILDS_URL" >"$log"
 		return 1
 	fi
 	chown -R "$user" "$w"
@@ -108,73 +118,127 @@ fetch_one() {   # fetch_one PKGBASE VERSION COMMIT
 			done
 		fi
 	fi
-	# the tarball cache: what it has of this package's files goes into SRCDEST
-	# first, so makepkg downloads only what the farm has never seen
 	mapfile -t names < <(source_files "$w/pkg")
-	if (( ${#names[@]} )); then
-		printf '%s\n' "${names[@]}" >"$w/names"
-		rclone copy --files-from "$w/names" "$ARCHCI_R2_SOURCES/files" "$srcdest" 2>/dev/null || true
-		for name in "${names[@]}"; do [[ -f $srcdest/$name ]] && cached+=("$name"); done
-	fi
-	log=$w/makepkg.log
 	run_makepkg() {
 		(cd "$w/pkg" && as_user env SRCDEST="$srcdest" SRCPKGDEST="$w/out" BUILDDIR="$w/build" timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
-			makepkg --allsource --ignorearch) >"$log" 2>&1
+			makepkg --allsource --ignorearch) >>"$log" 2>&1
 	}
+	echo "==> Fetching the sources of $job_pkgbase $job_version (${#names[@]} file(s) named)" >"$log"
 	if run_makepkg; then rc=0
 	else
 		rc=$?
-		# a cached file of the same name from another package: drop the cache's
-		# copies and let makepkg fetch them all upstream
-		if (( rc != 124 && ${#cached[@]} )) && grep -q "did not pass the validity check" "$log"; then
-			for name in "${cached[@]}"; do rm -f "$srcdest/$name"; done
-			cached=()
-			archci_log "$pkgbase $version: a cached file failed its checksum; fetching upstream"
+		# a file of the same name in SRCDEST from another package or version:
+		# drop this package's names from it and let makepkg fetch them upstream
+		if (( rc != 124 )) && grep -q "did not pass the validity check" "$log"; then
+			for name in "${names[@]}"; do rm -f "$srcdest/$name"; done
+			echo "==> a cached file failed its checksum; fetching upstream" >>"$log"
 			if run_makepkg; then rc=0; else rc=$?; fi
 		fi
 	fi
+	(( rc == 124 )) && echo "==> timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min" >>"$log"
 	f=$(find "$w/out" -maxdepth 1 -name '*.src.tar.gz' -print -quit)
 	if (( rc == 0 )) && [[ -n $f ]]; then
-		# the files makepkg downloaded (verified now) go to the cache, the source package to pkg/
-		: >"$w/new"
-		for name in "${names[@]}"; do
-			[[ -f $srcdest/$name ]] || continue
-			[[ " ${cached[*]} " == *" $name "* ]] || printf '%s\n' "$name" >>"$w/new"
-		done
-		if [[ -s $w/new ]]; then
-			rclone copy --files-from "$w/new" "$srcdest" "$ARCHCI_R2_SOURCES/files" || { report_failed "$pkgbase" "$commit" "could not push the files to $ARCHCI_R2_SOURCES"; rm -rf "$w"; return 1; }
+		mv "$f" "$out/${f##*/}"
+		if gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes --detach-sign -u "$ARCHCI_BUILDER_KEY" -o "$out/${f##*/}.buildsig" "$out/${f##*/}"; then
+			echo "==> made and builder-signed ${f##*/} ($(du -h "$out/${f##*/}" | cut -f1))" >>"$log"
+		else
+			echo "==> could not sign ${f##*/} with the builder key" >>"$log"; rc=1
 		fi
-		rclone copyto "$f" "$ARCHCI_R2_SOURCES/pkg/${f##*/}" || { report_failed "$pkgbase" "$commit" "could not push ${f##*/} to $ARCHCI_R2_SOURCES"; rm -rf "$w"; return 1; }
-		master sources-ready "$pkgbase" "$commit" "${f##*/}" >/dev/null || archci_log "WARNING: the master did not take sources-ready for $pkgbase"
-		archci_log "$pkgbase $version: ${f##*/} ($(du -h "$f" | cut -f1)) on $ARCHCI_R2_SOURCES, $(wc -l <"$w/new") file(s) new to the cache"
-	else
-		err=$(grep -E 'ERROR|error:|FAILED|Could not' "$log" | grep -v 'gpg:' | head -1 | cut -c1-160)
-		(( rc == 124 )) && err="timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
-		report_failed "$pkgbase" "$commit" "${err:-makepkg exited with $rc}"
+	elif (( rc == 0 )); then
+		echo "==> makepkg made no source package" >>"$log"; rc=1
 	fi
-	rm -rf "$w" "${srcdest:?}"/*
+	rm -rf "$w"
 	(( rc == 0 ))
 }
 
-report_failed() {   # report_failed PKGBASE COMMIT MESSAGE
-	archci_log "$1: sources failed: $3"
-	master sources-failed "$1" "$2" "$3" >/dev/null || archci_log "WARNING: the master did not take sources-failed for $1"
+# --- the loop, as archci-worker's
+claim=$jobsdir/claim.tmp
+job_id=
+reported=1
+on_term() {
+	trap - TERM INT
+	if [[ -n $job_id && $reported == 0 ]]; then
+		archci_log "shutting down, handing $job_id back to the master"
+		master report "$job_id" abandoned || true
+	fi
+	exit 0
 }
+trap on_term TERM INT
 
-# --- the pass
-if (( $# )); then
-	list=$(master sources-needed --all) || archci_die "could not ask $ARCHCI_MASTER"
-	for p in "$@"; do grep "^$p " <<<"$list" || archci_log "$p: not outstanding, or its sources are in"; done >"$work/list" || true
-else
-	list=$(master sources-needed) || archci_die "could not ask $ARCHCI_MASTER"
-	head -n "$ARCHCI_SOURCER_BATCH" <<<"$list" >"$work/list"
-fi
-n=0
-fetched=0
-while read -r pkgbase version commit; do
-	[[ -n $commit ]] || continue
-	(( ++n ))
-	fetch_one "$pkgbase" "$version" "$commit" && (( ++fetched )) || true
-done <"$work/list"
-rm -f "$work/list"
-(( n == 0 )) || archci_log "pass done: $fetched of $n fetched"
+archci_log "sourcer $me started, master $ARCHCI_MASTER"
+down=0
+while true; do
+	if [[ $(stat -c '%i %Y %s' "${code_files[@]}" 2>/dev/null | tr '\n' ' ') != "$code_sig" ]]; then
+		archci_log "archci-sourcer or its library changed on disk; restarting on the new code"
+		exec "$self"
+	fi
+	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
+	if ! master claim "$me" src $(archci_worker_stats "$home") >"$claim"; then
+		(( down )) || archci_log "master unreachable, retrying every ${ARCHCI_IDLE_SLEEP}s"
+		down=1
+		rm -f "$claim"
+		sleep "$ARCHCI_IDLE_SLEEP"
+		continue
+	fi
+	(( down )) && archci_log "master reachable again"
+	down=0
+	if [[ ! -s $claim ]]; then
+		rm -f "$claim"
+		sleep "$ARCHCI_IDLE_SLEEP"
+		continue
+	fi
+	if ! archci_read_job "$claim"; then
+		archci_log "master sent an unreadable job, ignoring"
+		rm -f "$claim"
+		sleep "$ARCHCI_IDLE_SLEEP"
+		continue
+	fi
+	reported=0
+	jobdir=$jobsdir/$(printf '%s' "$job_id" | tr -c 'A-Za-z0-9:_.,-' '_')
+	rm -rf "$jobdir"
+	mkdir -p "$jobdir"
+	mv "$claim" "$jobdir/job"
+	archci_log "fetching $job_pkgbase $job_version ($job_id)"
+	(
+		trap - TERM INT
+		while sleep "$ARCHCI_HEARTBEAT_SECONDS"; do
+			# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
+			master heartbeat "$job_id" $(archci_worker_stats "$home") phase=fetch >/dev/null 2>&1 || true
+		done
+	) &
+	heartbeat=$!
+	start=$(date +%s)
+	status=failure
+	fetch_one "$jobdir" && status=success
+	kill "$heartbeat" 2>/dev/null || true
+	wait "$heartbeat" 2>/dev/null || true
+	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min: $(tail -n 1 "$jobdir/out/build.log" 2>/dev/null | cut -c1-160)"
+
+	# deliver, as the worker does: kept and retried while the master is away
+	uploaded=0 try=0
+	while true; do
+		(( ++try ))
+		rc=0; master heartbeat "$job_id" phase=upload || rc=$?
+		if (( rc == 255 )); then
+			(( try == 1 )) && archci_log "master unreachable, keeping $job_id's results until it is back"
+			sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
+		elif (( rc )); then
+			archci_log "$job_id is no longer ours; dropping its results"; break
+		fi
+		if (( ! uploaded )); then
+			if rsync -a --timeout=300 -e "ssh ${ssh_opts[*]}" "$jobdir/out/" "$ARCHCI_MASTER:$job_id/"; then
+				uploaded=1
+			else
+				archci_log "upload of $job_id failed (try $try)"
+				sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
+			fi
+		fi
+		rc=0; master report "$job_id" "$status" || rc=$?
+		(( rc == 0 )) && { reported=1; break; }
+		(( rc == 255 )) || { archci_log "the master refused the report for $job_id; dropping it"; break; }
+		archci_log "could not report $job_id (try $try)"
+		sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"
+	done
+	rm -rf "$jobdir"
+	job_id=
+done

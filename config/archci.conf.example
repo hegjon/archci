@@ -55,22 +55,16 @@ ARCHCI_CACHE_DIR=/var/cache/archci
 # there) or "xattr" (the PKGBUILD's user.archci.* extended attributes). Both
 # are written; the scan's journal says what each rebuild cost.
 ARCHCI_INDEX_CACHE=file
-# The sourcer host fetches the outstanding packages' sources and keeps the
-# upstream tarballs and the source packages (<pkgbase>-<version>.src.tar.gz)
-# on this rclone path (a public R2 bucket): files/ and pkg/ under it. It
-# needs ARCHCI_MASTER and a worker key like a worker, and ARCHCI_RCLONE_CONFIG.
-ARCHCI_R2_SOURCES=""
-# The store's public URL: a worker whose claim names a source package takes
-# it from <URL>/pkg/ and fetches nothing upstream. Empty: workers fetch
-# upstream themselves.
-ARCHCI_SOURCES_URL=""
-# The sourcer's state (mirror of the PKGBUILD repository, scratch), how many
-# packages a pass fetches, the time one may take, and how long a failed
-# fetch waits before the master offers it again.
+# Sources: the sourcer host claims src jobs and hands the master a source
+# package (<pkgbase>-<version>.src.tar.gz) per package, released beside the
+# arches under <repo>/os/src; a build claim names it to the worker.
+# Master: 1 holds a build until its source package is released, so no
+# build fetches upstream; 0 lets a build fetch upstream meanwhile.
+ARCHCI_SOURCES_REQUIRED=0
+# The sourcer's state (mirror of the PKGBUILD repository, SRCDEST, jobs)
+# and the time one fetch may take.
 ARCHCI_SOURCER_HOME=/var/lib/archci-sourcer
-ARCHCI_SOURCER_BATCH=5
 ARCHCI_SOURCER_TIMEOUT_MINUTES=30
-ARCHCI_SOURCER_RETRY_HOURS=6
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 ARCHCI_REMOTE_JOURNAL=/var/lib/archci/journal
 # Finished job records are pruned from queue/done after this many days.

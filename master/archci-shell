@@ -1,20 +1,32 @@
 #!/bin/bash
-# archci-shell -- forced command for worker keys the master authorizes.
+# archci-shell [ROLE] -- forced command for the keys the master authorizes:
+# a worker's (ROLE worker, the default) or the sourcer's (sourcer, written
+# by archci authorize --sourcer).
 #
 # authorized_keys (written by archci-authorize):
 #   command="/usr/lib/archci/master/archci-shell",restrict  ssh-ed25519 AAAA... worker
+#   command="/usr/lib/archci/master/archci-shell sourcer",restrict  ssh-ed25519 AAAA... sourcer
 #
-# A worker may only run the job protocol and rsync into incoming/. The signer
-# does not use ssh at all: it exchanges packages with the master through R2.
+# Both roles run the job protocol and rsync into incoming/. A sourcer key
+# claims, beats for and reports src jobs only (a job id ends in ,src); a
+# worker key anything but. The signer does not use ssh at all: it exchanges
+# packages with the master through R2.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
+role=${1:-worker}
 read -ra argv <<<"${SSH_ORIGINAL_COMMAND:-}"
+refuse() { archci_log "refused ($role key): ${SSH_ORIGINAL_COMMAND:-<none>}"; exit 2; }
 case ${argv[0]:-} in
-	claim|poll|heartbeat|report|sources-needed|sources-ready|sources-failed) exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
+	claim)
+		[[ $role == sourcer && ${argv[2]:-} == src || $role == worker && ${argv[2]:-} != src ]] || refuse
+		exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
+	heartbeat|report)
+		[[ $role == sourcer && ${argv[1]:-} == *,src || $role == worker && ${argv[1]:-} != *,src ]] || refuse
+		exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
 	# -no-lock: rrsync 3.5 otherwise holds a lock on incoming/ for the whole
 	# transfer, and every other worker's upload fails while one is running
 	# (a debug package can take minutes to arrive).
 	rsync) exec rrsync -wo -no-del -no-lock "$ARCHCI_HOME/incoming" ;;
-	*) archci_log "refused: ${SSH_ORIGINAL_COMMAND:-<none>}"; exit 2 ;;
+	*) refuse ;;
 esac

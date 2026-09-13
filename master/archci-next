@@ -6,8 +6,8 @@
 # Output: "<prio> <repo> <arch> <pkgbase> <version> <commit> <profile>", where
 # <arch> is the job's arch: the worker's, or "any". Used by archci-job claim
 # when queue/pending holds nothing for the worker; safe to run by hand.
-# archci-next --all -- every outstanding package once, "<pkgbase> <version>
-# <commit>", in claim order across the arches; what archci-sources fetches.
+# archci-next src -- the next package without a source package for its
+# commit, the same line, for the sourcer's claim.
 # archci-next --waiting PKGBASE ARCH -- the dependencies from this repository
 # a job for PKGBASE on ARCH ("any" for an any package) still waits for, one
 # line, empty for none. Used by archci-housekeeping to hold a failed job's
@@ -18,13 +18,12 @@ if ARGV[0] == '--waiting'
   puts Archci.waiting_for(ARGV[1], ARGV[2]).join(' ')
   exit
 end
-if ARGV[0] == '--all'
-  Archci.outstanding.map { |e| e.values_at('pkgbase', 'version', 'commit') }.uniq.each { |l| puts l.join(' ') }
-  exit
-end
-
 # not a package whose dependency is being built or retried: that build would only fail first
-entry = Archci.outstanding(arch: ARGV[0]).find { |e| !e['expected'] }
+entry = if ARGV[0] == 'src'
+          Archci.outstanding_sources.first
+        else
+          Archci.outstanding(arch: ARGV[0]).find { |e| !e['expected'] }
+        end
 exit 0 unless entry
 
 puts entry.values_at('prio', 'repo', 'arch', 'pkgbase', 'version', 'commit', 'profile').join(' ')

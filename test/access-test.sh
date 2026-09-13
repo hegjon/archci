@@ -22,6 +22,11 @@ ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" "$tmp/wkey.pub" 2>&1 | grep "updated" >
 [[ $(stat -c %a "$akf") == 644 ]] || fail "authorized_keys should be world-readable, root-writable"
 ! ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" 'not a key' 2>/dev/null || fail "garbage must be rejected"
 
+echo "--- archci-authorize --sourcer: the sourcer's key runs archci-shell sourcer"
+ssh-keygen -q -t ed25519 -N '' -C archci-worker@srcr -f "$tmp/skey"
+ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" --sourcer "$tmp/skey.pub"
+grep -q '^command="[^"]*/master/archci-shell sourcer",restrict,port-forwarding,permitopen="127.0.0.1:19533" ssh-ed25519 .* archci-worker@srcr$' "$akf" || fail "the sourcer's line must name the sourcer role: $(<"$akf")"
+ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" --revoke "$tmp/skey.pub" >/dev/null 2>&1
 echo "--- archci-authorize --revoke: by key file, by key, by comment"
 ssh-keygen -q -t ed25519 -N '' -C archci-worker@other -f "$tmp/okey" >/dev/null
 ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" "$tmp/okey.pub"
@@ -52,6 +57,20 @@ id=$(sed -n 's/^id=//p' < <("$tmp/fakessh" master claim worker-5 x86_64))
 mkdir -p "$tmp/out"; echo hi >"$tmp/out/build.log"; mkpkg "$tmp/out" acl 1:2.3.2-1
 rsync -a -e "$tmp/fakessh" "$tmp/out/" "master:$id/" || fail "rsync via rrsync"
 [[ -f $ARCHCI_HOME/incoming/$id/build.log ]] || fail "upload did not land in incoming/"
+echo "--- the sourcer's role: src claims only, and no build's heartbeat"
+cat >"$tmp/fakessh-sourcer" <<'SH'
+#!/bin/bash
+shift
+SSH_ORIGINAL_COMMAND="$*" exec "$ARCHCI_SHELL" sourcer
+SH
+chmod +x "$tmp/fakessh-sourcer"
+! "$tmp/fakessh-sourcer" master claim srcr x86_64 >/dev/null 2>&1 || fail "a sourcer key must not claim a build"
+! "$tmp/fakessh-sourcer" master heartbeat "$id" >/dev/null 2>&1 || fail "a sourcer key must not beat for a build"
+! "$tmp/fakessh" master claim worker-5 src >/dev/null 2>&1 || fail "a worker key must not claim src jobs"
+sid=$(sed -n 's/^id=//p' < <("$tmp/fakessh-sourcer" master claim srcr src))
+[[ $sid == *,src ]] || fail "the sourcer key must get a src job: $sid"
+"$tmp/fakessh-sourcer" master heartbeat "$sid" || fail "the sourcer key beats for its src job"
+"$tmp/fakessh-sourcer" master report "$sid" abandoned || fail "the sourcer key reports its src job"
 ! rsync -a -e "$tmp/fakessh" "$tmp/out/" "master:../escape/" 2>/dev/null || fail "rrsync must refuse paths outside incoming"
 ! "$tmp/fakessh" master housekeeping 2>/dev/null || fail "shell must refuse non-worker commands"
 "$tmp/fakessh" master report "$id" success

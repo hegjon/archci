@@ -28,6 +28,7 @@ module Archci
     'ARCHCI_IGNOREARCH' => '1',
     'ARCHCI_MAX_ATTEMPTS' => '3',
     'ARCHCI_RELEASE_LAG_MINUTES' => '20',
+    'ARCHCI_SOURCES_REQUIRED' => '0',
     'ARCHCI_REMOTE_JOURNAL' => '/var/lib/archci/journal'
   }.freeze
 
@@ -111,6 +112,20 @@ module Archci
     config['ARCHCI_ANY_ARCH'] || arches.first
   end
 
+  # The source package the sourcer made for pkg at its current commit, by
+  # name, once it has been out long enough for the signer to have released
+  # it (ARCHCI_RELEASE_LAG_MINUTES; a build claim hands it to the worker);
+  # nil before that. The src built record is "version commit file".
+  def self.source_file(repo, pkg)
+    path = File.join(home, 'built', "#{repo}-src", pkg['pkgbase'])
+    _version, commit, file = built_record(path) || []
+    return nil unless file && commit == pkg['commit']
+
+    File.mtime(path) <= Time.now - config['ARCHCI_RELEASE_LAG_MINUTES'].to_i * 60 ? file : nil
+  rescue Errno::ENOENT
+    nil
+  end
+
   # A worker id is <host>-<n> for a worker building the host's native arch
   # and <host>-<arch>-<n> for one emulating a port arch (archci-worker's
   # rule): the host and the port arch, nil for native.
@@ -130,9 +145,8 @@ module Archci
   # an idle worker's poll, or the last beat a finished job kept. A worker
   # whose last poll is older than POLL_TTL is gone. The native arch is what a
   # worker without an arch in its name builds ("any" jobs are the any
-  # arch's). A poll with role=sourcer is the sourcer's heartbeat: the host is
-  # listed (role=sourcer), with no worker. Order: the master, the sourcers,
-  # then the workers by name.
+  # arch's). The sourcer claims and runs src jobs: its host is listed with
+  # no worker. Order: the master, the sourcers, then the workers by name.
   POLL_TTL = 600
 
   def self.hosts(running, recent, polls, now)
@@ -150,7 +164,7 @@ module Archci
       host, port = worker_host(j['worker'])
       h = hosts[host] ||= { 'host' => host, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
                             **HOST_STATS.to_h { |k| [k, nil] } }
-      if j['role'] == 'sourcer' then h['role'] = 'sourcer' else h['workers'] |= [j['worker']] end
+      if j['arch'] == 'src' then h['sourcer'] = true else h['workers'] |= [j['worker']] end
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       h['vendor'] ||= j['vendor']   # constant for a host: any worker that sent it will do
@@ -172,8 +186,8 @@ module Archci
     m['arch'] ||= Etc.uname[:machine]
     m.merge!('heartbeat_age_s' => 0, **master_stats)
     # the master first, then the sourcer(s), then the workers by name
-    rest = hosts.values.reject { |h| h.equal?(m) }.sort_by { |h| [h['role'] == 'sourcer' ? 0 : 1, h['host']] }
-    [m, *rest].each { |h| h['workers'].sort!; h.delete('archci_at') }
+    rest = hosts.values.reject { |h| h.equal?(m) }.sort_by { |h| [h['sourcer'] ? 0 : 1, h['host']] }
+    [m, *rest].each { |h| h['workers'].sort!; h.delete('archci_at'); h.delete('sourcer') }
   end
 
   # The master's own host stats, as a worker would send them (load, mem, disk
@@ -243,12 +257,12 @@ module Archci
       end
     end
 
-    sources = cfg['ARCHCI_PKG_SOURCES'].to_s.split
     also = cfg['ARCHCI_PKG_ALSO'].to_s.split   # built whatever their source
     ignorearch = cfg['ARCHCI_IGNOREARCH'] != '0'
-    candidates = packages.reject do |p|
-      p['skip'] || (!sources.empty? && !sources.include?(p['source']) && !also.include?(p['pkgbase']))
-    end
+    # a build waits for its source package when builds must never fetch
+    # upstream (ARCHCI_SOURCES_REQUIRED): claimed once it is released
+    sources_required = cfg['ARCHCI_SOURCES_REQUIRED'] != '0'
+    candidates = self.candidates
 
     # An arch-independent package is one job, for workers of the any arch,
     # and is pooled for every arch; those come after the arch's own packages.
@@ -311,6 +325,7 @@ module Archci
           dep_arch = by_base[b]['arches'] == ['any'] ? 'any' : (any ? any_arch : a)
           running[[repo, b, dep_arch]] || queued_commits[[repo, b, dep_arch]].include?(by_base[b]['commit'])
         end
+        expected ||= sources_required && source_file(repo, p).nil?
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
                   'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting, 'expected' => expected,
                   'rank' => [also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
@@ -321,10 +336,48 @@ module Archci
     limit ? ordered.first(limit) : ordered
   end
 
+  # The packages the farm builds: the index less skip_build and, with
+  # ARCHCI_PKG_SOURCES, those of another source (ARCHCI_PKG_ALSO excepted).
+  def self.candidates
+    sources = config['ARCHCI_PKG_SOURCES'].to_s.split
+    also = config['ARCHCI_PKG_ALSO'].to_s.split
+    packages.reject do |p|
+      p['skip'] || (!sources.empty? && !sources.include?(p['source']) && !also.include?(p['pkgbase']))
+    end
+  end
+
+  # The packages without a source package for their current commit, in claim
+  # order, as src jobs for the sourcer: like outstanding, less the
+  # dependencies (sources have none): the farm's own packages first, then
+  # those the sourcer has fetched before (their update) before the never
+  # fetched, then by origin and name. One src job per package at a time; a
+  # queued or failed one at the current commit is not offered again.
+  #   queued: include packages with a src job running or queued (for the counts)
+  def self.outstanding_sources(queued: false)
+    repo = config['ARCHCI_REPO']
+    also = config['ARCHCI_PKG_ALSO'].to_s.split
+    busy = {}
+    unless queued
+      jobs('running').each { |j| busy[[j['pkgbase'], j['commit']]] = true if j['arch'] == 'src' }
+      %w[pending failed].each { |q| jobs(q).each { |j| busy[[j['pkgbase'], j['commit']]] = true if j['arch'] == 'src' } }
+    end
+    candidates.filter_map do |p|
+      _version, commit, = built_record(File.join(home, 'built', "#{repo}-src", p['pkgbase'])) || []
+      next if commit == p['commit'] || busy[[p['pkgbase'], p['commit']]]
+
+      { 'repo' => repo, 'arch' => 'src', 'pkgbase' => p['pkgbase'], 'version' => p['version'], 'commit' => p['commit'],
+        'profile' => p['profile'], 'prio' => commit ? 1 : 5, 'waiting' => [], 'expected' => false,
+        'rank' => [also.include?(p['pkgbase']) ? 0 : 1, commit ? 0 : 1, origin_rank(p), p['arches'] == ['any'] ? 1 : 0, p['pkgbase']] }
+    end.sort_by { |e| e['rank'] }
+  end
+
   # The dependencies from this repository a job for pkgbase on job_arch
   # ("any" for an any package) still waits for (see outstanding); [] when
-  # none, or when the package is not outstanding at all.
+  # none, or when the package is not outstanding at all. A src job waits
+  # for nothing.
   def self.waiting_for(pkgbase, job_arch)
+    return [] if job_arch == 'src'
+
     a = job_arch == 'any' ? any_arch : job_arch
     outstanding(arch: a, queued: true).find { |e| e['pkgbase'] == pkgbase && e['arch'] == job_arch }&.dig('waiting') || []
   end
@@ -339,24 +392,18 @@ module Archci
     pkgs = packages.reject { |p| p['skip'] }
     any_count = pkgs.count { |p| p['arches'] == ['any'] }
     sets = arches.map { |a| ["#{repo}-#{a}", pkgs.size - any_count] } << ["#{repo}-any", any_count]
+    sets << ["#{repo}-src", candidates.size]
     outstanding = self.outstanding
-    # the sourcer's records (sources/<pkgbase>: commit, then file= or
-    # error=): source packages in for their current commit, fetches that
-    # failed at it, and outstanding packages still without one
-    sources = { 'ready' => 0, 'failed' => 0, 'needed' => 0, 'last' => nil }
-    ready = {}
-    Dir.glob(File.join(home, 'sources', '*')).each do |rec|
-      fields = File.readlines(rec, chomp: true).to_h { |l| l.split('=', 2) } rescue next
-      base = File.basename(rec)
-      ready[base] = fields['commit'] if fields['file']
-      sources['failed'] += 1 if fields['error']
-      tried = Time.at(fields['tried'].to_i) if fields['tried']
-      sources['last'] = tried if tried && (sources['last'].nil? || tried > sources['last'])
-    end
-    outstanding.map { |e| [e['pkgbase'], e['commit']] }.uniq.each do |base, commit|
-      if ready[base] == commit then sources['ready'] += 1 else sources['needed'] += 1 end
-    end
-    sources['last'] = sources['last']&.utc&.iso8601
+    # the sourcer: packages with a source package for their current commit
+    # (the src built records), those still to fetch (src jobs to come, queued
+    # or running), fetches that failed, and when one last came in
+    src_dir = File.join(home, 'built', "#{repo}-src")
+    sources = {
+      'ready' => candidates.count { |p| built_record(File.join(src_dir, p['pkgbase']))&.at(1) == p['commit'] },
+      'needed' => outstanding_sources(queued: true).size,
+      'failed' => jobs('failed').count { |j| j['arch'] == 'src' },
+      'last' => Dir.glob(File.join(src_dir, '*')).map { |f| File.mtime(f) }.max&.utc&.iso8601
+    }
     updates = outstanding.count { |e| e['prio'] == 1 }
     by_name = packages.to_h { |p| [p['pkgbase'], p] }
     job = lambda do |j|

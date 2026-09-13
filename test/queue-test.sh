@@ -72,17 +72,45 @@ sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"
 
-echo "--- the sourcer: what lacks sources, what it reports, and a claim naming the source package"
-[[ $("$next" --all) == *"libsigc++ 2.12.2-1 $(pkgcommit libsigc++)"* ]] || fail "archci-next --all must list the outstanding packages with their commits: $("$next" --all)"
-[[ $("$job" sources-needed | grep -c .) == 2 ]] || fail "sources-needed must list every outstanding package lacking sources: $("$job" sources-needed)"
-"$job" sources-ready libsigc++ "$(pkgcommit libsigc++)" libsigc++-2.12.2-1.src.tar.gz
-"$job" sources-failed linux "$(pkgcommit linux)" "Failure while downloading https://example/linux.tar.xz"
-grep -q '^file=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/sources/libsigc++" || fail "sources-ready must record the file"
-grep -q '^error=Failure while downloading' "$ARCHCI_HOME/sources/linux" || fail "sources-failed must record the error"
-[[ -z $("$job" sources-needed) ]] || fail "a package with sources in, or failed lately, is not offered: $("$job" sources-needed)"
-[[ $("$job" sources-needed --all) == "linux "* ]] || fail "sources-needed --all offers the failed one again: $("$job" sources-needed --all)"
-"$top" | grep "^sources: 1 packaged  1 to fetch  1 failed   (last fetch " >/dev/null || fail "top must show the sourcer's state: $("$top" | grep ^sources)"
-! "$job" sources-ready 'evil;rm' abc123 x.src.tar.gz 2>/dev/null || fail "a bad package name must be refused"
+echo "--- sources as src jobs: the sourcer claims them, hands in a source package, a build claim names it once staged"
+[[ $("$next" src) == "5 omarchy src acl 1:2.3.2-1 $(pkgcommit acl) "* ]] || fail "archci-next src must offer the first package without a source package: $("$next" src)"
+sid=$(claim_id sourcer src load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.13-1)
+[[ $sid == *omarchy,acl,1:2.3.2-1,src ]] || fail "the sourcer's claim must be a src job: $sid"
+"$top" | grep "^sourcer  *DigitalOcean  *src  *0.10  *30  *5  *1  *-  *1  0.4.13-1$" >/dev/null || fail "archci-top must list the sourcer host, no workers, one job active: $("$top" | grep ^sourcer)"
+inc=$ARCHCI_HOME/incoming/$sid
+echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"
+"$job" report "$sid" success
+[[ -f $ARCHCI_HOME/queue/failed/$sid.job ]] || fail "a source package without its builder signature is refused"
+"$job" retry "$sid" >/dev/null; sid=$(claim_id sourcer src); inc=$ARCHCI_HOME/incoming/$sid
+echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"; : >"$inc/acl-1:2.3.2-1.src.tar.gz.buildsig"
+"$job" report "$sid" success
+[[ $(<"$ARCHCI_HOME/built/omarchy-src/acl") == "1:2.3.2-1 $(pkgcommit acl) acl-1:2.3.2-1.src.tar.gz" ]] || fail "the src built record must name the file: $(<"$ARCHCI_HOME/built/omarchy-src/acl")"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz && -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz.buildsig && -e $ARCHCI_HOME/stage.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage"
+[[ -f $ARCHCI_HOME/logs/omarchy/acl/1:2.3.2-1/src/attempt-1.log ]] || fail "the fetch's log must be archived under the src arch"
+[[ $("$next" src) == "5 omarchy src libsigc++ "* ]] || fail "acl's sources are in; libsigc++ is next: $("$next" src)"
+sid=$(claim_id sourcer src)
+inc=$ARCHCI_HOME/incoming/$sid
+echo fetched >"$inc/build.log"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz.buildsig"
+"$job" report "$sid" success
+sid=$(claim_id sourcer src)
+[[ $sid == *omarchy,linux,* ]] || fail "linux's sources are next: $sid"
+echo "==> ERROR: Failure while downloading https://example/linux.tar.xz" >"$ARCHCI_HOME/incoming/$sid/build.log"
+"$job" report "$sid" failure
+[[ -f $ARCHCI_HOME/queue/failed/$sid.job ]] || fail "a failed fetch is a failed job"
+[[ -z $("$next" src) ]] || fail "a failed src job is not offered again before its retry: $("$next" src)"
+"$top" | grep "^sources: 2 packaged  1 to fetch  1 failed   (last fetch " >/dev/null || fail "top must show the sources' state: $("$top" | grep ^sources)"
+"$top" | grep "^built: x86_64 1/3  any 0/0  src 2/3$" >/dev/null || fail "top must count the source packages beside the arches: $("$top" | grep ^built)"
+"$failed" | grep "^linux 7.2.3.arch1-2 .* src  *arch  *sourcer  *1/2 retry .*: ==> ERROR: Failure while downloading" >/dev/null || fail "archci failed must list the fetch with its error: $("$failed" | grep ^linux)"
+# a build waits for its source package while builds must not fetch
+# upstream, and its claim names the package only once it has been out for
+# the release lag (the signer has published it)
+[[ -z $(ARCHCI_SOURCES_REQUIRED=1 ARCHCI_RELEASE_LAG_MINUTES=60 "$next" x86_64) ]] || fail "with sources required, a build whose source package is not released yet must wait: $(ARCHCI_SOURCES_REQUIRED=1 ARCHCI_RELEASE_LAG_MINUTES=60 "$next" x86_64)"
+[[ $(ARCHCI_SOURCES_REQUIRED=1 "$next" x86_64) == "5 omarchy x86_64 libsigc++ "* ]] || fail "once released, the build is claimable: $(ARCHCI_SOURCES_REQUIRED=1 "$next" x86_64)"
+id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
+grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must not name a source package the signer has not released yet"
+"$job" report "$id" abandoned
+"$job" enqueue linux 0 src >/dev/null
+[[ $(claim_id sourcer src) == 0-*omarchy,linux,*,src ]] || fail "a package's sources can be enqueued by hand with ARCH=src"
 echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
@@ -177,17 +205,15 @@ grep -q '^seen=20' "$ARCHCI_HOME/hosts/idle-host-1" || fail "hosts/ entry must s
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! ARCHCI_ARCHES="x86_64 riscv64" "$job" claim idle-host-1 riscv64 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
 touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/seen=$(date -u -d '20 minutes ago' +%FT%TZ)/" "$ARCHCI_HOME/hosts/idle-host-1"
-# the sourcer's heartbeat: a poll keeps the host's stats without taking work,
-# and role=sourcer lists the host with no worker
-out=$("$job" poll srcr x86_64 load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.9-1 role=sourcer 2>&1) || fail "a poll must be accepted: $out"
-[[ -z $out ]] || fail "a poll must print nothing: $out"
-grep -q '^role=sourcer$' "$ARCHCI_HOME/hosts/srcr" || fail "the poll's stats must be kept in hosts/"
-"$top" | grep "^srcr  *DigitalOcean  *x86_64  *0.10  *30  *5  *1  *-  *0  0.4.9-1$" >/dev/null || fail "archci-top must list the sourcer host with - for its workers: $("$top" | grep srcr)"
-# hosts in order: the master, then the sourcer, then the workers by name
-order=$("$top" | sed -n '/^HOST/,/^$/p' | awk '/^srcr |^idle-host |^worker /{printf "%s ", $1}')
-[[ $order == "srcr worker " ]] || fail "the sourcer must come before the workers in the hosts table: $order"
+# the sourcer's idle claim (arch src) keeps its host in the table with no
+# worker, ahead of the workers; a malformed stat is refused
+out=$("$job" claim srcr src load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.13-1)
+[[ -z $out ]] || "$job" report "$(sed -n 's/^id=//p' <<<"$out")" abandoned   # handed back: the host is idle again
+"$top" | grep "^srcr  *DigitalOcean  *src  *0.10  *30  *5  *1  *-  *0  0.4.13-1$" >/dev/null || fail "archci-top must list the idle sourcer host with - for its workers: $("$top" | grep ^srcr)"
+order=$("$top" | sed -n '/^HOST/,/^$/p' | awk '/^srcr |^sourcer |^idle-host |^worker /{printf "%s ", $1}')
+[[ $order == "sourcer srcr worker " ]] || fail "the sourcers must come before the workers in the hosts table: $order"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
-! "$job" poll srcr x86_64 'role=$(true)' 2>/dev/null || fail "a malformed poll stat must be refused"
+! "$job" claim srcr src 'load=$(true)' 2>/dev/null || fail "a malformed host stat must be refused"
 "$top" | grep "^idle-host " >/dev/null && fail "a worker that stopped polling must drop out of the hosts table"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/hosts/idle-host-1 ]] || fail "housekeeping must keep a poll younger than a day"

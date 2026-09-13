@@ -99,6 +99,25 @@ out=$("$here/../signer/archci-sign" 2>&1)
 [[ -f $rel/hello-1-2-x86_64.pkg.tar.zst.sig && ! -e $rel/hello-1-1-x86_64.pkg.tar.zst && ! -e $rel/hello-1-1-x86_64.pkg.tar.zst.sig ]] || fail "hello 1-1 and its signature must be gone, 1-2 released: $(ls "$rel")"
 [[ -f $ARCHCI_SIGNER_HOME/prune-omarchy-os-x86_64.stamp ]] || fail "the listing prune leaves a stamp"
 
+echo "--- a source package (os/src): released with its .sig, no database, the older version pruned"
+mkdir -p "$ARCHCI_HOME/repo/omarchy/os/src"
+for v in 1-1 1-2; do
+	sp=$ARCHCI_HOME/repo/omarchy/os/src/hello-$v.src.tar.gz
+	echo "sources $v" >"$sp"
+	gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$sp.buildsig" "$sp"
+done
+echo "other" >"$ARCHCI_HOME/repo/omarchy/os/src/hello-world-2-1.src.tar.gz"   # another package whose name starts the same way
+gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$ARCHCI_HOME/repo/omarchy/os/src/hello-world-2-1.src.tar.gz.buildsig" "$ARCHCI_HOME/repo/omarchy/os/src/hello-world-2-1.src.tar.gz"
+"$master/archci-stage" --force
+out=$("$sign" 2>&1)
+srel=$release/omarchy/os/src
+[[ -f $srel/hello-1-2.src.tar.gz && -f $srel/hello-1-2.src.tar.gz.sig && -f $srel/hello-world-2-1.src.tar.gz.sig ]] || fail "source packages must be released with their signatures: $(ls "$srel")"
+[[ ! -e $srel/hello-1-1.src.tar.gz && ! -e $srel/hello-1-1.src.tar.gz.sig ]] || fail "the older source package must be pruned: $(ls "$srel")"
+[[ $out == *"pruning superseded omarchy/os/src/hello-1-1.src.tar.gz"* ]] || fail "the prune must be logged: $out"
+! compgen -G "$srel/*.db*" >/dev/null || fail "os/src gets no database"
+gpg --homedir "$relpub" --batch --verify "$srel/hello-1-2.src.tar.gz.sig" "$srel/hello-1-2.src.tar.gz" 2>/dev/null || fail "a source package's release signature must verify"
+[[ -z $(find "$staging" -name '*.src.tar.gz' 2>/dev/null) ]] || fail "staging must be drained of source packages"
+
 echo "--- a pass takes ARCHCI_SIGN_BATCH packages, the farm's own first, the rest wait"
 bs=$tmp/batch; mkdir -p "$bs/staging/omarchy/os/x86_64" "$bs/release/omarchy/os/x86_64" "$tmp/bs-signer"
 for n in zzz-late archci-master aaa-early; do
