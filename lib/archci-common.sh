@@ -639,9 +639,13 @@ ARCHCI_CONTAINER_TMP='--tmpfs=/tmp:mode=1777,strictatime,nodev,nosuid,size=50%'
 # (a build's, --slice=archci-offline) may reach loopback and nothing else,
 # rejected so tools fail at once; archci-online is untouched. The table is
 # archci's own, beside whatever else the host runs; idempotent (rewritten
-# at every build). Needs root and nftables. 1 without nft.
+# at every build). nft resolves the cgroup path when the rule is loaded, so
+# the slice is started first (it exists from then on). Needs root and
+# nftables; 1, with the reason on stderr, when the table cannot be set up.
 archci_firewall() {
-	command -v nft >/dev/null || return 1
+	command -v nft >/dev/null || { echo "nft is not installed" >&2; return 1; }
+	systemctl start archci-offline.slice archci-online.slice 2>/dev/null ||
+		mkdir -p /sys/fs/cgroup/archci.slice/archci-offline.slice /sys/fs/cgroup/archci.slice/archci-online.slice 2>/dev/null || true
 	nft -f - <<-'NFT'
 		table inet archci
 		delete table inet archci

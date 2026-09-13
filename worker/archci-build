@@ -215,12 +215,12 @@ fi
 # home), so prepare()'s fetch is served from the cache and the ecosystem
 # fetches nothing.
 vendor_conf=''
-if [[ -d $srcdir/vendor ]]; then
+kinds=()
+for d in "$srcdir"/vendor/*/; do [[ -d $d ]] && kinds+=("$(basename "$d")"); done
+if (( ${#kinds[@]} )); then
 	vendor_conf=${jobfile%/*}/vendorconf
 	rm -rf "$vendor_conf"
 	mkdir -p "$vendor_conf/pacman"
-	kinds=()
-	for d in "$srcdir"/vendor/*/; do [[ -d $d ]] && kinds+=("$(basename "$d")"); done
 	{
 		echo "# written by archci-build: the source package's vendored dependencies, replayed offline"
 		for k in "${kinds[@]}"; do archci_vendor_env "$k" replay /startdir/vendor | sed 's/^/export /'; done
@@ -377,7 +377,7 @@ elif [[ $ARCHCI_BUILD_OFFLINE != 1 ]]; then
 	build_slice=archci-online
 elif ! archci_firewall; then
 	build_slice=archci-online
-	echo "==> WARNING: nftables is not installed; building with the network"
+	echo "==> WARNING: the firewall could not be set up (see above); building with the network"
 fi
 machine=$(archci_machine_name archci-build "$job_pkgbase")
 printf '%s\n' "$machine" >"$jobdir/machine"   # for the worker's per-job heartbeat stats

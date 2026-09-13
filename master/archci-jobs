@@ -85,7 +85,7 @@ def read_log(j)
           else
             File.exist?(j['log']) ? File.read(j['log']).scrub.lines(chomp: true) : []
           end
-  [lines, lines.index { |l| error_line?(l) }]
+  [lines, j['state'] == 'done' ? nil : lines.index { |l| error_line?(l) }]   # a done job's line of interest is its last
 end
 
 # the job's story in one line: state, where, when, what it had
