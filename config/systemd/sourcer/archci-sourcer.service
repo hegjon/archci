@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 # Journal streaming to the master, when configured (archci-remote-logging).
 Wants=archci-logging-tunnel.service systemd-journal-upload.service
-RequiresMountsFor=/var/lib/archci-sourcer
+RequiresMountsFor=/var/lib/archci-sourcer /var/lib/archbuild
 StartLimitIntervalSec=0
 
 [Service]

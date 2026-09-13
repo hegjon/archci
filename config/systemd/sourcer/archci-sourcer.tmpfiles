@@ -1,4 +1,5 @@
-# sourcer state (ARCHCI_SOURCER_HOME): the PKGBUILD mirror and the jobs (root's), SRCDEST and the keyring (archci's)
+# sourcer state (ARCHCI_SOURCER_HOME): the PKGBUILD mirror and the jobs (root's), SRCDEST and the keyring
+# (archci's, the build user's inside the chroot); the chroot itself is under ARCHCI_CHROOTS
 d /var/lib/archci-sourcer 0755 root root -
 d /var/lib/archci-sourcer/srcdest 0755 archci archci -
 d /var/lib/archci-sourcer/jobs 0755 root root -

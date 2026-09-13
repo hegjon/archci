@@ -147,7 +147,7 @@ package_archci-worker-qemu-riscv64() {
 
 package_archci-sourcer() {
   pkgdesc='Headless build farm for Arch Linux packages (sourcer: fetches upstream sources into source packages for the workers)'
-  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" git gnupg openssh rsync curl libarchive debugedit)
+  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools git gnupg openssh rsync btrfs-progs)
   conflicts=(archci-worker)   # one role's /usr/bin/archci per host
 
   _install_role sourcer archci-sourcer.service

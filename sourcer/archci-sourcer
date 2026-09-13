@@ -1,23 +1,27 @@
 #!/bin/bash
 # archci-sourcer -- claim src jobs from the master and fetch each one's
 # sources into a source package. Runs on the sourcer host as root, as a
-# service (archci-sourcer.service; the worker key is root's; makepkg and gpg
-# run as the archci user); the one host of the farm that talks to upstream.
+# service (archci-sourcer.service; the worker key is root's); the one host
+# of the farm that talks to upstream.
 # It is a worker for the arch "src": it claims with the worker key (`claim
 # <host> src`, once a minute while idle), and for each job exports the
 # PKGBUILD directory at the job's commit from a bare mirror of the PKGBUILD
-# repository, imports the keys it names and refreshes them from the
-# keyservers, runs `makepkg --allsource` (every source of every arch
-# downloaded, checksummed, signature-checked, packed as
-# <pkgbase>-<version>.src.tar.gz; SRCDEST is kept between jobs, pruned like
-# a worker's), signs the source package with this host's builder key
-# (archci-worker-setup's; made here if missing, to authorize on the signer
-# with archci authorize-builder) and hands it in like a build's packages
-# (rsync into incoming/, then `report`). The master pools it under
-# <repo>/os/src, the signer releases it beside the arches, and a build claim
-# then names it to the worker (sources=). A fetch that fails is a failed
-# job: its makepkg log is the attempt's log, and housekeeping retries it
-# like a build.
+# repository and runs the fetch in a clean chroot (devtools' mkarchroot,
+# refreshed like a build's; a fresh copy per job, entered with
+# arch-nspawn, network kept: this is the online pass): there, as the build
+# user, the keys the PKGBUILD names are imported from keys/pgp/ and
+# refreshed from the keyservers, and `makepkg --allsource --ignorearch`
+# downloads every source of every arch, checksums and signature-checks
+# them and packs <pkgbase>-<version>.src.tar.gz. A PKGBUILD is sourced
+# only inside the container. SRCDEST is the host's, kept between jobs and
+# pruned like a worker's. The source package is signed with this host's
+# builder key (archci-worker-setup's; made here if missing, to authorize on
+# the signer with archci authorize-builder) and handed in like a build's
+# packages (rsync into incoming/, then `report`). The master pools it under
+# <repo>/os/src, the signer releases it beside the arches, and a build
+# claim then names it to the worker (sources=). A fetch that fails is a
+# failed job: its makepkg log is the attempt's log, and housekeeping
+# retries it like a build.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -27,12 +31,12 @@ self=$(readlink -f "${BASH_SOURCE[0]}")
 code_files=("$self" "$ARCHCI_ROOT/lib/archci-common.sh")
 code_sig=$(stat -c '%i %Y %s' "${code_files[@]}" | tr '\n' ' ')
 
-for tool in makepkg git gpg bsdtar debugedit rsync; do   # (makepkg insists on debugedit whatever it is asked)
+for tool in git gpg rsync mkarchroot arch-nspawn; do
 	command -v "$tool" >/dev/null || archci_die "$tool is not installed"
 done
 [[ -n $ARCHCI_MASTER ]] || archci_die "ARCHCI_MASTER is not set in $ARCHCI_CONF"
 [[ -r $ARCHCI_WORKER_KEY ]] || archci_die "no ssh key at $ARCHCI_WORKER_KEY"
-(( EUID == 0 )) || archci_die "must run as root (the worker key is root's)"
+(( EUID == 0 )) || archci_die "must run as root (the worker key is root's; the chroot needs it)"
 export GIT_TERMINAL_PROMPT=0
 me=${HOSTNAME%%.*}
 archci_valid_worker "$me" || archci_die "hostname makes an invalid worker id: $me"
@@ -46,17 +50,116 @@ if ! gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --list-secret-keys "archc
 	archci_log "generated the builder key in $ARCHCI_BUILDER_GNUPGHOME; on the signer: archci authorize-builder builder_key.pub (this host's /etc/archci/builder_key.pub)"
 fi
 
+# devtools' own helpers: lock, lock_close, is_btrfs, is_subvolume,
+# subvolume_delete_recursive (the copy itself is made below: makechrootpkg
+# keeps that to itself). Its common.sh is not nounset-clean, so drop -u
+# before sourcing.
+export DEVTOOLS_COLOR=never
+set +u
+source /usr/share/devtools/lib/common.sh
+source /usr/share/devtools/lib/archroot.sh
+
 user=archci
 home=$ARCHCI_SOURCER_HOME
 mirror=$home/pkgbuilds.git
 srcdest=$home/srcdest
 jobsdir=$home/jobs
-gnupghome=$home/gnupg
+gnupghome=$home/gnupg      # the upstream signing keys, the build user's inside the chroot
 mkdir -p "$srcdest" "$jobsdir"
 install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$gnupghome"
 chown "$user" "$srcdest"
-# makepkg and gpg, as the archci user (makepkg refuses root)
-as_user() { runuser -u "$user" -- env HOME="$home" GNUPGHOME="$gnupghome" "$@"; }
+uid=$(id -u "$user") gid=$(id -g "$user")
+
+# --- the chroot: the sourcer's own, x86_64 with the mirrors' extra profile,
+# base-devel plus what makepkg fetches with; one copy, remade per job.
+# The chroots live on a btrfs subvolume when the filesystem allows (a
+# snapshot per job), a plain directory otherwise (an rsync per job).
+chroot=$ARCHCI_CHROOTS/src
+copy=$chroot/fetch
+pacconf=$(archci_arch_conf x86_64 extra.conf /usr/share/devtools/pacman.conf.d/extra.conf)
+mkconf=$(archci_arch_conf x86_64 makepkg.conf /usr/share/devtools/makepkg.conf.d/x86_64.conf)
+cachedir=$(pacman-conf --config "$pacconf" CacheDir | head -1)
+: "${cachedir:=/var/cache/pacman/pkg/}"
+base_packages=(base-devel git gnupg)
+if [[ ! -e $ARCHCI_CHROOTS ]]; then
+	if [[ $(stat -f -c %T "$(dirname "$ARCHCI_CHROOTS")") == btrfs ]]; then btrfs subvolume create "$ARCHCI_CHROOTS" >/dev/null
+	else mkdir -p "$ARCHCI_CHROOTS"
+	fi
+fi
+say() { printf '%s\n' "$*" | tee -a "$log"; }   # the fetch's log, and the journal for archci top
+
+# the root from the mirrors; complete only with devtools' marker in it
+create_root() {
+	subvolume_delete_recursive "$chroot/root" 2>/dev/null || true
+	rm -rf --one-file-system "$chroot/root"
+	mkarchroot -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" "${base_packages[@]}" 2>&1 | tee -a "$log"
+	[[ -f $chroot/root/.arch-chroot ]]
+}
+# create once (once more on failure: a cached package that fails its
+# signature is dropped by pacman on the first try), refresh every
+# ARCHCI_CHROOT_UPDATE_MINUTES, recreate on a devtools bump; under the
+# root's lock, as a worker's. 1 without a usable root.
+prepare_root() {
+	local have=''
+	[[ -f $chroot/root/.arch-chroot ]] && have=$(<"$chroot/root/.arch-chroot")
+	if [[ ! -d $chroot/root || $have != "$CHROOT_VERSION" ]]; then
+		say "==> Creating chroot $chroot/root (version $CHROOT_VERSION)"
+		subvolume_delete_recursive "$copy" 2>/dev/null || true
+		rm -rf --one-file-system "$copy"
+		(umask 0022; mkdir -p "$chroot")
+		if ! create_root; then
+			say "==> creating the chroot failed; trying once more"
+			create_root || return 1
+		fi
+		touch "$chroot/root.updated"
+	elif [[ -z $(find "$chroot/root.updated" -mmin -"$ARCHCI_CHROOT_UPDATE_MINUTES" 2>/dev/null) ]]; then
+		say "==> Updating chroot $chroot/root"
+		arch-nspawn -C "$pacconf" -M "$mkconf" -c "$cachedir" "$chroot/root" pacman -Syu --noconfirm 2>&1 | tee -a "$log" || true
+		touch "$chroot/root.updated"
+	fi
+}
+
+# a fresh copy of the root, with the build user (the archci user's ids, so
+# what it writes to the bound SRCDEST and keyring is the host user's), the
+# directories makepkg is told to use, and the fetch script it runs
+prepare_copy() {
+	# a snapshot of the root where the filesystem allows, an rsync otherwise
+	if is_btrfs "$chroot" && is_subvolume "$chroot/root" && ! mountpoint -q "$copy"; then
+		subvolume_delete_recursive "$copy" || return 1
+		rm -rf --one-file-system "$copy"
+		btrfs subvolume snapshot "$chroot/root" "$copy" >/dev/null || return 1
+	else
+		mkdir -p "$copy"
+		rsync -a --delete -q -W -x "$chroot/root/" "$copy" || return 1
+	fi
+	touch "$copy"
+	sed -e '/^builduser:/d' -i "$copy"/etc/{passwd,shadow,group}
+	printf 'builduser:x:%d:\n' "$gid" >>"$copy/etc/group"
+	printf 'builduser:x:%d:%d:builduser:/build:/bin/bash\n' "$uid" "$gid" >>"$copy/etc/passwd"
+	printf 'builduser:!!:%d::::::\n' "$(( $(date -u +%s) / 86400 ))" >>"$copy/etc/shadow"
+	install -d -o "$uid" -g "$gid" "$copy"/{build,startdir,srcdest,srcpkgdest}
+	sed -e '/^\(BUILDDIR\|SRCDEST\|SRCPKGDEST\|PACKAGER\)=/d' -i "$copy/etc/makepkg.conf"
+	printf '%s\n' BUILDDIR=/build SRCDEST=/srcdest SRCPKGDEST=/srcpkgdest "PACKAGER=${ARCHCI_PACKAGER@Q}" >>"$copy/etc/makepkg.conf"
+	printf '[safe]\n\tdirectory = *\n' | tee "$copy/etc/gitconfig" >"$copy/etc/makepkg.d/gitconfig" 2>/dev/null || true
+	# the fetch, as the build user: the keys the PKGBUILD names (keys/pgp/,
+	# then the keyservers), .SRCINFO for the host, then every source
+	cat >"$copy/chrootfetch" <<-SCRIPT
+		#!/bin/bash
+		. /etc/profile
+		exec runuser -u builduser -- bash -c '
+			set -e
+			export HOME=/build GNUPGHOME=/build/.gnupg
+			cd /startdir
+			if compgen -G "keys/pgp/*.asc" >/dev/null; then gpg --batch --quiet --import keys/pgp/*.asc 2>/dev/null || true; fi
+			makepkg --printsrcinfo >.SRCINFO 2>/dev/null || true
+			mapfile -t fp < <(sed -n "s/^\\\\tvalidpgpkeys = //p" .SRCINFO)
+			if (( \${#fp[@]} )); then
+				for ks in $ARCHCI_KEYSERVERS; do timeout 120 gpg --batch --quiet --keyserver "\$ks" --recv-keys "\${fp[@]}" 2>/dev/null || true; done
+			fi
+			exec makepkg --allsource --ignorearch'
+	SCRIPT
+	chmod 755 "$copy/chrootfetch"
+}
 
 # --- the PKGBUILD repository: one bare mirror, the directory exported at the commit
 export_pkgbuild() {   # export_pkgbuild PKGBASE COMMIT DIR
@@ -86,53 +189,50 @@ source_files() {   # source_files DIR
 }
 
 # --- one job: fetch_one JOBDIR (the job's fields are read); its results in
-# JOBDIR/out: the source package, its .buildsig and build.log
+# JOBDIR/out: the source package, its .buildsig and build.log. The
+# container runs under MACHINE (a scope of its own, for the heartbeat's
+# stats and for a stop).
 fetch_one() {
-	local jobdir=$1 w=$1/work out=$1/out log=$1/out/build.log rc f names name
+	local jobdir=$1 w=$1/work out=$1/out rc f names name
+	log=$out/build.log
 	rm -rf "$w"
-	mkdir -p "$w"/{pkg,out,build} "$out"
+	mkdir -p "$w"/{pkg,out} "$out"
+	: >"$log"
 	# SRCDEST is kept between jobs (a pkgrel bump downloads nothing); files
 	# not used for ARCHCI_SRCDEST_KEEP_DAYS go
 	find "$srcdest" -mindepth 1 -atime +"$ARCHCI_SRCDEST_KEEP_DAYS" -delete 2>/dev/null || true
 	if ! export_pkgbuild "$job_pkgbase" "$job_commit" "$w/pkg"; then
-		echo "==> no $ARCHCI_PKGBUILDS_DIR/$job_pkgbase at $job_commit in $ARCHCI_PKGBUILDS_URL" >"$log"
+		say "==> no $ARCHCI_PKGBUILDS_DIR/$job_pkgbase at $job_commit in $ARCHCI_PKGBUILDS_URL"
 		return 1
 	fi
-	chown -R "$user" "$w"
-	[[ -f $w/pkg/.SRCINFO ]] || (cd "$w/pkg" && as_user env BUILDDIR="$w/build" makepkg --printsrcinfo >.SRCINFO 2>/dev/null) || true
-	# the keys validpgpkeys names: keys/pgp/ from the repository, then the keyservers
-	if compgen -G "$w/pkg/keys/pgp/*.asc" >/dev/null; then
-		as_user gpg --batch --quiet --import "$w"/pkg/keys/pgp/*.asc 2>/dev/null || true
+	chown -R "$uid:$gid" "$w"
+	lock 9 "$chroot/root.lock" "Waiting for the clean chroot"
+	if ! prepare_root; then
+		lock_close 9
+		say "==> no clean chroot to fetch in"
+		return 1
 	fi
-	if [[ -n $ARCHCI_KEYSERVERS ]]; then
-		local fingerprints keyserver
-		mapfile -t fingerprints < <(sed -n 's/^\tvalidpgpkeys = //p' "$w/pkg/.SRCINFO" 2>/dev/null)
-		if (( ${#fingerprints[@]} )); then
-			for keyserver in $ARCHCI_KEYSERVERS; do
-				as_user timeout 120 gpg --batch --quiet --keyserver "$keyserver" --recv-keys "${fingerprints[@]}" 2>/dev/null || true
-			done
-		fi
-	fi
-	mapfile -t names < <(source_files "$w/pkg")
-	# makepkg's output: the log that goes to the master with the results, and
-	# the journal (streamed to the master too), where archci top reads the
-	# last line from
-	say() { printf '%s\n' "$*" | tee -a "$log"; }
-	run_makepkg() {
-		(cd "$w/pkg" && as_user env SRCDEST="$srcdest" SRCPKGDEST="$w/out" BUILDDIR="$w/build" timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
-			makepkg --allsource --ignorearch) 2>&1 | tee -a "$log"
+	lock_close 9
+	prepare_copy || { say "==> could not make the chroot copy $copy"; return 1; }
+	# (no -C/-M here: arch-nspawn would copy them over the copy's own
+	# pacman.conf and makepkg.conf, which prepare_copy just wrote to)
+	run_fetch() {
+		timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
+			arch-nspawn -c "$cachedir" "$copy" \
+				--bind="$w/pkg:/startdir" --bind="$srcdest:/srcdest" --bind="$w/out:/srcpkgdest" --bind="$gnupghome:/build/.gnupg" \
+				--tmpfs=/tmp:mode=1777,strictatime,nodev,nosuid,size=50% --machine="$machine" /chrootfetch 2>&1 | tee -a "$log"
 	}
-	: >"$log"
-	say "==> Fetching the sources of $job_pkgbase $job_version (${#names[@]} file(s) named)"
-	if run_makepkg; then rc=0
+	say "==> Fetching the sources of $job_pkgbase $job_version in $copy"
+	if run_fetch; then rc=0
 	else
 		rc=$?
 		# a file of the same name in SRCDEST from another package or version:
 		# drop this package's names from it and let makepkg fetch them upstream
-		if (( rc != 124 )) && grep -q "did not pass the validity check" "$log"; then
+		mapfile -t names < <(source_files "$w/pkg")
+		if (( rc != 124 && ${#names[@]} )) && grep -q "did not pass the validity check" "$log"; then
 			for name in "${names[@]}"; do rm -f "$srcdest/$name"; done
 			say "==> a cached file failed its checksum; fetching upstream"
-			if run_makepkg; then rc=0; else rc=$?; fi
+			if run_fetch; then rc=0; else rc=$?; fi
 		fi
 	fi
 	(( rc == 124 )) && say "==> timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
@@ -151,12 +251,21 @@ fetch_one() {
 	(( rc == 0 ))
 }
 
+# the container's scope, for the heartbeat's stats and for a stop: nspawn
+# names it <machine>.scope under devtools' slice (arch-nspawn's; devtools'
+# own machine names carry a pid, ours not); nothing while there is none
+fetch_cgroup() { local c; for c in /sys/fs/cgroup/devtools.slice/*/"$machine"*.scope; do [[ -d $c ]] && { echo "$c"; return 0; }; done; return 0; }
+
 # --- the loop, as archci-worker's
 claim=$jobsdir/claim.tmp
+machine=''
+log=/dev/null
 job_id=
 reported=1
 on_term() {
 	trap - TERM INT
+	local cg
+	[[ -n $machine ]] && cg=$(fetch_cgroup) && [[ -n $cg ]] && systemctl stop "${cg##*/}" 2>/dev/null || true
 	if [[ -n $job_id && $reported == 0 ]]; then
 		archci_log "shutting down, handing $job_id back to the master"
 		archci_master report "$job_id" abandoned || true
@@ -165,7 +274,7 @@ on_term() {
 }
 trap on_term TERM INT
 
-archci_log "sourcer $me started, master $ARCHCI_MASTER"
+archci_log "sourcer $me started, master $ARCHCI_MASTER, chroot $chroot"
 while true; do
 	if [[ $(stat -c '%i %Y %s' "${code_files[@]}" 2>/dev/null | tr '\n' ' ') != "$code_sig" ]]; then
 		archci_log "archci-sourcer or its library changed on disk; restarting on the new code"
@@ -179,17 +288,30 @@ while true; do
 	mkdir -p "$jobdir"
 	mv "$claim" "$jobdir/job"
 	archci_log "fetching $job_pkgbase $job_version ($job_id)"
+	# the machine name is a hostname: the package's, in hostname characters
+	machine=archci-fetch-$(printf '%s' "$job_pkgbase" | tr -c 'A-Za-z0-9-' '-' | cut -c1-48)
+	date +%s%6N >"$jobdir/started"   # the job's start, for the first CPU sample (archci_cgroup_stats)
+	# each beat carries this machine's stats and the fetch's own: CPU, memory
+	# and the size of what it has fetched so far, from the container's scope
 	(
 		trap - TERM INT
+		set +e   # a beat that cannot be measured is still sent
 		while sleep "$ARCHCI_HEARTBEAT_SECONDS"; do
-			# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-			archci_master heartbeat "$job_id" $(archci_worker_stats "$home") phase=fetch >/dev/null 2>&1 || true
+			jobstats=phase=fetch
+			cg=$(fetch_cgroup)
+			if [[ -n $cg ]]; then
+				s=$(archci_cgroup_stats "$cg" "$jobdir" "$jobdir/work" 'phase=fetch ')
+				[[ -n $s ]] && jobstats=$s
+			fi
+			# shellcheck disable=SC2046,SC2086  # the stats are separate key=value words on purpose
+			archci_master heartbeat "$job_id" $(archci_worker_stats "$home") $jobstats >/dev/null 2>&1 || true
 		done
 	) &
 	heartbeat=$!
 	start=$(date +%s)
 	status=failure
 	fetch_one "$jobdir" && status=success
+	machine=''
 	kill "$heartbeat" 2>/dev/null || true
 	wait "$heartbeat" 2>/dev/null || true
 	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min: $(tail -n 1 "$jobdir/out/build.log" 2>/dev/null | cut -c1-160)"

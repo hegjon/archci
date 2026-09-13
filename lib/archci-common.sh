@@ -345,35 +345,42 @@ archci_job_stats() {
 		cg=''
 	done <"/sys/fs/cgroup$ucg/cgroup.procs"
 	[[ -n $cg ]] || { [[ -n $phase ]] && echo "phase=$phase"; return 0; }
-	{
-		usage=$(awk '/^usage_usec/ { print $2 }' "$cg/cpu.stat" 2>/dev/null) || return 0
-		now=$(date +%s%6N)
-		# CPU time used since the previous sample, and the wall time between
-		# the samples; on the first, since the scope started (systemd's
-		# monotonic clock against /proc/uptime, both in us), or since the job
-		# started (JOBDIR/started, written by archci-worker) when the scope is
-		# too young to have a start time yet
-		local cpu_us='' cpu_dt=''
-		if [[ -f $jobdir/cpu.prev ]]; then
-			read -r prev_usage prev_now <"$jobdir/cpu.prev"
-			(( now > prev_now )) && cpu_us=$((usage - prev_usage)) cpu_dt=$((now - prev_now))
-		else
-			local started up
-			started=$(systemctl show -p ActiveEnterTimestampMonotonic --value "${cg##*/}" 2>/dev/null || true)
-			up=$(awk '{ printf "%d", $1 * 1000000 }' /proc/uptime)
-			if [[ $started =~ ^[1-9][0-9]*$ ]] && (( up > started )); then
-				cpu_us=$usage cpu_dt=$((up - started))
-			elif [[ -f $jobdir/started ]] && started=$(<"$jobdir/started") && [[ $started =~ ^[0-9]+$ ]] && (( now > started )); then
-				cpu_us=$usage cpu_dt=$((now - started))
-			fi
+	build=''
+	[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$copydir/build
+	archci_cgroup_stats "$cg" "$jobdir" "$build" "${phase:+phase=$phase }"
+}
+
+# archci_cgroup_stats CG JOBDIR DIR [PREFIX] -- the job stats of the cgroup
+# CG (a path under /sys/fs/cgroup; a scope's): the CPU time used since the
+# previous sample and the wall time between the samples (JOBDIR/cpu.prev;
+# on the first, since the scope started, by systemd's monotonic clock
+# against /proc/uptime, or since the job started, JOBDIR/started, when the
+# scope is too young to have a start time yet), memory now and at its peak
+# in MiB, and the size of DIR in KiB (the build tree, the fetched sources),
+# after PREFIX on the one line; nothing while the cgroup has no cpu.stat.
+archci_cgroup_stats() {
+	local cg=$1 jobdir=$2 dir=$3 prefix=${4:-} usage now prev_usage prev_now mem peak build cpu_us='' cpu_dt=''
+	usage=$(awk '/^usage_usec/ { print $2 }' "$cg/cpu.stat" 2>/dev/null) || return 0
+	now=$(date +%s%6N)
+	if [[ -f $jobdir/cpu.prev ]]; then
+		read -r prev_usage prev_now <"$jobdir/cpu.prev"
+		(( now > prev_now )) && cpu_us=$((usage - prev_usage)) cpu_dt=$((now - prev_now))
+	else
+		local started up
+		started=$(systemctl show -p ActiveEnterTimestampMonotonic --value "${cg##*/}" 2>/dev/null || true)
+		up=$(awk '{ printf "%d", $1 * 1000000 }' /proc/uptime)
+		if [[ $started =~ ^[1-9][0-9]*$ ]] && (( up > started )); then
+			cpu_us=$usage cpu_dt=$((up - started))
+		elif [[ -f $jobdir/started ]] && started=$(<"$jobdir/started") && [[ $started =~ ^[0-9]+$ ]] && (( now > started )); then
+			cpu_us=$usage cpu_dt=$((now - started))
 		fi
-		printf '%s %s\n' "$usage" "$now" >"$jobdir/cpu.prev"
-		mem=$(( $(<"$cg/memory.current") / 1048576 ))
-		peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
-		build=0
-		[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$(du -sk "$copydir/build" 2>/dev/null | cut -f1)
-		printf '%s%srss=%s peak=%s build=%s\n' "${phase:+phase=$phase }" "${cpu_us:+cpu_us=$cpu_us cpu_dt=$cpu_dt }" "$mem" "$peak" "${build:-0}"
-	}
+	fi
+	printf '%s %s\n' "$usage" "$now" >"$jobdir/cpu.prev"
+	mem=$(( $(<"$cg/memory.current") / 1048576 ))
+	peak=$(( $(cat "$cg/memory.peak" 2>/dev/null || echo 0) / 1048576 ))
+	build=0
+	[[ -n $dir ]] && build=$(du -sk "$dir" 2>/dev/null | cut -f1)
+	printf '%s%srss=%s peak=%s build=%s\n' "$prefix" "${cpu_us:+cpu_us=$cpu_us cpu_dt=$cpu_dt }" "$mem" "$peak" "${build:-0}"
 }
 
 # archci_watchdog SECONDS -- COMMAND... : run COMMAND with its output through a

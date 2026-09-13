@@ -183,10 +183,14 @@ worker for that arch: it claims (`claim <host> src`, with the host's stats,
 once a minute while idle), and `archci next src` picks the next package
 without a source package for its current commit, in the same order builds
 are claimed. For the job it exports the PKGBUILD directory at the commit
-from its own mirror of the repository, runs `makepkg --allsource` (every
-source of every arch downloaded, checksummed and signature-checked, packed
-as `<pkgbase>-<version>.src.tar.gz`; its `SRCDEST` is kept between jobs),
-signs the source package with its builder key and hands it in like a
+from its own mirror of the repository and runs the fetch in a clean chroot
+of its own (`mkarchroot`, refreshed like a build's; a fresh copy per job,
+entered with `arch-nspawn` with the network kept, since this is the online
+pass): `makepkg --allsource` there, as the build user, downloads every
+source of every arch, checksums and signature-checks them and packs
+`<pkgbase>-<version>.src.tar.gz`; a PKGBUILD is sourced only inside the
+container, and `SRCDEST` is the host's, kept between jobs. It then signs
+the source package with its builder key and hands it in like a
 build's packages (rsync into `incoming/`, then `report`). The master pools
 it under `<repo>/os/src` and records it in `built/<repo>-src/` ("version
 commit file"); `archci-stage` and the signer treat it as a package without
@@ -523,8 +527,9 @@ systemctl enable --now archci-sourcer.service
 ```
 
 It claims `src` jobs from the master, in claim order, and for each runs
-`makepkg --allsource` on the PKGBUILD at the job's commit: every source of
-every arch downloaded, checksummed and signature-checked, and packed as
+`makepkg --allsource` on the PKGBUILD at the job's commit in a clean
+chroot (devtools; `ARCHCI_CHROOTS` on btrfs for a snapshot per job): every
+source of every arch downloaded, checksummed and signature-checked, and packed as
 `<pkgbase>-<version>.src.tar.gz`, which it hands in like a build's
 packages; the signer releases it under `<repo>/os/src/`. Workers with
 `ARCHCI_RELEASE_URL` take source packages from there; without it they fetch
