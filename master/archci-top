@@ -74,6 +74,7 @@ def journal_entry(e)
   [key, (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip]
 end
 
+# -a with -o json: a field over 4 KB (a compiler's command line) is null without it
 JOURNAL_FIELDS = '--output-fields=MESSAGE,_SYSTEMD_UNIT,_HOSTNAME,SYSLOG_IDENTIFIER'
 
 # The last line a key (unit_name's) has in the journal, '' for none: one
@@ -86,7 +87,7 @@ def journal_last_line(dir, key)
             else
               ["_SYSTEMD_UNIT=#{key}.service"]
             end
-  out, = Open3.capture2('journalctl', '-D', dir, '--no-pager', '-o', 'json', JOURNAL_FIELDS, '-n', '1', *matches, err: File::NULL)
+  out, = Open3.capture2('journalctl', '-D', dir, '--no-pager', '-a', '-o', 'json', JOURNAL_FIELDS, '-n', '1', *matches, err: File::NULL)
   line = out.lines.last.to_s
   return '' if line.empty?
 
@@ -98,13 +99,21 @@ def journal_last_line(dir, key)
   journal_entry(e)&.last.to_s
 end
 
-# One frame into a pipe: each running job's last line, asked for once.
+# One frame into a pipe: the newest entries, read once, answer for the
+# chatty jobs; a job absent from them (quiet) is asked for by its matches.
 class JournalSnapshot
-  def initialize(dir)
+  def initialize(dir, entries = 500)
     @dir = dir
+    @last = {}
+    out, = Open3.capture2('journalctl', '-D', dir, '--no-pager', '-a', '-o', 'json', JOURNAL_FIELDS, '-n', entries.to_s, err: File::NULL)
+    out.each_line do |line|
+      e = JSON.parse(line.force_encoding(Encoding::UTF_8).scrub) rescue next
+      key, msg = journal_entry(e)
+      @last[key] = msg if key
+    end
   end
 
-  def last(units) = units.to_h { |u| [u, journal_last_line(@dir, u)] }
+  def last(units) = units.to_h { |u| [u, @last.fetch(u) { journal_last_line(@dir, u) }] }
 end
 
 # The remote journal holds every worker's every build (a gigabyte or more,
@@ -132,7 +141,7 @@ class JournalFollow
   def follow
     loop do
       begin
-        stdin, out, waiter = Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-o', 'json', JOURNAL_FIELDS, '-f', '-n', '100', err: File::NULL)
+        stdin, out, waiter = Open3.popen2('journalctl', '-D', @dir, '--no-pager', '-a', '-o', 'json', JOURNAL_FIELDS, '-f', '-n', '100', err: File::NULL)
         @pid = waiter.pid
         stdin.close
         out.each_line do |line|
@@ -235,9 +244,10 @@ def frame(journal)
   # the load in five characters: as sent (two decimals) below 100, whole from 100
   load = ->(l) { l.nil? ? '-' : (l.to_f < 100 ? l : format('%.0f', l.to_f)) }
   snap['hosts'].each do |h|
-    # a host without workers (the master, a sourcer) shows - rather than 0
-    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6d  %s', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', load[h['load']],
-                  h['disk'] || '-', h['mem'] || '-', h['cpus'] || '-', h['workers'].empty? ? '-' : h['workers'].size, h['building'], h['archci'] || '-')
+    # a host without workers (the master) shows - for them and for active
+    none = h['workers'].empty?
+    out << format('%-22s %-13s %-7s %5s %5s %5s %7s %7s %6s  %s', h['host'], (h['vendor'] || '-')[0, 13], h['arch'] || '-', load[h['load']],
+                  h['disk'] || '-', h['mem'] || '-', h['cpus'] || '-', none ? '-' : h['workers'].size, none ? '-' : h['building'], h['archci'] || '-')
   end
   out << ''
 

@@ -32,7 +32,7 @@ grep -q '^build=5242880$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stat
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
 me=$(cut -d. -f1 /proc/sys/kernel/hostname)
-"$top" | sed -n '/^HOST/{n;p}' | grep "^$me .*  -  *0  " >/dev/null || fail "the master itself must be the first host row, with no workers: $("$top" | sed -n '/^HOST/{n;p}')"
+"$top" | sed -n '/^HOST/{n;p}' | grep "^$me .*  -  *-  " >/dev/null || fail "the master itself must be the first host row, with - for workers and active: $("$top" | sed -n '/^HOST/{n;p}')"
 "$top" | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1  -$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count, active workers and a dash for an unknown archci version: $("$top" | grep ^worker)"
 # a second worker of the host says which archci it runs; a newer beat from
 # the first, which says nothing, must not hide that
