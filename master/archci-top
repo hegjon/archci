@@ -122,8 +122,10 @@ end
 # read by a thread that remembers the newest line per build unit as it
 # arrives; a frame only renders. A job the stream has not spoken of yet (one
 # already running, and quiet, when the session began) is asked for once
-# (journal_last_line). The phase comes with the worker's heartbeat
-# (archci_phase_filter), not from here.
+# (journal_last_line), by a second thread, so no frame waits for a query:
+# the first frame draws at once and the line comes with a later one. The
+# phase comes with the worker's heartbeat (archci_phase_filter), not from
+# here.
 #
 # One journalctl -f for the session; last(units) answers from what it has
 # streamed.
@@ -132,8 +134,24 @@ class JournalFollow
     @dir = dir
     @lock = Mutex.new
     @last = {}
+    @pending = []   # units a frame asked for that the stream has not mentioned
     @pid = nil
     @reader = Thread.new { follow }
+    @asker = Thread.new { ask }
+  end
+
+  # the pending units, asked of the journal one at a time (a streamed line
+  # that arrives meanwhile wins)
+  def ask
+    loop do
+      u = @lock.synchronize { @pending.shift }
+      if u.nil?
+        sleep 0.5
+        next
+      end
+      line = journal_last_line(@dir, u)
+      @lock.synchronize { @last[u] = line unless @last.key?(u) }
+    end
   end
 
   # journalctl -f, starting with the last 100 entries; started again should
@@ -180,19 +198,19 @@ class JournalFollow
   end
 
   def stop
+    @asker.kill
     @reader.kill
     kill_child
   end
 
-  # units -> { unit => last line streamed, or the journal's last line for a
-  # unit the stream has not mentioned (asked once; '' when it has none) }
+  # units -> { unit => last line known, '' for none yet }; a unit the
+  # stream has not mentioned is queued for the asker, and answered by a
+  # later frame
   def last(units)
-    unknown = @lock.synchronize { units.reject { |u| @last.key?(u) } }
-    unknown.each do |u|
-      line = journal_last_line(@dir, u)
-      @lock.synchronize { @last[u] = line unless @last.key?(u) }   # a streamed line meanwhile wins
+    @lock.synchronize do
+      units.each { |u| @pending << u unless @last.key?(u) || @pending.include?(u) }
+      units.to_h { |u| [u, @last[u].to_s] }
     end
-    @lock.synchronize { units.to_h { |u| [u, @last[u].to_s] } }
   end
 end
 
