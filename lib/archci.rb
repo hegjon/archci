@@ -131,7 +131,8 @@ module Archci
   # whose last poll is older than POLL_TTL is gone. The native arch is what a
   # worker without an arch in its name builds ("any" jobs are the any
   # arch's). A poll with role=sourcer is the sourcer's heartbeat: the host is
-  # listed, with no worker.
+  # listed (role=sourcer), with no worker. Order: the master, the sourcers,
+  # then the workers by name.
   POLL_TTL = 600
 
   def self.hosts(running, recent, polls, now)
@@ -149,7 +150,7 @@ module Archci
       host, port = worker_host(j['worker'])
       h = hosts[host] ||= { 'host' => host, 'workers' => [], 'building' => 0, 'arch' => nil, 'heartbeat_age_s' => nil,
                             **HOST_STATS.to_h { |k| [k, nil] } }
-      h['workers'] |= [j['worker']] unless j['role'] == 'sourcer'
+      if j['role'] == 'sourcer' then h['role'] = 'sourcer' else h['workers'] |= [j['worker']] end
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       h['vendor'] ||= j['vendor']   # constant for a host: any worker that sent it will do
@@ -170,7 +171,8 @@ module Archci
                             **HOST_STATS.to_h { |k| [k, nil] } }
     m['arch'] ||= Etc.uname[:machine]
     m.merge!('heartbeat_age_s' => 0, **master_stats)
-    rest = hosts.values.reject { |h| h.equal?(m) }.sort_by { |h| h['host'] }
+    # the master first, then the sourcer(s), then the workers by name
+    rest = hosts.values.reject { |h| h.equal?(m) }.sort_by { |h| [h['role'] == 'sourcer' ? 0 : 1, h['host']] }
     [m, *rest].each { |h| h['workers'].sort!; h.delete('archci_at') }
   end
 

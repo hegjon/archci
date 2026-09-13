@@ -32,7 +32,7 @@ grep -q '^build=5242880$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stat
 ! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
 me=$(cut -d. -f1 /proc/sys/kernel/hostname)
-"$top" | sed -n '/^HOST/{n;p}' | grep "^$me .*  0  *0  " >/dev/null || fail "the master itself must be the first host row, with no workers: $("$top" | sed -n '/^HOST/{n;p}')"
+"$top" | sed -n '/^HOST/{n;p}' | grep "^$me .*  -  *0  " >/dev/null || fail "the master itself must be the first host row, with no workers: $("$top" | sed -n '/^HOST/{n;p}')"
 "$top" | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *1  *1  -$" >/dev/null || fail "archci-top must show the host's arch, vendor, stats, threads, worker count, active workers and a dash for an unknown archci version: $("$top" | grep ^worker)"
 # a second worker of the host says which archci it runs; a newer beat from
 # the first, which says nothing, must not hide that
@@ -182,7 +182,10 @@ touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/s
 out=$("$job" poll srcr x86_64 load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.9-1 role=sourcer 2>&1) || fail "a poll must be accepted: $out"
 [[ -z $out ]] || fail "a poll must print nothing: $out"
 grep -q '^role=sourcer$' "$ARCHCI_HOME/hosts/srcr" || fail "the poll's stats must be kept in hosts/"
-"$top" | grep "^srcr  *DigitalOcean  *x86_64  *0.10  *30  *5  *1  *0  *0  0.4.9-1$" >/dev/null || fail "archci-top must list the sourcer host with no workers: $("$top" | grep srcr)"
+"$top" | grep "^srcr  *DigitalOcean  *x86_64  *0.10  *30  *5  *1  *-  *0  0.4.9-1$" >/dev/null || fail "archci-top must list the sourcer host with - for its workers: $("$top" | grep srcr)"
+# hosts in order: the master, then the sourcer, then the workers by name
+order=$("$top" | sed -n '/^HOST/,/^$/p' | awk '/^srcr |^idle-host |^worker /{printf "%s ", $1}')
+[[ $order == "srcr worker " ]] || fail "the sourcer must come before the workers in the hosts table: $order"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
 ! "$job" poll srcr x86_64 'role=$(true)' 2>/dev/null || fail "a malformed poll stat must be refused"
 "$top" | grep "^idle-host " >/dev/null && fail "a worker that stopped polling must drop out of the hosts table"
