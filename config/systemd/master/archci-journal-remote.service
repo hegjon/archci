@@ -13,9 +13,12 @@ Wants=sshd.service
 After=network.target sshd.service
 
 [Service]
-ExecStart=/usr/lib/systemd/systemd-journal-remote --listen-http=127.0.0.1:19533 --output=/var/log/journal/remote/archci-workers.journal
+ExecStart=/usr/lib/systemd/systemd-journal-remote --listen-http=127.0.0.1:19533 --output=/var/lib/archci/journal/archci-workers.journal
 User=systemd-journal-remote
-LogsDirectory=journal/remote
+# on the archci volume (/var/lib/archci), not the small root disk; the
+# directory is the service user's, so the receiver may write under
+# ProtectSystem=strict
+StateDirectory=archci/journal
 Restart=on-failure
 WatchdogSec=3min
 LimitNOFILE=524288

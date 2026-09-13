@@ -71,7 +71,7 @@ archci_load_conf
 : "${ARCHCI_SOURCER_RETRY_HOURS:=6}"
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
-: "${ARCHCI_REMOTE_JOURNAL:=/var/log/journal/remote}"
+: "${ARCHCI_REMOTE_JOURNAL:=/var/lib/archci/journal}"
 # R2 (or any rclone remote). Master writes unsigned packages to STAGING; the
 # signer reads STAGING, signs, and writes the released repo to RELEASE. Both
 # empty = the R2 hand-off is idle. See README "Signing".

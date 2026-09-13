@@ -72,7 +72,7 @@ ARCHCI_SOURCER_BATCH=5
 ARCHCI_SOURCER_TIMEOUT_MINUTES=30
 ARCHCI_SOURCER_RETRY_HOURS=6
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
-ARCHCI_REMOTE_JOURNAL=/var/log/journal/remote
+ARCHCI_REMOTE_JOURNAL=/var/lib/archci/journal
 # Finished job records are pruned from queue/done after this many days.
 ARCHCI_DONE_KEEP_DAYS=30
 # R2 hand-off (see README "Signing"). Master moves built packages to STAGING;

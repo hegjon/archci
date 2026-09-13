@@ -549,7 +549,7 @@ signing stops silently and packages pile up in staging, so `archci-sign-health`
 depth, and warns loudly into the journal — `ALERT: release key is LOCKED ...` or
 a backlog warning past `ARCHCI_STAGING_WARN`. Re-run `archci sign --unlock` when
 you see it. The journal streams to the master, so
-`journalctl -D /var/log/journal/remote -t archci-sign-health` surfaces it there.
+`journalctl -D /var/lib/archci/journal -t archci-sign-health` surfaces it there.
 
 ### Using the repo (client)
 

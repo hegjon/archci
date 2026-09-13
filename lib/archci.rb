@@ -28,7 +28,7 @@ module Archci
     'ARCHCI_IGNOREARCH' => '1',
     'ARCHCI_MAX_ATTEMPTS' => '3',
     'ARCHCI_RELEASE_LAG_MINUTES' => '20',
-    'ARCHCI_REMOTE_JOURNAL' => '/var/log/journal/remote'
+    'ARCHCI_REMOTE_JOURNAL' => '/var/lib/archci/journal'
   }.freeze
 
   ROOT = File.expand_path('..', __dir__)

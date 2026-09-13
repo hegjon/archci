@@ -1,7 +1,7 @@
 #!/bin/bash
 # archci-sign-health -- warn, loudly into the journal, when release signing is
 # stalled. Runs on the signer on a timer; the journal streams to the master, so
-# a warning shows up in `journalctl -D /var/log/journal/remote -t archci-sign-health`.
+# a warning shows up in `journalctl -D /var/lib/archci/journal -t archci-sign-health`.
 #
 # Two failure modes it catches, both otherwise silent (no unit goes red):
 #   * the release key's gpg-agent cache expired -> archci-sign can't sign

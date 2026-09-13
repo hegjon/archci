@@ -16,17 +16,18 @@ after `restrict`, and the sshd drop-in adds `PermitOpen`), and with `-N` no
 session is opened, so the forced command never runs. Same direction as the
 job protocol, and the last lines of a worker that died are already on the
 master. journal-remote keeps the received journals under
-`/var/log/journal/remote/`, capped by `journal-remote.conf` (2 GB, 200
-files); since every worker arrives from 127.0.0.1 they share one
-`remote-127.0.0.1.journal` file, so select a worker with `_HOSTNAME=`.
+`/var/lib/archci/journal/` (on the archci volume, not the root disk), capped
+by `journal-remote.conf` (20 GB, 200 files); since every worker arrives from
+127.0.0.1 they share one `archci-workers.journal` file, so select a worker
+with `_HOSTNAME=`.
 
 ```
-journalctl -D /var/log/journal/remote -f                     all workers, live
-journalctl -D /var/log/journal/remote -u 'archci-worker@*'   the worker loops only
-journalctl -D /var/log/journal/remote -u 'archci-build@*'    every build's output
-journalctl -D /var/log/journal/remote -u archci-build@core-linux-7.2.3.arch1-2-a1
-journalctl -D /var/log/journal/remote _HOSTNAME=worker1      one worker
-journalctl --merge -f                                        master and workers together
+journalctl -D /var/lib/archci/journal -f                     all workers, live
+journalctl -D /var/lib/archci/journal -u 'archci-worker@*'   the worker loops only
+journalctl -D /var/lib/archci/journal -u 'archci-build@*'    every build's output
+journalctl -D /var/lib/archci/journal -u archci-build@core-linux-7.2.3.arch1-2-a1
+journalctl -D /var/lib/archci/journal _HOSTNAME=worker1      one worker
+journalctl -D /var/lib/archci/journal -D /var/log/journal -f  master and workers together
 ```
 
 Because full build output goes through journald and journal-upload, size the
