@@ -135,6 +135,13 @@ archci_load_conf
 : "${ARCHCI_CACHE_KEEP:=1}"
 # the worker's own source cache: files not used for this many days are deleted
 : "${ARCHCI_SRCDEST_KEEP_DAYS:=7}"
+# Builds run off the network (archci_firewall: the build's container may
+# reach loopback only; its dependencies are installed in a container of its
+# own first, with the network, and its sources come from the source
+# package or were fetched on the host). 0: every container keeps the
+# network, as before. A package with "network": true in its package.json
+# builds with the network either way.
+: "${ARCHCI_BUILD_OFFLINE:=1}"
 # Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
@@ -258,9 +265,9 @@ archci_chroot_pacconf() {
 # repository commit the build is pinned to. (tag is accepted from old files.)
 archci_read_job() {
 	local line
-	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker='' job_created='' job_sources=''
+	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker='' job_created='' job_sources='' job_network=''
 	while IFS= read -r line || [[ -n $line ]]; do
-		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker|created|sources)=(.*)$ ]] || continue
+		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker|created|sources|network)=(.*)$ ]] || continue
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 	done <"$1"
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]
@@ -325,26 +332,20 @@ archci_phase_filter() {
 # archci_job_stats JOBDIR UNIT -> "phase=<phase> cpu_us=<us> cpu_dt=<us> rss=<MiB> peak=<MiB> build=<KiB>"
 # for the build UNIT (archci-build@...) running from JOBDIR: the phase as soon
 # as archci_phase_filter has written JOBDIR/phase, the rest once the build's
-# scope exists; nothing while there is neither. Raw figures: the CPU time the
-# build used since the previous sample and the wall time that took (archci
-# top divides them into cores), memory in MiB, the build tree in KiB. The container's processes live in a scope of nspawn's own,
-# devtools.slice/*/makechrootpkg-<pkg>.build.<pid>.scope, named after the
-# makechrootpkg process, which itself sits in the build unit's cgroup; the
-# scope's cgroup accounts CPU and memory for the whole build. cpu is the cores
-# used on average since the previous call (JOBDIR/cpu.prev); build is the
-# chroot copy's /build directory (archci-build writes the copy to
-# JOBDIR/copydir), where makepkg extracts and compiles.
+# container exists; nothing while there is neither. Raw figures: the CPU
+# time the build used since the previous sample and the wall time that took
+# (archci top divides them into cores), memory in MiB, the build tree in
+# KiB. The container's processes live in a scope of nspawn's own, named
+# after the machine archci-build gave it (JOBDIR/machine, see
+# archci_container_cgroup); the scope's cgroup accounts CPU and memory for
+# the whole build. build is the chroot copy's /build directory
+# (archci-build writes the copy to JOBDIR/copydir), where makepkg extracts
+# and compiles.
 archci_job_stats() {
-	local jobdir=$1 unit=$2 ucg pid cg='' copydir usage now prev_usage prev_now cpu mem peak build phase=''
+	local jobdir=$1 cg='' copydir build phase='' machine=''
 	[[ -r $jobdir/phase ]] && phase=$(<"$jobdir/phase") && [[ $phase =~ ^[A-Za-z0-9._-]{1,8}$ ]] || phase=''
-	ucg=$(systemctl show -p ControlGroup --value "$unit" 2>/dev/null)
-	[[ -n $ucg && -f /sys/fs/cgroup$ucg/cgroup.procs ]] || { [[ -n $phase ]] && echo "phase=$phase"; return 0; }
-	while read -r pid; do
-		for cg in /sys/fs/cgroup/devtools.slice/*/makechrootpkg-*."$pid".scope; do
-			[[ -d $cg ]] && break 2
-		done
-		cg=''
-	done <"/sys/fs/cgroup$ucg/cgroup.procs"
+	[[ -r $jobdir/machine ]] && machine=$(<"$jobdir/machine")
+	[[ -n $machine ]] && cg=$(archci_container_cgroup "$machine")
 	[[ -n $cg ]] || { [[ -n $phase ]] && echo "phase=$phase"; return 0; }
 	build=''
 	[[ -f $jobdir/copydir ]] && copydir=$(<"$jobdir/copydir") && build=$copydir/build
@@ -507,10 +508,13 @@ archci_pkg_wanted() {
 # chroot: makepkg -o runs prepare() with the ecosystem's cache directed into
 # vendor/<kind>/ (archci_vendor_env capture), which goes into the source
 # package; the worker replays it offline: the same cache, and the ecosystem
-# told to fetch nothing (archci_vendor_env replay). Kinds: rust is captured
-# and replayed today; go, npm, pip and maven are detected and named
-# (archci_vendor_kinds), their capture and replay come later, and their
-# packages fetch at build time until then.
+# told to fetch nothing (archci_vendor_env replay). Kinds: rust (cargo), go
+# (the module cache), npm (npm's cache; yarn, pnpm and bun keep their own
+# and are best effort), pip (pip's cache: its index pages are served from
+# it offline only while fresh; best effort) and maven (maven's local
+# repository and gradle's user home; gradle has no offline switch in the
+# environment: best effort). A package whose fetch the capture cannot
+# serve builds with the network through package.json "network": true.
 # archci_vendor_kinds PKGBUILD -> the kinds the PKGBUILD fetches, one per line
 archci_vendor_kinds() {
 	local f=$1
@@ -522,20 +526,25 @@ archci_vendor_kinds() {
 	return 0
 }
 # archci_vendor_supported KIND -> can the kind be captured and replayed?
-archci_vendor_supported() { [[ $1 == rust ]]; }
+ARCHCI_VENDOR_KINDS='rust go npm pip maven'
+archci_vendor_supported() { [[ " $ARCHCI_VENDOR_KINDS " == *" $1 "* ]]; }
 # archci_vendor_env KIND capture|replay DIR -> the environment for the kind's
 # tools, KEY=VALUE per line: capture directs the fetch into DIR/<kind>,
-# replay points the build at it and forbids the network. Nothing for a kind
-# not supported yet:
-#   go     GOMODCACHE=DIR/go; replay GOPROXY=off GOFLAGS=-mod=mod
-#   npm    npm_config_cache=DIR/npm; replay npm_config_offline=true
-#   pip    a wheelhouse in DIR/pip (pip download); replay PIP_NO_INDEX=1 PIP_FIND_LINKS=DIR/pip
-#   maven  -Dmaven.repo.local=DIR/maven and gradle --offline: flags, not environment
+# replay points the build at it and, where the tool has a switch for it,
+# forbids the network (the firewall does the rest).
 archci_vendor_env() {
 	local kind=$1 phase=$2 dir=$3
 	case $kind:$phase in
 		rust:capture) printf 'CARGO_HOME=%s/rust\n' "$dir" ;;
 		rust:replay)  printf 'CARGO_HOME=%s/rust\nCARGO_NET_OFFLINE=true\n' "$dir" ;;
+		go:capture)   printf 'GOMODCACHE=%s/go\nGOFLAGS=-mod=mod\n' "$dir" ;;
+		go:replay)    printf 'GOMODCACHE=%s/go\nGOFLAGS=-mod=mod\nGOPROXY=off\n' "$dir" ;;
+		npm:capture)  printf 'npm_config_cache=%s/npm\nYARN_CACHE_FOLDER=%s/yarn\n' "$dir" "$dir" ;;
+		npm:replay)   printf 'npm_config_cache=%s/npm\nnpm_config_offline=true\nYARN_CACHE_FOLDER=%s/yarn\n' "$dir" "$dir" ;;
+		pip:capture)  printf 'PIP_CACHE_DIR=%s/pip\n' "$dir" ;;
+		pip:replay)   printf 'PIP_CACHE_DIR=%s/pip\n' "$dir" ;;
+		maven:capture) printf 'MAVEN_OPTS=-Dmaven.repo.local=%s/maven\nGRADLE_USER_HOME=%s/gradle\n' "$dir" "$dir" ;;
+		maven:replay)  printf 'MAVEN_OPTS=-Dmaven.repo.local=%s/maven\nMAVEN_ARGS=--offline\nGRADLE_USER_HOME=%s/gradle\n' "$dir" "$dir" ;;
 		*) ;;
 	esac
 }
@@ -547,6 +556,89 @@ archci_srcpkg_add_vendor() {
 	gzip -dc "$srcpkg" >"$tar" || return 1
 	tar -rf "$tar" -C "$(dirname "$dir")" --owner=0 --group=0 --transform="s|^$(basename "$dir")|$pkgbase/vendor|" "$(basename "$dir")" || return 1
 	gzip -c "$tar" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tar"
+}
+
+# --- containers: what the worker's builds and the sourcer's fetches share -
+# Both enter a copy of a clean chroot with arch-nspawn (devtools'), in a
+# slice of archci's own: archci-online for what may reach the network (a
+# build's dependency install, the sourcer's fetch, a build with the network
+# exemption), archci-offline for a build itself, which archci_firewall keeps
+# off the network. nspawn names the container's scope <machine>.<pid>.scope
+# under the slice.
+# archci_container_cgroup MACHINE -> the scope's cgroup path, empty for none
+archci_container_cgroup() {
+	local c
+	for c in /sys/fs/cgroup/archci.slice/*/"$1".*.scope; do [[ -d $c ]] && { printf '%s\n' "$c"; return 0; }; done
+	return 0
+}
+# archci_container_stop MACHINE -- stop the container's scope, if it runs
+archci_container_stop() {
+	local cg
+	cg=$(archci_container_cgroup "$1")
+	[[ -n $cg ]] && systemctl stop "${cg##*/}" 2>/dev/null || true
+}
+# archci_machine_name PREFIX NAME -> a machine name (a hostname: 64 characters
+# of letters, digits and dashes) for the container of NAME
+archci_machine_name() { printf '%s-%s' "$1" "$(printf '%s' "$2" | tr -c 'A-Za-z0-9-' '-' | cut -c1-$(( 63 - ${#1} )))"; }
+
+# archci_chroot_copy ROOT COPY -- a fresh copy of the clean chroot ROOT at
+# COPY: a btrfs snapshot where the filesystem allows, an rsync otherwise
+# (devtools' archroot.sh helpers, sourced by the caller). 1 on failure.
+archci_chroot_copy() {
+	local root=$1 copy=$2
+	if is_btrfs "${root%/*}" && is_subvolume "$root" && ! mountpoint -q "$copy"; then
+		subvolume_delete_recursive "$copy" || return 1
+		rm -rf --one-file-system "$copy"
+		btrfs subvolume snapshot "$root" "$copy" >/dev/null || return 1
+	else
+		mkdir -p "$copy"
+		rsync -a --delete -q -W -x "$root/" "$copy" || return 1
+	fi
+	touch "$copy"
+}
+# archci_chroot_prepare COPY UID GID [PACKAGER] -- the copy made ready for
+# makepkg as makechrootpkg does it: the build user with the ids given
+# (builduser: what it writes to the bound directories is the host user's),
+# the directories makepkg is told to use (/build, /startdir, /srcdest,
+# /pkgdest, /srcpkgdest, /logdest, bound by the caller), sudo for pacman
+# (makepkg -s), git's safe.directory
+archci_chroot_prepare() {
+	local copy=$1 uid=$2 gid=$3 packager=${4:-}
+	sed -e '/^builduser:/d' -i "$copy"/etc/{passwd,shadow,group}
+	printf 'builduser:x:%d:\n' "$gid" >>"$copy/etc/group"
+	printf 'builduser:x:%d:%d:builduser:/build:/bin/bash\n' "$uid" "$gid" >>"$copy/etc/passwd"
+	printf 'builduser:!!:%d::::::\n' "$(( $(date -u +%s) / 86400 ))" >>"$copy/etc/shadow"
+	rm -rf "$copy/build"
+	install -d -o "$uid" -g "$gid" "$copy"/{build,startdir,srcdest,pkgdest,srcpkgdest,logdest}
+	sed -e '/^\(BUILDDIR\|SRCDEST\|PKGDEST\|SRCPKGDEST\|LOGDEST\|PACKAGER\)=/d' -i "$copy/etc/makepkg.conf"
+	printf '%s\n' BUILDDIR=/build SRCDEST=/srcdest PKGDEST=/pkgdest SRCPKGDEST=/srcpkgdest LOGDEST=/logdest >>"$copy/etc/makepkg.conf"
+	[[ -n $packager ]] && printf 'PACKAGER=%s\n' "${packager@Q}" >>"$copy/etc/makepkg.conf"
+	printf 'builduser ALL = NOPASSWD: /usr/bin/pacman\n' >"$copy/etc/sudoers.d/builduser-pacman"
+	chmod 440 "$copy/etc/sudoers.d/builduser-pacman"
+	mkdir -p "$copy/etc/makepkg.d"
+	printf '[safe]\n\tdirectory = *\n' | tee "$copy/etc/gitconfig" >"$copy/etc/makepkg.d/gitconfig"
+}
+# The tmpfs every container gets on /tmp (makepkg's mktemp needs it writable)
+ARCHCI_CONTAINER_TMP='--tmpfs=/tmp:mode=1777,strictatime,nodev,nosuid,size=50%'
+
+# archci_firewall -- the nftables table that keeps an offline container
+# off the network: a socket of a cgroup under archci.slice/archci-offline.slice
+# (a build's, --slice=archci-offline) may reach loopback and nothing else,
+# rejected so tools fail at once; archci-online is untouched. The table is
+# archci's own, beside whatever else the host runs; idempotent (rewritten
+# at every build). Needs root and nftables. 1 without nft.
+archci_firewall() {
+	command -v nft >/dev/null || return 1
+	nft -f - <<-'NFT'
+		table inet archci
+		delete table inet archci
+		table inet archci {
+			chain output {
+				type filter hook output priority filter; policy accept;
+				socket cgroupv2 level 2 "archci.slice/archci-offline.slice" oifname != "lo" counter reject
+			}
+		}
+	NFT
 }
 
 # --- the job protocol over ssh: what the worker and the sourcer share -----

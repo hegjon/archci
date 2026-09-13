@@ -51,9 +51,9 @@ if ! gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --list-secret-keys "archc
 fi
 
 # devtools' own helpers: lock, lock_close, is_btrfs, is_subvolume,
-# subvolume_delete_recursive (the copy itself is made below: makechrootpkg
-# keeps that to itself). Its common.sh is not nounset-clean, so drop -u
-# before sourcing.
+# subvolume_delete_recursive (archci_chroot_copy uses them; the copy is made
+# here, makechrootpkg keeps that to itself). Its common.sh is not
+# nounset-clean, so drop -u before sourcing.
 export DEVTOOLS_COLOR=never
 set +u
 source /usr/share/devtools/lib/common.sh
@@ -119,30 +119,13 @@ prepare_root() {
 	fi
 }
 
-# a fresh copy of the root, with the build user (the archci user's ids, so
-# what it writes to the bound SRCDEST and keyring is the host user's), the
-# directories makepkg is told to use, and the fetch script it runs
+# a fresh copy of the root (archci_chroot_copy), with the build user (the
+# archci user's ids, so what it writes to the bound SRCDEST and keyring is
+# the host user's), the directories makepkg is told to use
+# (archci_chroot_prepare), and the fetch script it runs
 prepare_copy() {
-	# a snapshot of the root where the filesystem allows, an rsync otherwise
-	if is_btrfs "$chroot" && is_subvolume "$chroot/root" && ! mountpoint -q "$copy"; then
-		subvolume_delete_recursive "$copy" || return 1
-		rm -rf --one-file-system "$copy"
-		btrfs subvolume snapshot "$chroot/root" "$copy" >/dev/null || return 1
-	else
-		mkdir -p "$copy"
-		rsync -a --delete -q -W -x "$chroot/root/" "$copy" || return 1
-	fi
-	touch "$copy"
-	sed -e '/^builduser:/d' -i "$copy"/etc/{passwd,shadow,group}
-	printf 'builduser:x:%d:\n' "$gid" >>"$copy/etc/group"
-	printf 'builduser:x:%d:%d:builduser:/build:/bin/bash\n' "$uid" "$gid" >>"$copy/etc/passwd"
-	printf 'builduser:!!:%d::::::\n' "$(( $(date -u +%s) / 86400 ))" >>"$copy/etc/shadow"
-	install -d -o "$uid" -g "$gid" "$copy"/{build,startdir,srcdest,srcpkgdest}
-	sed -e '/^\(BUILDDIR\|SRCDEST\|SRCPKGDEST\|PACKAGER\)=/d' -i "$copy/etc/makepkg.conf"
-	printf '%s\n' BUILDDIR=/build SRCDEST=/srcdest SRCPKGDEST=/srcpkgdest "PACKAGER=${ARCHCI_PACKAGER@Q}" >>"$copy/etc/makepkg.conf"
-	printf '[safe]\n\tdirectory = *\n' | tee "$copy/etc/gitconfig" >"$copy/etc/makepkg.d/gitconfig" 2>/dev/null || true
-	printf 'builduser ALL = NOPASSWD: /usr/bin/pacman\n' >"$copy/etc/sudoers.d/builduser-pacman"
-	chmod 440 "$copy/etc/sudoers.d/builduser-pacman"
+	archci_chroot_copy "$chroot/root" "$copy" || return 1
+	archci_chroot_prepare "$copy" "$uid" "$gid" "$ARCHCI_PACKAGER"
 	# the fetch, as the build user. "sources": the keys the PKGBUILD names
 	# (keys/pgp/, then the keyservers), .SRCINFO for the host, then every
 	# source. "vendor VAR=VALUE...": the dependencies makepkg -o's prepare()
@@ -230,9 +213,9 @@ fetch_one() {
 	# pacman.conf and makepkg.conf, which prepare_copy just wrote to)
 	in_copy() {   # in_copy MODE ARGS... -- /chrootfetch in the copy, within the fetch's time
 		timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
-			arch-nspawn -c "$cachedir" "$copy" \
+			arch-nspawn -c "$cachedir" "$copy" --slice=archci-online --machine="$machine" \
 				--bind="$w/pkg:/startdir" --bind="$srcdest:/srcdest" --bind="$w/out:/srcpkgdest" --bind="$gnupghome:/build/.gnupg" --bind="$w/vendor:/vendor" \
-				--tmpfs=/tmp:mode=1777,strictatime,nodev,nosuid,size=50% --machine="$machine" /chrootfetch "$@" 2>&1 | tee -a "$log"
+				"$ARCHCI_CONTAINER_TMP" /chrootfetch "$@" 2>&1 | tee -a "$log"
 	}
 	run_fetch() { in_copy sources; }
 	install -d -o "$uid" -g "$gid" "$w/vendor"
@@ -295,10 +278,8 @@ fetch_one() {
 	(( rc == 0 ))
 }
 
-# the container's scope, for the heartbeat's stats and for a stop: nspawn
-# names it <machine>.scope under devtools' slice (arch-nspawn's; devtools'
-# own machine names carry a pid, ours not); nothing while there is none
-fetch_cgroup() { local c; for c in /sys/fs/cgroup/devtools.slice/*/"$machine"*.scope; do [[ -d $c ]] && { echo "$c"; return 0; }; done; return 0; }
+# the container's scope, for the heartbeat's stats and for a stop (archci_container_cgroup)
+fetch_cgroup() { archci_container_cgroup "$machine"; }
 
 # --- the loop, as archci-worker's
 claim=$jobsdir/claim.tmp
@@ -309,7 +290,7 @@ reported=1
 on_term() {
 	trap - TERM INT
 	local cg
-	[[ -n $machine ]] && cg=$(fetch_cgroup) && [[ -n $cg ]] && systemctl stop "${cg##*/}" 2>/dev/null || true
+	[[ -n $machine ]] && archci_container_stop "$machine"
 	if [[ -n $job_id && $reported == 0 ]]; then
 		archci_log "shutting down, handing $job_id back to the master"
 		archci_master report "$job_id" abandoned || true
@@ -332,8 +313,7 @@ while true; do
 	mkdir -p "$jobdir"
 	mv "$claim" "$jobdir/job"
 	archci_log "fetching $job_pkgbase $job_version ($job_id)"
-	# the machine name is a hostname: the package's, in hostname characters
-	machine=archci-fetch-$(printf '%s' "$job_pkgbase" | tr -c 'A-Za-z0-9-' '-' | cut -c1-48)
+	machine=$(archci_machine_name archci-fetch "$job_pkgbase")
 	date +%s%6N >"$jobdir/started"   # the job's start, for the first CPU sample (archci_cgroup_stats)
 	# each beat carries this machine's stats and the fetch's own: CPU, memory
 	# and the size of what it has fetched so far, from the container's scope

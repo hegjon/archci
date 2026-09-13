@@ -243,7 +243,7 @@ module Archci
           next unless build
 
           { 'pkgbase' => name, 'version' => version, 'commit' => commit, 'arches' => arch.split(','),
-            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'arch_repo' => arch_repo.to_s,
+            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'network' => build == 'network', 'arch_repo' => arch_repo.to_s,
             'pkgnames' => (pkgnames || name).split(','), 'deps' => (deps == '-' ? [] : deps.to_s.split(',')) }
         end
       else
@@ -384,7 +384,7 @@ module Archci
         expected ||= sources_required && source_file(repo, p).nil?
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
                   'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting, 'expected' => expected,
-                  'dependents' => weight[p['pkgbase']],
+                  'network' => p['network'], 'dependents' => weight[p['pkgbase']],
                   'rank' => [also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, -weight[p['pkgbase']],
                              origin_rank(p), any ? 1 : 0, p['pkgbase']] }
         (built ? updates : backlog) << entry

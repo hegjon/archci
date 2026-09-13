@@ -4,7 +4,7 @@
 # One line per directory under <clone>/$ARCHCI_PKGBUILDS_DIR holding a PKGBUILD
 # and .omarchy/package.json (the omarchy-pkgs layout):
 #
-#   <name> <version> <commit> <arch> <profile> <source> <build|skip> <arch_repo> <pkgnames> <deps>
+#   <name> <version> <commit> <arch> <profile> <source> <build|skip|network> <arch_repo> <pkgnames> <deps>
 #
 #   name     the directory name; it is the job's pkgbase (the PKGBUILD's own
 #            pkgbase may differ for a split package)
@@ -55,7 +55,7 @@ fi
 command -v jq >/dev/null || archci_die "jq is not installed"
 head=$(git -C "$clone" rev-parse HEAD)
 
-index_current() { [[ -f $index && $(head -1 "$index") == "# $head v3" ]]; }
+index_current() { [[ -f $index && $(head -1 "$index") == "# $head v4" ]]; }
 
 # annotate PKGBUILD HASH LINE -- the line's fields as user.archci.* attributes
 # on the file, when it does not carry them for this hash yet (carries[] has
@@ -116,7 +116,7 @@ generate() {
 		*) load_cache_file; walk_xattrs 0 ;;
 	esac
 	newcache=$(mktemp "$cache.XXXXXX")
-	printf '# %s v3\n' "$head"
+	printf '# %s v4\n' "$head"
 	while read -r mode type hash name; do
 		[[ $type == tree ]] || continue
 		dir=$clone/$ARCHCI_PKGBUILDS_DIR/$name
@@ -156,7 +156,7 @@ calculate() {
 	fi
 	commit=$(git -C "$clone" log -1 --format=%H -- "$ARCHCI_PKGBUILDS_DIR/$name")
 	read -r source build repo < <(jq -r '
-		[(.source // "local"), (if .skip_build == true then "skip" else "build" end), (.arch_repo // "-")]
+		[(.source // "local"), (if .skip_build == true then "skip" elif .network == true then "network" else "build" end), (.arch_repo // "-")]
 		| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; return 1; }
 	if [[ $repo == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
 	printf '%s %s %s %s %s %s %s %s %s\n' "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build" "$repo" "${pkgnames:-$name}" "${deps:--}"

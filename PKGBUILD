@@ -95,7 +95,7 @@ package_archci-master() {
 
 package_archci-worker() {
   pkgdesc='Headless build farm for Arch Linux packages (worker: builds jobs in clean devtools chroots)'
-  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg btrfs-progs)
+  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg btrfs-progs nftables)
   conflicts=(archci-sourcer)   # one role's /usr/bin/archci per host
 
   _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service

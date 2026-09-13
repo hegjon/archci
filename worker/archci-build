@@ -27,8 +27,8 @@ instance=${instance:-manual}
 # The worker instance that claimed the job says which arch it builds (an
 # archci-worker-<arch>@ instance differs from the machine's ARCHCI_ARCH).
 [[ -f ${jobfile%/*}/arch ]] && ARCHCI_ARCH=$(<"${jobfile%/*}/arch")
-(( EUID == 0 )) || archci_die "must run as root (makechrootpkg needs it)"
-for tool in mkarchroot makechrootpkg arch-nspawn; do
+(( EUID == 0 )) || archci_die "must run as root (the chroot and its containers need it)"
+for tool in mkarchroot arch-nspawn; do
 	command -v "$tool" >/dev/null || archci_die "devtools is not installed"
 done
 id -u "$ARCHCI_BUILD_USER" >/dev/null 2>&1 || archci_die "build user $ARCHCI_BUILD_USER does not exist"
@@ -89,7 +89,7 @@ copy=archci-$instance
 # aarch64 and riscv64 instances 1 of one host both build a "guile" at times
 # (the chroot copy is per arch already: $chroot is)
 srcdir=$ARCHCI_WORKER_HOME/build/$ARCHCI_ARCH-$instance/$job_pkgbase
-printf '%s\n' "$chroot/$copy" >"${jobfile%/*}/copydir"   # for the worker's per-job heartbeat stats
+printf '%s\n' "$chroot/$copy" >"${jobfile%/*}/copydir"   # for the worker's per-job heartbeat stats (with JOBDIR/machine, below)
 
 echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
 echo "    repo=$job_repo arch=$job_arch profile=$profile chroot=$chroot copy=$copy commit=$job_commit"
@@ -279,9 +279,9 @@ export PACKAGER=$ARCHCI_PACKAGER
 
 say "Building %s %s in %s" "$job_pkgbase" "$job_version" "$copy"
 cd "$srcdir"
-# Upstream source signatures. makechrootpkg verifies the sources on the host,
-# as $ARCHCI_BUILD_USER with its GNUPGHOME (makepkg --verifysource), before
-# the chroot build, which then skips integrity checks. The keys a PKGBUILD's
+# Upstream source signatures. The sources are verified on the host, as
+# $ARCHCI_BUILD_USER with its GNUPGHOME (makepkg --verifysource, below),
+# before the chroot build, which then skips integrity checks. The keys a PKGBUILD's
 # validpgpkeys names come with it in keys/pgp/<fingerprint>.asc, as in Arch's
 # packaging repositories; import them into a keyring of ours for that user.
 # A package whose keys are missing fails its signature check, unless
@@ -312,16 +312,32 @@ if [[ -n $ARCHCI_KEYSERVERS ]]; then
 		done
 	fi
 fi
-# no -u: an upgrade in the copy would take the farm's packages wholesale,
-# and on a port those can break the copy's own tools (see mirrorconf); the
-# copy's databases are the root's, synced every ARCHCI_CHROOT_UPDATE_MINUTES
-mcp_args=(-c -r "$chroot" -l "$copy" -U "$ARCHCI_BUILD_USER")
-# ARCHCI_MAKEPKG_ARGS is passed to makepkg after -- (default: none).
+# --- the copy: a fresh snapshot of the root per build (a read lock on the
+# root, as makechrootpkg took), made ready for makepkg (archci_chroot_prepare)
+copydir=$chroot/$copy
+jobdir=${jobfile%/*}
+slock 9 "$chroot/root.lock" "Waiting for the clean chroot"
+archci_chroot_copy "$chroot/root" "$copydir" || archci_die "could not make the chroot copy $copydir"
+lock_close 9
+archci_chroot_prepare "$copydir" "$(id -u "$ARCHCI_BUILD_USER")" "$(id -g "$ARCHCI_BUILD_USER")" "$ARCHCI_PACKAGER"
+# what makepkg runs inside: the environment makechrootpkg passed, baked in;
+# 14 (nothing to do) is success, as there
+{
+	printf '#!/bin/bash\n. /etc/profile\nulimit -c 0\n'
+	printf 'export SOURCE_DATE_EPOCH=%q BUILDTOOL=%q BUILDTOOLVER=%q\n' "$SOURCE_DATE_EPOCH" "$BUILDTOOL" "$BUILDTOOLVER"
+	# shellcheck disable=SC2016  # the container's shell expands these
+	printf '%s\n' 'sudo --preserve-env=SOURCE_DATE_EPOCH --preserve-env=BUILDTOOL --preserve-env=BUILDTOOLVER -iu builduser bash -c '"'"'cd /startdir; makepkg "$@"'"'"' -bash "$@"' \
+		'ret=$?' 'case $ret in 0|14) exit 0;; *) exit $ret;; esac'
+} >"$copydir/chrootbuild"
+chmod 755 "$copydir/chrootbuild"
+# The sources, verified on the host as the build user with its keyring
+# (makepkg --verifysource, as makechrootpkg did; a build without a source
+# package downloads them here, into the worker's cache), so the container's
+# makepkg skips integrity checks: it has no keys and, offline, no network.
 extra_makepkg_args=()
 [[ -n $ARCHCI_MAKEPKG_ARGS ]] && read -ra extra_makepkg_args <<<"$ARCHCI_MAKEPKG_ARGS"
 # a source package carries its VCS sources as snapshots: build them as they are
 (( from_srcpkg )) && extra_makepkg_args+=(--holdver)
-[[ -n $vendor_conf ]] && mcp_args+=(-D "$vendor_conf:/build/.config")
 # PKGBUILDs carried from Arch declare arch=(x86_64) unless a patch in the
 # repository adds the port arch; a port arch builds them anyway (the Arch
 # Linux Ports RFC keeps the arch array as is and has the tooling ignore it).
@@ -334,25 +350,59 @@ if [[ $arch != "$(uname -m)" && $ARCHCI_EMULATED_NOCHECK == 1 ]]; then
 	extra_makepkg_args+=(--nocheck)
 	say "Building %s under emulation: check() skipped (ARCHCI_EMULATED_NOCHECK)" "$arch"
 fi
-(( ${#extra_makepkg_args[@]} )) && mcp_args+=(-- "${extra_makepkg_args[@]}")
+verify_args=()
+for a in "${extra_makepkg_args[@]}"; do [[ $a == --holdver || $a == --ignorearch || $a == --skip* ]] && verify_args+=("$a"); done
+verifydir=$(mktemp -d); chown "$ARCHCI_BUILD_USER" "$verifydir"
+say "Verifying the sources on the host"
+runuser -u "$ARCHCI_BUILD_USER" -- env GNUPGHOME="$GNUPGHOME" SRCDEST="$SRCDEST" BUILDDIR="$verifydir" \
+	makepkg --config "$copydir/etc/makepkg.conf" --verifysource -o "${verify_args[@]}" 2>&1 || { rm -rf "$verifydir"; archci_die "could not verify the sources"; }
+rm -rf "$verifydir"
+
+# --- the build: two containers on the copy. First the dependencies are
+# installed (makepkg --syncdeps up to "sources are ready", no prepare()),
+# with the network, in the archci-online slice; then makepkg builds, in
+# archci-offline, where archci_firewall lets nothing but loopback through:
+# the sources are in /startdir and /srcdest, the vendored dependencies
+# replay from /startdir/vendor, and pacman has nothing left to fetch. A
+# package with the network exemption (package.json "network": true,
+# network=1 in the job) builds in archci-online; so does everything with
+# ARCHCI_BUILD_OFFLINE=0, or where nft is missing.
+build_slice=archci-offline
+if [[ ${job_network:-} == 1 ]]; then
+	build_slice=archci-online
+	say "Building with the network: the package is exempt (package.json)"
+elif [[ $ARCHCI_BUILD_OFFLINE != 1 ]]; then
+	build_slice=archci-online
+elif ! archci_firewall; then
+	build_slice=archci-online
+	echo "==> WARNING: nftables is not installed; building with the network"
+fi
+machine=$(archci_machine_name archci-build "$job_pkgbase")
+printf '%s\n' "$machine" >"$jobdir/machine"   # for the worker's per-job heartbeat stats
+container=(arch-nspawn -c "$cachedir" "$copydir" --machine="$machine"
+	--bind="$srcdir:/startdir" --bind="$SRCDEST:/srcdest" --bind="$outdir:/pkgdest" --bind="$outdir:/logdest" --bind="$outdir:/srcpkgdest"
+	"$ARCHCI_CONTAINER_TMP")
+[[ -n $vendor_conf ]] && container+=(--bind-ro="$vendor_conf:/build/.config")
+deps_args=(--syncdeps --noconfirm --skipinteg --nobuild --noextract --noprepare "${extra_makepkg_args[@]}")
+build_args=(--syncdeps --noconfirm --log --skipinteg "${extra_makepkg_args[@]}")
 # Through archci_watchdog's pipe on purpose: systemd-nspawn (arch-nspawn's
-# --console=autopipe)
-# passes the container's stdout through when it is a pipe or a file, but drops
-# it when it is the unit's journal stream socket, which left every line makepkg
-# printed inside the chroot out of the journal and of build.log. pipefail
-# makes rc makechrootpkg's own status.
-# A build silent for ARCHCI_BUILD_MAX_IDLE_MINUTES is a stuck test suite: kill it
-# rather than hold the worker until the unit's TimeoutStartSec.
-# (its output also lands in $outdir/makechrootpkg.log, for the check below,
-# and its phase markers in JOBDIR/phase, for the worker's heartbeats)
+# --console=autopipe) passes the container's stdout through when it is a
+# pipe or a file, but drops it when it is the unit's journal stream socket.
+# A build silent for ARCHCI_BUILD_MAX_IDLE_MINUTES is a stuck test suite:
+# kill it rather than hold the worker until the unit's TimeoutStartSec.
+# (its output also lands in $outdir/build.out, for the check below, and its
+# phase markers in JOBDIR/phase, for the worker's heartbeats)
 build_once() {
-	local rcf; rcf=$(mktemp)
-	# (the group runs in a subshell under set -e: a plain failing command
-	# would end it before the status is written, so the status is taken
-	# through if/else)
+	local rcf idle; rcf=$(mktemp); idle=$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))
 	{
-		if archci_watchdog "$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))" -- makechrootpkg "${mcp_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
-	} 2>&1 | tee "$outdir/makechrootpkg.log" | archci_phase_filter "${jobfile%/*}/phase"
+		echo "==> Installing the dependencies (with the network)"
+		if archci_watchdog "$idle" -- "${container[@]}" --slice=archci-online /chrootbuild "${deps_args[@]}"; then
+			echo "==> Building in the $build_slice slice"
+			if archci_watchdog "$idle" -- "${container[@]}" --slice="$build_slice" /chrootbuild "${build_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
+		else
+			echo $? >"$rcf"
+		fi
+	} 2>&1 | tee "$outdir/build.out" | archci_phase_filter "$jobdir/phase"
 	rc=$(<"$rcf"); rc=${rc:-1}; rm -f "$rcf"
 }
 rc=0
@@ -370,7 +420,7 @@ build_once
 # and arch: what a build needs is fetched again, once, and no later round
 # trips over the next stale name. Three tries at most.
 tries=1
-while (( rc && tries < 3 )) && grep -Eq "invalid or corrupted package|failed retrieving file" "$outdir/makechrootpkg.log"; do
+while (( rc && tries < 3 )) && grep -Eq "invalid or corrupted package|failed retrieving file" "$outdir/build.out"; do
 	echo "==> a package failed its checksum or was gone from the release (a mirror's copy of a name the farm now builds, or a version the signer just replaced); emptying $cachedir and building again"
 	find "$cachedir" -maxdepth 1 -type f \( -name '*.pkg.tar.*' -o -name '*.sig' \) -delete 2>/dev/null || true
 	(( ++tries ))
@@ -378,10 +428,11 @@ while (( rc && tries < 3 )) && grep -Eq "invalid or corrupted package|failed ret
 done
 if (( rc == 124 )); then
 	# the container's own processes live in a scope of their own; make sure none survive
-	pkill -KILL -f -- "--directory=$chroot/$copy" 2>/dev/null || true
+	archci_container_stop "$machine"
 	echo "==> build killed after $ARCHCI_BUILD_MAX_IDLE_MINUTES min without output"
 fi
-(( rc == 0 )) || echo "==> makechrootpkg exited with $rc"
+rm -f "$outdir/build.out"
+(( rc == 0 )) || echo "==> the build exited with $rc"
 
 shopt -s nullglob
 pkgs=("$outdir"/*.pkg.tar.zst)

@@ -124,6 +124,18 @@ grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$i
 rm -r "$ARCHCI_HOME/released"
 "$job" enqueue linux 0 src >/dev/null
 [[ $(claim_id sourcer src) == 0-*omarchy,linux,*,src ]] || fail "a package's sources can be enqueued by hand with ARCH=src"
+echo "--- the network exemption: package.json \"network\": true reaches the job"
+mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch", "network": true}'
+commit_pkgs netpkg
+"$scan" >/dev/null 2>&1
+[[ $("$master/archci-pkgindex" netpkg | awk '{print $7}') == network ]] || fail "the index must flag the package: $("$master/archci-pkgindex" netpkg)"
+"$job" enqueue netpkg 0 x86_64 >/dev/null
+nid=$(claim_id worker-9 x86_64)
+[[ $nid == *omarchy,netpkg,* ]] || fail "the enqueued job is claimed first: $nid"
+grep -q '^network=1$' "$ARCHCI_HOME/queue/running/$nid.job" || fail "the job must carry network=1: $(cat "$ARCHCI_HOME/queue/running/$nid.job")"
+"$job" report "$nid" failure >/dev/null
+grep -q '^network=1$' "$ARCHCI_HOME/queue/failed/$nid.job" || fail "a failure keeps the flag"
+rm -rf "$ARCHCI_HOME"/queue/failed/*netpkg* "$pkgs/pkgbuilds/netpkg"; commit_pkgs "netpkg gone"; "$scan" >/dev/null 2>&1
 echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
@@ -169,7 +181,7 @@ commit_pkgs bump
 "$housekeeping"
 ls "$ARCHCI_HOME/queue/pending" | grep 'linux,7.2.3.arch1-2' >/dev/null && fail "superseded pending job not dropped"
 [[ -z $(ls -A "$ARCHCI_HOME/queue/failed") ]] || fail "superseded final failure not dropped"
-[[ $("$next") == "5 omarchy x86_64 libsigc++ 2.12.3-1 $(pkgcommit libsigc++) extra" ]] || fail "new libsigc++ version should be next: $("$next")"
+[[ $("$next") == "5 omarchy x86_64 libsigc++ 2.12.3-1 $(pkgcommit libsigc++) extra -" ]] || fail "new libsigc++ version should be next: $("$next")"
 "$job" enqueue acl 0
 ls "$ARCHCI_HOME/queue/pending" | grep '^0-.*omarchy,acl' >/dev/null || fail "manual enqueue"
 ! "$job" enqueue skipped 0 2>/dev/null || true   # skip_build packages may still be enqueued by hand

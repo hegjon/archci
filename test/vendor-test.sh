@@ -29,9 +29,26 @@ printf 'pkgname=cargo-c\nbuild() { make; }\n' >"$tmp/name"
 echo "--- archci_vendor_env: capture directs the cache, replay forbids the network"
 [[ $(archci_vendor_env rust capture /vendor) == "CARGO_HOME=/vendor/rust" ]] || fail "rust capture: $(archci_vendor_env rust capture /vendor)"
 [[ $(archci_vendor_env rust replay /startdir/vendor | tr '\n' ' ') == "CARGO_HOME=/startdir/vendor/rust CARGO_NET_OFFLINE=true " ]] || fail "rust replay: $(archci_vendor_env rust replay /startdir/vendor)"
-[[ -z $(archci_vendor_env go capture /vendor) ]] || fail "go is not captured yet"
-archci_vendor_supported rust || fail "rust is supported"
-! archci_vendor_supported go || fail "go is not supported yet"
+[[ $(archci_vendor_env go replay /startdir/vendor | tr '\n' ' ') == "GOMODCACHE=/startdir/vendor/go GOFLAGS=-mod=mod GOPROXY=off " ]] || fail "go replay: $(archci_vendor_env go replay /startdir/vendor)"
+[[ $(archci_vendor_env npm replay /v | head -2 | tr '\n' ' ') == "npm_config_cache=/v/npm npm_config_offline=true " ]] || fail "npm replay: $(archci_vendor_env npm replay /v)"
+[[ $(archci_vendor_env pip capture /v) == "PIP_CACHE_DIR=/v/pip" ]] || fail "pip capture: $(archci_vendor_env pip capture /v)"
+[[ $(archci_vendor_env maven replay /v | tr '\n' ' ') == "MAVEN_OPTS=-Dmaven.repo.local=/v/maven MAVEN_ARGS=--offline GRADLE_USER_HOME=/v/gradle " ]] || fail "maven replay: $(archci_vendor_env maven replay /v)"
+for k in rust go npm pip maven; do archci_vendor_supported "$k" || fail "$k is supported"; done
+! archci_vendor_supported perl || fail "an unknown kind is not"
+[[ -z $(archci_vendor_env perl capture /v) ]] || fail "an unknown kind has no environment"
+
+echo "--- archci_firewall: the table for the offline slice (needs nft and root; skipped without)"
+if command -v nft >/dev/null && [[ $EUID == 0 ]]; then
+	archci_firewall || fail "archci_firewall must install its table"
+	nft list table inet archci | grep -q 'archci.slice/archci-offline.slice' || fail "the table must key on the offline slice"
+	nft delete table inet archci
+else
+	echo "(not root, or no nft: skipped)"
+fi
+echo "--- archci_machine_name: a hostname from a package name"
+[[ $(archci_machine_name archci-build 'libsigc++') == archci-build-libsigc-- ]] || fail "machine name: $(archci_machine_name archci-build 'libsigc++')"
+long=$(archci_machine_name archci-build "$(printf 'x%.0s' {1..100})")
+(( ${#long} <= 64 )) || fail "a machine name is at most 64 characters: ${#long}"
 
 echo "--- archci_srcpkg_add_vendor: vendor/ joins the source package under its pkgbase"
 mkdir -p "$tmp/pkg/hello" "$tmp/vendor/rust/registry/cache"

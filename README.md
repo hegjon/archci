@@ -39,7 +39,7 @@ flowchart LR
   end
   subgraph WORKER["worker x N"]
     WL["archci-worker@N"]
-    BUILD["archci-build: makechrootpkg + builder-sign"]
+    BUILD["archci-build: nspawn (deps online, build offline) + builder-sign"]
   end
   subgraph SIGNER["signer (holds release key)"]
     SIGN["archci-sign: verify buildsig, release-sign, repo-add (os/src: no db)"]
@@ -139,7 +139,16 @@ for the job's commit and it is released, and is printed. The worker then:
    output stops for `ARCHCI_BUILD_MAX_IDLE_MINUTES` (90) is killed long before
    that: a hung test suite otherwise holds the worker for the whole 48 h, while
    an emulated build that keeps compiling (emacs took over 12 h) is left alone,
-3. inside that unit, builds with `makechrootpkg -c -l archci-N` in
+3. inside that unit, builds in a fresh snapshot of the clean chroot, entered
+   with `arch-nspawn` twice: once with the network, in the `archci-online`
+   slice, to install the dependencies (makepkg up to "sources are ready"),
+   then in `archci-offline`, where an nftables table of archci's own lets
+   nothing but loopback out, to build: the sources sit in the source
+   package or were verified on the host, and what the sourcer vendored
+   replays from it. A package with `"network": true` in its package.json
+   builds in `archci-online` (its prepare() fetches what no vendoring
+   serves); `ARCHCI_BUILD_OFFLINE=0` keeps the network for every build.
+   (Before 0.4.20 this was `makechrootpkg -c -l archci-N`) in
    `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
    btrfs subvolume and each build gets a fresh snapshot of it. The root is
    upgraded from the mirrors alone, every `ARCHCI_CHROOT_UPDATE_MINUTES`
@@ -244,7 +253,7 @@ master at all; it talks only to R2.
 
 ```mermaid
 flowchart TD
-  A["worker: makechrootpkg produces pkg"] --> B["gpg detach-sign -u builder to pkg.buildsig<br/>builder key = internal provenance"]
+  A["worker: archci-build produces pkg"] --> B["gpg detach-sign -u builder to pkg.buildsig<br/>builder key = internal provenance"]
   B -->|"rsync (rrsync-jailed)"| C["master: pool pkg + .buildsig<br/>(holds no key)"]
   C -->|"archci-stage: rclone move"| D[("R2 staging/")]
   D --> E["signer: rclone pull pkg + .buildsig"]

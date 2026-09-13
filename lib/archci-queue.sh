@@ -45,9 +45,9 @@ requeue_file() {  # requeue_file FILE  (lock held)
 	rm -rf "${ARCHCI_HOME:?}/incoming/${name%.job}"
 }
 
-# write_job DEST PRIO REPO ARCH PKGBASE VERSION COMMIT PROFILE -> prints the file name
+# write_job DEST PRIO REPO ARCH PKGBASE VERSION COMMIT PROFILE [network] -> prints the file name
 write_job() {
-	local dest=$1 prio=$2 repo=$3 arch=$4 pkgbase=$5 version=$6 commit=$7 profile=$8 id
+	local dest=$1 prio=$2 repo=$3 arch=$4 pkgbase=$5 version=$6 commit=$7 profile=$8 flags=${9:-} id
 	id="$prio-$(date +%s)-$repo,$pkgbase,$version,$arch"
 	archci_valid_id "$id" || archci_die "cannot form a valid job id for $repo/$pkgbase $version $arch"
 	cat >"$dest/$id.job.tmp" <<-JOB
@@ -61,6 +61,7 @@ write_job() {
 		attempt=0
 		created=$(archci_now)
 	JOB
+	[[ $flags == network ]] && echo 'network=1' >>"$dest/$id.job.tmp"
 	mv "$dest/$id.job.tmp" "$dest/$id.job"
 	printf '%s\n' "$id.job"
 }

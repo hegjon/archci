@@ -3,8 +3,10 @@
 
 # archci-next [ARCH] -- print the next package to build for a worker of ARCH
 # (default: every enabled arch), or nothing if all is built.
-# Output: "<prio> <repo> <arch> <pkgbase> <version> <commit> <profile>", where
-# <arch> is the job's arch: the worker's, or "any". Used by archci-job claim
+# Output: "<prio> <repo> <arch> <pkgbase> <version> <commit> <profile> <flags>",
+# where <arch> is the job's arch: the worker's, or "any", and <flags> is
+# "network" for a package that builds with the network (package.json), else
+# "-". Used by archci-job claim
 # when queue/pending holds nothing for the worker; safe to run by hand.
 # archci-next src -- the next package without a source package for its
 # commit, the same line, for the sourcer's claim.
@@ -37,4 +39,4 @@ entry = if ARGV[0] == 'src'
         end
 exit 0 unless entry
 
-puts entry.values_at('prio', 'repo', 'arch', 'pkgbase', 'version', 'commit', 'profile').join(' ')
+puts [*entry.values_at('prio', 'repo', 'arch', 'pkgbase', 'version', 'commit', 'profile'), entry['network'] ? 'network' : '-'].join(' ')

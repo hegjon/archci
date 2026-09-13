@@ -89,10 +89,10 @@ cmd_claim() {
 	done
 	if [[ -z $name ]]; then
 		# Nothing queued by hand or for retry: pick the next outstanding package now.
-		local prio repo arch pkgbase version commit profile
-		read -r prio repo arch pkgbase version commit profile < <("$ARCHCI_MASTER_DIR/archci-next" "$warch") || true
+		local prio repo arch pkgbase version commit profile flags
+		read -r prio repo arch pkgbase version commit profile flags < <("$ARCHCI_MASTER_DIR/archci-next" "$warch") || true
 		[[ -n ${commit:-} ]] || exit 0
-		name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile")
+		name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile" "${flags:-}")
 	fi
 	mv "$Q_PENDING/$name" "$Q_RUNNING/$name"
 	archci_read_job "$Q_RUNNING/$name" || archci_die "corrupt job file $name"
@@ -246,12 +246,12 @@ cmd_retry() {
 }
 
 cmd_enqueue() {
-	local pkgbase=$1 prio=${2:-0} arch=${3:-$ARCHCI_ARCH} repo=$ARCHCI_REPO line name version commit parch profile old
+	local pkgbase=$1 prio=${2:-0} arch=${3:-$ARCHCI_ARCH} repo=$ARCHCI_REPO line name version commit parch profile build old
 	archci_valid_arch "$arch" || archci_die "invalid arch: $arch"
 	[[ $arch == any ]] || archci_enabled_arch "$arch" || archci_die "arch $arch is not enabled (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
 	line=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase")
 	[[ -n $line ]] || archci_die "no package $pkgbase in the PKGBUILD repository (run archci-scan first?)"
-	read -r name version commit parch profile _ <<<"$line"
+	read -r name version commit parch profile _ build _ <<<"$line"
 	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected index line: $line"
 	if [[ $arch == src ]]; then :   # its sources: any package's
 	elif [[ $parch == any ]]; then
@@ -263,7 +263,7 @@ cmd_enqueue() {
 	for old in "$Q_PENDING"/*-"$repo,$pkgbase,"*",$arch.job"; do
 		[[ -e $old ]] && rm -f "$old"
 	done
-	name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile")
+	name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile" "$build")
 	archci_log "enqueued ${name%.job}"
 }
 
