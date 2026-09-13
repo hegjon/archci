@@ -66,8 +66,9 @@ archci_load_conf
 # into a source package (<pkgbase>-<version>.src.tar.gz), builder-signs it
 # and hands it in like a build's packages; it is pooled under
 # <repo>/os/src, staged, release-signed and published beside the arches,
-# and a build claim names it (sources=) once it has been out for
-# ARCHCI_RELEASE_LAG_MINUTES; a worker with ARCHCI_RELEASE_URL takes it from
+# and a build claim names it (sources=) once archci-signer-status has
+# listed it in the release (ARCHCI_RELEASE_LAG_MINUTES after the build
+# without a listing); a worker with ARCHCI_RELEASE_URL takes it from
 # there, checks the release signature, and fetches nothing upstream.
 # ARCHCI_SOURCES_REQUIRED=1 holds a build until that is so; 0 lets a build
 # fetch upstream meanwhile. The sourcer's state: ARCHCI_SOURCER_HOME (the

@@ -196,8 +196,11 @@ it under `<repo>/os/src` and records it in `built/<repo>-src/` ("version
 commit file"); `archci-stage` and the signer treat it as a package without
 a database: verified, release-signed and published beside the arches, the
 older versions of the package pruned. A build claim names the source
-package (`sources=`) once it has been out for `ARCHCI_RELEASE_LAG_MINUTES`,
-and the worker takes it from `ARCHCI_RELEASE_URL/<repo>/os/src/`, checks
+package (`sources=`) once `archci-signer-status` has seen it in the
+release (it lists the released packages and source packages every 2
+minutes, and dependencies count as available by the same listing;
+`ARCHCI_RELEASE_LAG_MINUTES` after the build stands in without one), and
+the worker takes it from `ARCHCI_RELEASE_URL/<repo>/os/src/`, checks
 the release signature with pacman's keyring, and fetches nothing upstream;
 with `ARCHCI_SOURCES_REQUIRED=1` the master holds a build until that is
 so. A failed fetch is a failed job: its makepkg log is the attempt's log,

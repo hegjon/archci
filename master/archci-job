@@ -96,13 +96,18 @@ cmd_claim() {
 	fi
 	mv "$Q_PENDING/$name" "$Q_RUNNING/$name"
 	archci_read_job "$Q_RUNNING/$name" || archci_die "corrupt job file $name"
-	# the source package the sourcer made for this commit, once it has been
-	# out long enough for the signer to have released it: the worker builds
-	# from it instead of fetching upstream
-	local rec=$ARCHCI_HOME/built/$job_repo-src/$job_pkgbase srcpkg='' v c f
-	if [[ $job_arch != src && -f $rec ]] && (( $(date +%s) - $(stat -c %Y "$rec") >= ARCHCI_RELEASE_LAG_MINUTES * 60 )); then
+	# the source package the sourcer made for this commit, once the signer
+	# has released it (archci-signer-status' listing; without one, once it
+	# has been out ARCHCI_RELEASE_LAG_MINUTES): the worker builds from it
+	# instead of fetching upstream
+	local rec=$ARCHCI_HOME/built/$job_repo-src/$job_pkgbase listing=$ARCHCI_HOME/released/$job_repo-src srcpkg='' v c f
+	if [[ $job_arch != src && -f $rec ]]; then
 		read -r v c f <"$rec"
-		[[ $c == "$job_commit" && -n $f ]] && srcpkg=$f
+		if [[ $c == "$job_commit" && -n $f ]]; then
+			if [[ -f $listing ]]; then grep -qxF "$f" "$listing" && srcpkg=$f
+			elif (( $(date +%s) - $(stat -c %Y "$rec") >= ARCHCI_RELEASE_LAG_MINUTES * 60 )); then srcpkg=$f
+			fi
+		fi
 	fi
 	rewrite_job "$Q_RUNNING/$name" "$Q_RUNNING/$name" \
 		"worker=$worker" "claimed=$(archci_now)" ${srcpkg:+"sources=$srcpkg"}

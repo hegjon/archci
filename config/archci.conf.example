@@ -48,9 +48,12 @@ ARCHCI_STALE_MINUTES=30
 # this much longer.
 ARCHCI_RETRY_MINUTES=180
 ARCHCI_RETRY_HOLD_MINUTES=720
-# A dependency built this recently is taken as not yet released (the signer's
-# lag) and waited for, so its dependents are not claimed before the chroot
-# can install it.
+# Whether a build's packages, or a source package, have been released (a
+# dependent's chroot installs from the release; a build claim names the
+# source package) is read from the release itself: archci-signer-status
+# lists it every 2 minutes (released/ on the master). Until it has (no
+# ARCHCI_RELEASE_URL, or before its first pass) this many minutes after
+# the build stand in.
 ARCHCI_RELEASE_LAG_MINUTES=20
 # Where the master keeps what it can rebuild: the package index cache.
 ARCHCI_CACHE_DIR=/var/cache/archci

@@ -109,6 +109,18 @@ echo "==> ERROR: Failure while downloading https://example/linux.tar.xz" >"$ARCH
 id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
 grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must not name a source package the signer has not released yet"
 "$job" report "$id" abandoned
+# with archci-signer-status' listing of the release, the listing decides,
+# not the lag (the abandoned job waits in pending/, so the claim is what
+# shows it)
+mkdir -p "$ARCHCI_HOME/released"; : >"$ARCHCI_HOME/released/omarchy-src"
+id=$(claim_id worker-2 x86_64)
+grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must not name a source package the listing lacks, whatever its age"
+"$job" report "$id" abandoned
+echo libsigc++-2.12.2-1.src.tar.gz >"$ARCHCI_HOME/released/omarchy-src"
+id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
+grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "listed as released, the claim names the source package at once: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
+"$job" report "$id" abandoned
+rm -r "$ARCHCI_HOME/released"
 "$job" enqueue linux 0 src >/dev/null
 [[ $(claim_id sourcer src) == 0-*omarchy,linux,*,src ]] || fail "a package's sources can be enqueued by hand with ARCH=src"
 echo "--- report failure, retry, give up"

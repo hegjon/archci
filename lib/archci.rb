@@ -113,16 +113,44 @@ module Archci
     config['ARCHCI_ANY_ARCH'] || arches.first
   end
 
+  # What the signer has released, as archci-signer-status last listed it
+  # (released/<repo>-<arch>: "name version" per package the arch's database
+  # names; released/<repo>-src: the source packages found): a Set of the
+  # lines, nil without a listing (no signer status yet), cached by the
+  # file's mtime.
+  @released = {}
+  def self.released(repo, arch)
+    path = File.join(home, 'released', "#{repo}-#{arch}")
+    mtime = File.mtime(path)
+    hit = @released[path]
+    return hit[1] if hit && hit[0] == mtime
+
+    (@released[path] = [mtime, File.readlines(path, chomp: true).to_set])[1]
+  rescue Errno::ENOENT
+    @released.delete(path)
+    nil
+  end
+
+  # Is what a built record says released? By the listing when there is
+  # one; without one, by age: ARCHCI_RELEASE_LAG_MINUTES since the record.
+  #   entry: what to look for in the listing
+  def self.released?(repo, arch, entry, record_path)
+    listing = released(repo, arch)
+    return listing.include?(entry) if listing
+
+    File.mtime(record_path) <= Time.now - config['ARCHCI_RELEASE_LAG_MINUTES'].to_i * 60
+  end
+
   # The source package the sourcer made for pkg at its current commit, by
-  # name, once it has been out long enough for the signer to have released
-  # it (ARCHCI_RELEASE_LAG_MINUTES; a build claim hands it to the worker);
-  # nil before that. The src built record is "version commit file".
+  # name, once the signer has released it (released?; a build claim hands it
+  # to the worker); nil before that. The src built record is "version
+  # commit file".
   def self.source_file(repo, pkg)
     path = File.join(home, 'built', "#{repo}-src", pkg['pkgbase'])
     _version, commit, file = built_record(path) || []
     return nil unless file && commit == pkg['commit']
 
-    File.mtime(path) <= Time.now - config['ARCHCI_RELEASE_LAG_MINUTES'].to_i * 60 ? file : nil
+    released?(repo, 'src', file, path) ? file : nil
   rescue Errno::ENOENT
     nil
   end
@@ -301,27 +329,29 @@ module Archci
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
     # a dependency is met once its pkgbase is built at its current version
     # for the arch, or as an any package (built at an older one, its update
-    # is waited for: the dependent's new version usually needs it), and long
-    # enough ago for the signer to have released it (ARCHCI_RELEASE_LAG_MINUTES:
-    # the chroot installs from the release); one that gave up at its current
-    # commit is not waited for (the chroot falls back on the mirrors' copy,
-    # if any). The built names come from one listing per arch, the versions
-    # from the built records (cached): the check runs for every dependency
-    # of every package on every archci top frame.
+    # is waited for: the dependent's new version usually needs it), and the
+    # signer has released it (released?: one of its packages at that version
+    # in the dependent's arch's released database, every arch's holds the
+    # any packages; the chroot installs from the release); one that gave up
+    # at its current commit is not waited for (the chroot falls back on the
+    # mirrors' copy, if any). The built names come from one listing per
+    # arch, the versions from the built records (cached): the check runs
+    # for every dependency of every package on every archci top frame.
     by_base = candidates.to_h { |p| [p['pkgbase'], p] }
     weight = dependents
     built_names = Hash.new do |h, a|
       dir = File.join(home, 'built', "#{repo}-#{a}")
       h[a] = File.directory?(dir) ? Dir.children(dir).to_set : Set.new
     end
-    released_before = Time.now - cfg['ARCHCI_RELEASE_LAG_MINUTES'].to_i * 60
-    current = Hash.new do |h, (dep_base, a)|
-      path = File.join(home, 'built', "#{repo}-#{a}", dep_base)
-      h[[dep_base, a]] = built_names[a].include?(dep_base) &&
-                         built_record(path)&.first == by_base[dep_base]['version'] && File.mtime(path) <= released_before
+    # (dep_base built as built_arch, released in db_arch's database)
+    current = Hash.new do |h, (dep_base, built_arch, db_arch)|
+      path = File.join(home, 'built', "#{repo}-#{built_arch}", dep_base)
+      version = by_base[dep_base]['version']
+      h[[dep_base, built_arch, db_arch]] = built_names[built_arch].include?(dep_base) && built_record(path)&.first == version &&
+                                           by_base[dep_base]['pkgnames'].any? { |n| released?(repo, db_arch, "#{n} #{version}", path) }
     end
     dep_built = lambda do |dep_base, a|
-      current[[dep_base, a]] || current[[dep_base, 'any']] ||
+      current[[dep_base, a, a]] || current[[dep_base, 'any', a]] ||
         [a, 'any'].any? { |x| given_up[[dep_base, x]] == by_base[dep_base]['commit'] }
     end
     updates = []
