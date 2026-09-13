@@ -76,28 +76,45 @@ end
 
 JOURNAL_FIELDS = '--output-fields=MESSAGE,_SYSTEMD_UNIT,_HOSTNAME,SYSLOG_IDENTIFIER'
 
-# One frame into a pipe: the last lines from the newest entries, read once.
+# The last line a key (unit_name's) has in the journal, '' for none: one
+# journalctl with the entry's matches, which the journal's field indexes
+# answer from the tail without a scan (a build that has been quiet for an
+# hour still has a last line)
+def journal_last_line(dir, key)
+  matches = if key.start_with?('archci-sourcer@')
+              ['_SYSTEMD_UNIT=archci-sourcer.service', "_HOSTNAME=#{key.delete_prefix('archci-sourcer@')}", 'SYSLOG_IDENTIFIER=archci-sourcer']
+            else
+              ["_SYSTEMD_UNIT=#{key}.service"]
+            end
+  out, = Open3.capture2('journalctl', '-D', dir, '--no-pager', '-o', 'json', JOURNAL_FIELDS, '-n', '1', *matches, err: File::NULL)
+  line = out.lines.last.to_s
+  return '' if line.empty?
+
+  e = begin
+    JSON.parse(line.force_encoding(Encoding::UTF_8).scrub)
+  rescue JSON::ParserError
+    return ''
+  end
+  journal_entry(e)&.last.to_s
+end
+
+# One frame into a pipe: each running job's last line, asked for once.
 class JournalSnapshot
-  def initialize(dir, entries = 500)
-    @last = {}
-    out, = Open3.capture2('journalctl', '-D', dir, '--no-pager', '-o', 'json', JOURNAL_FIELDS, '-n', entries.to_s, err: File::NULL)
-    out.each_line do |line|
-      e = JSON.parse(line.force_encoding(Encoding::UTF_8).scrub) rescue next
-      key, msg = journal_entry(e)
-      @last[key] = msg if key
-    end
+  def initialize(dir)
+    @dir = dir
   end
 
-  def last(units) = units.to_h { |u| [u, @last[u].to_s] }
+  def last(units) = units.to_h { |u| [u, journal_last_line(@dir, u)] }
 end
 
 # The remote journal holds every worker's every build (a gigabyte or more,
 # and the master has one CPU). It is read for one thing, each running job's
 # last output line: JournalFollow keeps one "journalctl -f" for the session,
 # read by a thread that remembers the newest line per build unit as it
-# arrives; a frame only renders. A job that was already running when the
-# session began shows no line until it prints its next one. The phase comes
-# with the worker's heartbeat (archci_phase_filter), not from here.
+# arrives; a frame only renders. A job the stream has not spoken of yet (one
+# already running, and quiet, when the session began) is asked for once
+# (journal_last_line). The phase comes with the worker's heartbeat
+# (archci_phase_filter), not from here.
 #
 # One journalctl -f for the session; last(units) answers from what it has
 # streamed.
@@ -158,8 +175,14 @@ class JournalFollow
     kill_child
   end
 
-  # units -> { unit => last line streamed, '' for none yet }
+  # units -> { unit => last line streamed, or the journal's last line for a
+  # unit the stream has not mentioned (asked once; '' when it has none) }
   def last(units)
+    unknown = @lock.synchronize { units.reject { |u| @last.key?(u) } }
+    unknown.each do |u|
+      line = journal_last_line(@dir, u)
+      @lock.synchronize { @last[u] = line unless @last.key?(u) }   # a streamed line meanwhile wins
+    end
     @lock.synchronize { units.to_h { |u| [u, @last[u].to_s] } }
   end
 end
