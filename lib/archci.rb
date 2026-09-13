@@ -24,6 +24,7 @@ module Archci
     'ARCHCI_PKGBUILDS_DIR' => 'pkgbuilds',
     'ARCHCI_REPO' => 'omarchy',
     'ARCHCI_PKG_SOURCES' => '',
+    'ARCHCI_PKG_REPOS' => '',
     'ARCHCI_PKG_ALSO' => '',
     'ARCHCI_IGNOREARCH' => '1',
     'ARCHCI_MAX_ATTEMPTS' => '3',
@@ -337,12 +338,17 @@ module Archci
   end
 
   # The packages the farm builds: the index less skip_build and, with
-  # ARCHCI_PKG_SOURCES, those of another source (ARCHCI_PKG_ALSO excepted).
+  # ARCHCI_PKG_SOURCES or ARCHCI_PKG_REPOS, those of another source or Arch
+  # repository (ARCHCI_PKG_ALSO excepted). archci_pkg_wanted in
+  # archci-common.sh is the same rule for the claim.
   def self.candidates
     sources = config['ARCHCI_PKG_SOURCES'].to_s.split
+    repos = config['ARCHCI_PKG_REPOS'].to_s.split
     also = config['ARCHCI_PKG_ALSO'].to_s.split
     packages.reject do |p|
-      p['skip'] || (!sources.empty? && !sources.include?(p['source']) && !also.include?(p['pkgbase']))
+      next false if also.include?(p['pkgbase'])
+
+      p['skip'] || (!sources.empty? && !sources.include?(p['source'])) || (!repos.empty? && !repos.include?(origin(p)))
     end
   end
 

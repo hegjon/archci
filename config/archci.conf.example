@@ -23,8 +23,11 @@ ARCHCI_REPO=omarchy
 # Only build packages whose package.json "source" is listed, e.g. "arch" for
 # the ones carried from Arch Linux. Empty: every package in the repository.
 ARCHCI_PKG_SOURCES=""
-# Packages built whatever their source, e.g. archci itself on a farm that
-# otherwise builds only the Arch-origin packages.
+# Only build packages of these Arch repositories (package.json arch_repo:
+# core, extra, multilib), e.g. "core" to hold the rest. Empty: every one.
+ARCHCI_PKG_REPOS=""
+# Packages built whatever their source or repository, e.g. archci itself on
+# a farm that otherwise builds only the Arch-origin packages.
 ARCHCI_PKG_ALSO=""
 
 ## Master ---------------------------------------------------------------------

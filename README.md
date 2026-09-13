@@ -93,8 +93,10 @@ AUR packages, alphabetically. A commit that changes a package directory without
 changing its version does not rebuild it, the same rule omarchy-pkgs' own
 pipeline follows; it does drop a pending or failed job for the older commit.
 `ARCHCI_PKG_SOURCES` restricts the farm to packages with a given `source`,
-for example `arch` for those carried from Arch Linux; `ARCHCI_PKG_ALSO`
-names packages built regardless, such as archci itself.
+for example `arch` for those carried from Arch Linux, and `ARCHCI_PKG_REPOS`
+to those of given Arch repositories, for example `core`; `ARCHCI_PKG_ALSO`
+names packages built regardless, such as archci itself. A filter set while
+jobs wait in `pending/` holds those too, until it is lifted.
 
 **Architectures.** `ARCHCI_ARCHES` on the master lists the arches it builds
 (default `x86_64`); each worker sends its own `ARCHCI_ARCH` with every claim

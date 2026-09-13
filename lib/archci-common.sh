@@ -44,9 +44,12 @@ archci_load_conf
 # Server line, the database name, and the repo/<repo>/os/<arch> pool).
 : "${ARCHCI_REPO:=omarchy}"
 # Only build packages whose .omarchy/package.json "source" is listed
-# (e.g. "arch" for those carried from Arch Linux). Empty: every package.
-# ARCHCI_PKG_ALSO names packages built regardless of that filter.
+# (e.g. "arch" for those carried from Arch Linux), and, with
+# ARCHCI_PKG_REPOS, only those of the listed Arch repositories (core,
+# extra, multilib, from package.json arch_repo). Empty: every package.
+# ARCHCI_PKG_ALSO names packages built regardless of both filters.
 : "${ARCHCI_PKG_SOURCES:=}"
+: "${ARCHCI_PKG_REPOS:=}"
 : "${ARCHCI_PKG_ALSO:=}"
 : "${ARCHCI_MAX_ATTEMPTS:=3}"
 : "${ARCHCI_STALE_MINUTES:=30}"
@@ -460,6 +463,33 @@ archci_profile() {
 		multilib*) echo multilib ;;
 		*) echo extra ;;
 	esac
+}
+
+# archci_pkg_wanted PKGBASE -- is the package one the farm builds
+# (ARCHCI_PKG_SOURCES, ARCHCI_PKG_REPOS, ARCHCI_PKG_ALSO; archci.rb's
+# candidates), by the package index (read once)? A package the index
+# does not have is not wanted. The claim asks before handing out a queued
+# job, so a filter set later holds the retries too.
+declare -A _archci_pkg_source=() _archci_pkg_repo=()
+_archci_pkg_index_read=0
+archci_pkg_wanted() {
+	local name source repo origin
+	if (( ! _archci_pkg_index_read )); then
+		_archci_pkg_index_read=1
+		while read -r name _ _ _ _ source _ repo _; do
+			[[ $name == \#* || -z $name ]] && continue
+			_archci_pkg_source[$name]=$source
+			_archci_pkg_repo[$name]=$repo
+		done <"$ARCHCI_PKGBUILDS_INDEX" 2>/dev/null
+	fi
+	source=${_archci_pkg_source[$1]:-}
+	[[ -n $source ]] || return 1
+	[[ " $ARCHCI_PKG_ALSO " == *" $1 "* ]] && return 0
+	[[ -z $ARCHCI_PKG_SOURCES || " $ARCHCI_PKG_SOURCES " == *" $source "* ]] || return 1
+	if [[ $source == arch ]]; then origin=${_archci_pkg_repo[$1]:-}; [[ $origin == - || -z $origin ]] && origin=arch
+	else origin=$source
+	fi
+	[[ -z $ARCHCI_PKG_REPOS || " $ARCHCI_PKG_REPOS " == *" $origin "* ]]
 }
 
 # --- the job protocol over ssh: what the worker and the sourcer share -----

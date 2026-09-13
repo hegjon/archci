@@ -78,6 +78,16 @@ ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 "$scan" >/dev/null 2>&
 order=$(next3)
 # the clone's own arch packages (no arch_repo) sort after multilib and before local
 [[ $order == "archci zz-core aa-extra lib32-mul "*" bb-lib mm-local bb-aur aa-app(bb-lib)" ]] || fail "claim order wrong: $order"
+echo "--- ARCHCI_PKG_REPOS: only the listed Arch repositories, ARCHCI_PKG_ALSO regardless; a queued job outside the filter waits"
+[[ $(ARCHCI_PKG_REPOS=core next3) == "archci zz-core" ]] || fail "ARCHCI_PKG_REPOS=core must leave the core packages and ARCHCI_PKG_ALSO: $(ARCHCI_PKG_REPOS=core next3)"
+[[ $(ARCHCI_PKG_REPOS="core multilib" next3) == "archci zz-core lib32-mul" ]] || fail "several repositories: $(ARCHCI_PKG_REPOS="core multilib" next3)"
+ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 "$job" enqueue aa-extra 0 x86_64 >/dev/null
+id=$(ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 ARCHCI_PKG_REPOS=core ARCHCI_PKG_ALSO=archci claim_id w-1 x86_64)
+[[ $id == *omarchy,archci,* ]] || fail "with the filter on, the claim must pass the queued extra package over: $id"
+[[ -n $(ls "$tmp"/home3/queue/pending/*aa-extra* 2>/dev/null) ]] || fail "the queued job outside the filter must wait in pending/"
+id=$(ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 claim_id w-2 x86_64)
+[[ $id == 0-*omarchy,aa-extra,* ]] || fail "with the filter lifted, the queued job is handed out first: $id"
+rm -f "$tmp"/home3/queue/{pending,running}/*.job   # the queue as the sections below expect it
 # a dependency that gave up at its current commit is not waited for either
 c=$(git -C "$pkgs3" log -1 --format=%H -- pkgbuilds/bb-lib)
 printf 'id=5-1-omarchy,bb-lib,1-1,x86_64\nrepo=omarchy\narch=x86_64\npkgbase=bb-lib\nversion=1-1\ncommit=%s\nprofile=extra\ncreated=2026-01-01T00:00:00Z\nattempt=3\nworker=w\nstatus=failure\nfinished=2026-01-01T01:00:00Z\nfinal=1\n' "$c" >"$tmp/home3/queue/failed/5-1-omarchy,bb-lib,1-1,x86_64.job"

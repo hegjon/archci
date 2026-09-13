@@ -79,10 +79,12 @@ cmd_claim() {
 	local LC_ALL=C                       # deterministic, ASCII filename order
 	shopt -s nullglob; pend=("$Q_PENDING"/*.job); shopt -u nullglob
 	# The first pending job this worker's arch can build (its own arch, or "any"
-	# if it is the any arch).
+	# if it is the any arch) of a package the farm builds (a retry of one a
+	# filter has since excluded waits in pending/ until the filter is lifted).
 	for p in "${pend[@]}"; do
 		archci_read_job "$p" || continue
 		archci_can_build "$warch" "$job_arch" || continue
+		archci_pkg_wanted "$job_pkgbase" || continue
 		name=${p##*/}; break
 	done
 	if [[ -z $name ]]; then
