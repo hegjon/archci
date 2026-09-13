@@ -223,6 +223,28 @@ module Archci
     end
   end
 
+  # The dependency graph over the candidates, for the claim order: each
+  # package's weight is how many packages need it directly, so what
+  # unblocks the most builds goes first. Direct, not transitive: through
+  # makedepends and checkdepends the graph is one big tangle of cycles, and
+  # a transitive count puts a third of the packages at "everything".
+  # Dependencies are matched by the names the packages provide as pkgname
+  # (the index records depends, makedepends and checkdepends); a dependency
+  # on a name only `provides` gives is not seen.
+  #   -> { pkgbase => weight }
+  def self.dependents
+    return @dependents[1] if @dependents && @dependents[0].equal?(packages)
+
+    cands = candidates
+    by_pkgname = cands.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
+    weights = cands.to_h { |p| [p['pkgbase'], 0] }
+    cands.each do |p|
+      p['deps'].filter_map { |d| by_pkgname[d] }.uniq.each { |b| weights[b] += 1 unless b == p['pkgbase'] }
+    end
+    @dependents = [packages, weights]
+    weights
+  end
+
   # Packages whose PKGBUILD version is not the one we last built, in claim
   # order: the farm's own packages (ARCHCI_PKG_ALSO, i.e. archci) first, then
   # packages whose dependencies from this repository are all built, at their
@@ -230,7 +252,8 @@ module Archci
   # before what links it, and a build is not tried before it can succeed:
   # an update waiting for a library's update comes after the whole backlog);
   # within those, updates of packages we already publish before the
-  # never-built backlog; then by
+  # never-built backlog; then by the dependency graph, the package needed by
+  # the most others first (dependents, direct); then by
   # origin: Arch's core, then extra, then multilib, then the repository's
   # local packages, then those from the AUR; an arch's own packages before
   # the any packages; alphabetically last.
@@ -285,6 +308,7 @@ module Archci
     # from the built records (cached): the check runs for every dependency
     # of every package on every archci top frame.
     by_base = candidates.to_h { |p| [p['pkgbase'], p] }
+    weight = dependents
     built_names = Hash.new do |h, a|
       dir = File.join(home, 'built', "#{repo}-#{a}")
       h[a] = File.directory?(dir) ? Dir.children(dir).to_set : Set.new
@@ -329,7 +353,9 @@ module Archci
         expected ||= sources_required && source_file(repo, p).nil?
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
                   'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting, 'expected' => expected,
-                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, origin_rank(p), any ? 1 : 0, p['pkgbase']] }
+                  'dependents' => weight[p['pkgbase']],
+                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, -weight[p['pkgbase']],
+                             origin_rank(p), any ? 1 : 0, p['pkgbase']] }
         (built ? updates : backlog) << entry
       end
     end
@@ -353,11 +379,12 @@ module Archci
   end
 
   # The packages without a source package for their current commit, in claim
-  # order, as src jobs for the sourcer: like outstanding, less the
-  # dependencies (sources have none): the farm's own packages first, then
+  # order, as src jobs for the sourcer: like outstanding, less the waiting
+  # (sources have no dependencies): the farm's own packages first, then
   # those the sourcer has fetched before (their update) before the never
-  # fetched, then by origin and name. One src job per package at a time; a
-  # queued or failed one at the current commit is not offered again.
+  # fetched, then the package needed by the most others (its sources unblock
+  # the most builds), then by origin and name. One src job per package at a
+  # time; a queued or failed one at the current commit is not offered again.
   #   queued: include packages with a src job running or queued (for the counts)
   def self.outstanding_sources(queued: false)
     repo = config['ARCHCI_REPO']
@@ -367,13 +394,14 @@ module Archci
       jobs('running').each { |j| busy[[j['pkgbase'], j['commit']]] = true if j['arch'] == 'src' }
       %w[pending failed].each { |q| jobs(q).each { |j| busy[[j['pkgbase'], j['commit']]] = true if j['arch'] == 'src' } }
     end
+    weight = dependents
     candidates.filter_map do |p|
       _version, commit, = built_record(File.join(home, 'built', "#{repo}-src", p['pkgbase'])) || []
       next if commit == p['commit'] || busy[[p['pkgbase'], p['commit']]]
 
       { 'repo' => repo, 'arch' => 'src', 'pkgbase' => p['pkgbase'], 'version' => p['version'], 'commit' => p['commit'],
-        'profile' => p['profile'], 'prio' => commit ? 1 : 5, 'waiting' => [], 'expected' => false,
-        'rank' => [also.include?(p['pkgbase']) ? 0 : 1, commit ? 0 : 1, origin_rank(p), p['arches'] == ['any'] ? 1 : 0, p['pkgbase']] }
+        'profile' => p['profile'], 'prio' => commit ? 1 : 5, 'waiting' => [], 'expected' => false, 'dependents' => weight[p['pkgbase']],
+        'rank' => [also.include?(p['pkgbase']) ? 0 : 1, commit ? 0 : 1, -weight[p['pkgbase']], origin_rank(p), p['arches'] == ['any'] ? 1 : 0, p['pkgbase']] }
     end.sort_by { |e| e['rank'] }
   end
 

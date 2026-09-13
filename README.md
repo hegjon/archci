@@ -88,8 +88,11 @@ packages already in our repo before the never-built rest; within each of
 those, packages whose dependencies from this repository are all built
 before those still waiting for one (the index records each PKGBUILD's
 `depends`, `makedepends` and `checkdepends`, so a library goes before what
-links it), then Arch's core before extra before multilib, then local and
-AUR packages, alphabetically. A commit that changes a package directory without
+links it), then by the dependency graph, the package needed directly by the
+most others first (`archci next --graph` shows the order with each
+package's count and what it waits for),
+then Arch's core before extra before multilib, then local and AUR packages,
+alphabetically. A commit that changes a package directory without
 changing its version does not rebuild it, the same rule omarchy-pkgs' own
 pipeline follows; it does drop a pending or failed job for the older commit.
 `ARCHCI_PKG_SOURCES` restricts the farm to packages with a given `source`,

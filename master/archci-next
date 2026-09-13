@@ -8,12 +8,23 @@
 # when queue/pending holds nothing for the worker; safe to run by hand.
 # archci-next src -- the next package without a source package for its
 # commit, the same line, for the sourcer's claim.
+# archci-next --graph [ARCH] -- the outstanding packages in claim order with
+# what the dependency graph says of each: "<pkgbase> <arch> <dependents>
+# <waiting for, or -><!: a waited-for build is running or queued>", where
+# dependents is how many packages need it directly.
 # archci-next --waiting PKGBASE ARCH -- the dependencies from this repository
 # a job for PKGBASE on ARCH ("any" for an any package) still waits for, one
 # line, empty for none. Used by archci-housekeeping to hold a failed job's
 # retry until they are built.
 require_relative '../lib/archci'
 
+if ARGV[0] == '--graph'
+  list = ARGV[1] == 'src' ? Archci.outstanding_sources : Archci.outstanding(arch: ARGV[1])
+  list.each do |e|
+    puts [e['pkgbase'], e['arch'], e['dependents'], e['waiting'].empty? ? '-' : e['waiting'].join(',') + (e['expected'] ? '!' : '')].join(' ')
+  end
+  exit
+end
 if ARGV[0] == '--waiting'
   puts Archci.waiting_for(ARGV[1], ARGV[2]).join(' ')
   exit

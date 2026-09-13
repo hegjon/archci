@@ -77,7 +77,9 @@ mkdir -p "$tmp/home3"/{queue/{pending,running,done,failed},built,lock}
 ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 "$scan" >/dev/null 2>&1
 order=$(next3)
 # the clone's own arch packages (no arch_repo) sort after multilib and before local
-[[ $order == "archci zz-core aa-extra lib32-mul "*" bb-lib mm-local bb-aur aa-app(bb-lib)" ]] || fail "claim order wrong: $order"
+[[ $order == "archci bb-lib zz-core aa-extra lib32-mul "*" mm-local bb-aur aa-app(bb-lib)" ]] || fail "claim order wrong (bb-lib, needed by aa-app, goes before the leaves): $order"
+graph=$(ARCHCI_HOME=$tmp/home3 ARCHCI_PKGBUILDS_URL=file://$pkgs3 ARCHCI_PKG_ALSO=archci "$next" --graph x86_64)
+[[ $graph == "archci x86_64 0 -"$'\n'"bb-lib x86_64 1 -"* && $graph == *"aa-app x86_64 0 bb-lib" ]] || fail "archci-next --graph must show each package's dependents and what it waits for: $graph"
 echo "--- ARCHCI_PKG_REPOS: only the listed Arch repositories, ARCHCI_PKG_ALSO regardless; a queued job outside the filter waits"
 [[ $(ARCHCI_PKG_REPOS=core next3) == "archci zz-core" ]] || fail "ARCHCI_PKG_REPOS=core must leave the core packages and ARCHCI_PKG_ALSO: $(ARCHCI_PKG_REPOS=core next3)"
 [[ $(ARCHCI_PKG_REPOS="core multilib" next3) == "archci zz-core lib32-mul" ]] || fail "several repositories: $(ARCHCI_PKG_REPOS="core multilib" next3)"
