@@ -534,6 +534,20 @@ module Archci
     nil
   end
 
+  # the id of the src job that produced a build's source package: same pkgbase
+  # and version, arch src (one repo per master). Prefer the one that succeeded
+  # (done), then running, failed, pending; newest first. nil if pruned.
+  # (The id is <prio>-<ts>-<repo>,<pkgbase>,<version>,<arch>, so the glob
+  # matches on the ",<pkgbase>,<version>,src" suffix.)
+  def self.find_src_job(_repo, pkgbase, version)
+    %w[done running failed pending].each do |q|
+      paths = Dir.glob(File.join(queue(q), "*,#{pkgbase},#{version},src.job"))
+      best = paths.max_by { |p| File.mtime(p) } or next
+      return File.basename(best, '.job')
+    end
+    nil
+  end
+
   # every job the master holds, each with its queue as 'state', its package's
   # origin and its log path
   def self.all_jobs
