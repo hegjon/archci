@@ -11,7 +11,7 @@ source "$here/fixture.sh"
 id=$(claim_id worker-1 x86_64)
 [[ $id == *,acl,* ]] || fail "expected acl first: $id"
 upload_ok "$id" acl 1:2.3.2-1
-"$job" report "$id" success
+"$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/built/omarchy-x86_64/acl ]] || fail "acl not recorded built for x86_64"
 
 echo "--- multi-arch: workers claim by arch, any packages are pooled for every arch"
@@ -54,13 +54,13 @@ grep -q '^arch=aarch64$' <<<"$out" || fail "job arch"
 echo "--- a package uploaded for another arch fails the job"
 inc=$ARCHCI_HOME/incoming/$id
 echo log >"$inc/build.log"; mkpkg "$inc" acl 1:2.3.2-1 x86_64
-"$job" report "$id" success
+"$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "an aarch64 job uploading an x86_64 package must fail"
 "$job" retry "$id"
 id=$(claim_id arm-1 aarch64)
 [[ $id == *,acl,*,aarch64 ]] || fail "retry should be claimed first: $id"
 upload_ok "$id" acl 1:2.3.2-1 aarch64
-"$job" report "$id" success
+"$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "aarch64 job not done"
 [[ $(<"$ARCHCI_HOME/built/omarchy-aarch64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "aarch64 built record"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/aarch64/acl-1:2.3.2-1-aarch64.pkg.tar.zst.buildsig ]] || fail "aarch64 package not pooled with its buildsig"
@@ -77,7 +77,7 @@ id=$(claim_id arm-2 aarch64)
 id=$(claim_id worker-7 x86_64)
 [[ $id == 0-*-omarchy,archlinux-keyring,20260901-1,any ]] || fail "x86_64 worker should get the any job: $id"
 upload_ok "$id" archlinux-keyring 20260901-1 any
-"$job" report "$id" success
+"$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "any job not done"
 [[ $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring") == "20260901-1 $(pkgcommit archlinux-keyring) x86_64,aarch64" ]] || fail "any built record: $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring")"
 for a in x86_64 aarch64; do

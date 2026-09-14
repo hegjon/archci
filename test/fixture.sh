@@ -36,6 +36,7 @@ commit_pkgs() { git -C "$pkgs" add -A && git -C "$pkgs" -c user.name=t -c user.e
 pkgcommit() { git -C "$pkgs" log -1 --format=%H -- "pkgbuilds/$1"; }
 # claim_id WORKER ARCH [STAT...] -> the id of the job claimed, empty for none
 claim_id() { sed -n 's/^id=//p' < <("$job" claim "$@"); }
+owner() { sed -n 's/^worker=//p' "$ARCHCI_HOME/queue/running/$1.job"; }   # the worker a running job is claimed by
 # upload_ok ID NAME VERSION [ARCH] -- a successful build's upload: log, package, buildsig
 upload_ok() {
 	local inc=$ARCHCI_HOME/incoming/$1

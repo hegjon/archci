@@ -22,14 +22,14 @@ grep -q '^attempt=1$' <<<"$out" || fail "attempt should be 1"
 [[ -f $ARCHCI_HOME/queue/running/$id.job ]] || fail "job not in running/"
 
 echo "--- heartbeats carry the host's and the job's stats; archci-top shows them"
-"$job" heartbeat "$id"
-"$job" heartbeat "$id" load=1.50 mem=42 disk=61 cpus=4
+"$job" heartbeat "$id" "worker=$(owner "$id")"
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=1.50 mem=42 disk=61 cpus=4
 grep -q '^load=1.50$' "$ARCHCI_HOME/queue/running/$id.job" || fail "heartbeat stats not kept with the job"
-"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
 grep -q '^build=5242880$' "$ARCHCI_HOME/queue/running/$id.job" || fail "job stats not kept"
 (( $(grep -c '^load=' "$ARCHCI_HOME/queue/running/$id.job") == 1 )) || fail "heartbeat stats must be replaced, not appended"
 # shellcheck disable=SC2016  # a literal shell-looking stat, meant to be rejected
-! "$job" heartbeat "$id" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
+! "$job" heartbeat "$id" "worker=$(owner "$id")" 'load=$(rm -rf /)' 2>/dev/null || fail "a malformed stat must be refused"
 ! "$job" heartbeat "9-1-omarchy,nope,1-1,x86_64" 2>/dev/null || fail "heartbeat of unknown job must fail"
 me=$(cut -d. -f1 /proc/sys/kernel/hostname)
 "$top" | sed -n '/^HOST/{n;p}' | grep "^$me .*  -  *-  " >/dev/null || fail "the master itself must be the first host row, with - for workers and active: $("$top" | sed -n '/^HOST/{n;p}')"
@@ -37,16 +37,16 @@ me=$(cut -d. -f1 /proc/sys/kernel/hostname)
 # a second worker of the host says which archci it runs; a newer beat from
 # the first, which says nothing, must not hide that
 ARCHCI_PKG_SOURCES=nothing "$job" claim worker-2 x86_64 load=0.20 mem=40 disk=61 cpus=4 archci=0.3.19-1 | grep . >/dev/null && fail "worker-2's poll must get no job with no sources enabled"
-"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
 "$top" | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *1  0.3.19-1$" >/dev/null || fail "the archci version must come from whichever worker sent it: $("$top" | grep ^worker)"
 printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
 "$top" | grep "^unsigned: 2 pkg in staging (oldest 1m30s)$" >/dev/null || fail "archci-top must show the unsigned staging backlog from signer.status: $("$top" | grep ^unsigned)"
 "$top" | grep "^released: x86_64 63 pkg  aarch64 unreachable$" >/dev/null || fail "the released line must show the released databases per arch: $("$top" | grep ^released)"
-"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=104858 peak=204800 build=134217728
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=104858 peak=204800 build=134217728
 COLUMNS=200 "$top" | grep "  3.70  128G  102G  200G  -        arch     acl" >/dev/null || fail "memory from 100G up must keep five characters: $(COLUMNS=200 "$top" | grep worker-1)"
-"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880 phase=check
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880 phase=check
 COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  check    arch     acl 1:2.3.2-1 | -" >/dev/null || fail "the phase the worker sent must show: $(COLUMNS=200 "$top" | grep worker-1)"
-"$job" heartbeat "$id" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
 COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  -        arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" | grep worker-1)"
 
 echo "--- report success pools packages and their builder signatures"
@@ -55,7 +55,7 @@ echo "log" >"$inc/build.log"
 mkpkg "$inc" acl 1:2.3.2-1
 mkpkg "$inc" acl-debug 1:2.3.2-1
 : >"$inc/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig"   # carried through to the signer
-"$job" report "$id" success
+"$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
 grep -q '^heartbeat=20[0-9][0-9]-.*Z$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep when its last heartbeat arrived"
@@ -79,11 +79,11 @@ sid=$(claim_id sourcer src load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean ar
 "$top" | grep "^sourcer  *DigitalOcean  *src  *0.10  *30  *5  *1  *1  *1  0.4.13-1$" >/dev/null || fail "archci-top must list the sourcer host as one worker, one job active: $("$top" | grep ^sourcer)"
 inc=$ARCHCI_HOME/incoming/$sid
 echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"
-"$job" report "$sid" success
+"$job" report "$sid" success "$(owner "$sid")"
 [[ -f $ARCHCI_HOME/queue/failed/$sid.job ]] || fail "a source package without its builder signature is refused"
 "$job" retry "$sid" >/dev/null; sid=$(claim_id sourcer src); inc=$ARCHCI_HOME/incoming/$sid
 echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"; : >"$inc/acl-1:2.3.2-1.src.tar.gz.buildsig"
-"$job" report "$sid" success
+"$job" report "$sid" success "$(owner "$sid")"
 [[ $(<"$ARCHCI_HOME/built/omarchy-src/acl") == "1:2.3.2-1 $(pkgcommit acl) acl-1:2.3.2-1.src.tar.gz" ]] || fail "the src built record must name the file: $(<"$ARCHCI_HOME/built/omarchy-src/acl")"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz && -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz.buildsig && -e $ARCHCI_HOME/stage.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage"
 [[ -f $ARCHCI_HOME/logs/omarchy/acl/1:2.3.2-1/src/attempt-1.log ]] || fail "the fetch's log must be archived under the src arch"
@@ -91,11 +91,11 @@ echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"; : >"$inc/acl
 sid=$(claim_id sourcer src)
 inc=$ARCHCI_HOME/incoming/$sid
 echo fetched >"$inc/build.log"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz.buildsig"
-"$job" report "$sid" success
+"$job" report "$sid" success "$(owner "$sid")"
 sid=$(claim_id sourcer src)
 [[ $sid == *omarchy,linux,* ]] || fail "linux's sources are next: $sid"
 echo "==> ERROR: Failure while downloading https://example/linux.tar.xz" >"$ARCHCI_HOME/incoming/$sid/build.log"
-"$job" report "$sid" failure
+"$job" report "$sid" failure "$(owner "$sid")"
 [[ -f $ARCHCI_HOME/queue/failed/$sid.job ]] || fail "a failed fetch is a failed job"
 [[ -z $("$next" src) ]] || fail "a failed src job is not offered again before its retry: $("$next" src)"
 "$top" | grep "^sources: 2 packaged  1 to fetch  1 failed   (last fetch " >/dev/null || fail "top must show the sources' state: $("$top" | grep ^sources)"
@@ -108,19 +108,19 @@ echo "==> ERROR: Failure while downloading https://example/linux.tar.xz" >"$ARCH
 [[ $(ARCHCI_SOURCES_REQUIRED=1 "$next" x86_64) == "5 omarchy x86_64 libsigc++ "* ]] || fail "once released, the build is claimable: $(ARCHCI_SOURCES_REQUIRED=1 "$next" x86_64)"
 id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
 grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must not name a source package the signer has not released yet"
-"$job" report "$id" abandoned
+"$job" report "$id" abandoned "$(owner "$id")"
 # with archci-signer-status' listing of the release, the listing decides,
 # not the lag (the abandoned job waits in pending/, so the claim is what
 # shows it)
 mkdir -p "$ARCHCI_HOME/released"; : >"$ARCHCI_HOME/released/omarchy-src"
 id=$(claim_id worker-2 x86_64)
 grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must not name a source package the listing lacks, whatever its age"
-"$job" report "$id" abandoned
+"$job" report "$id" abandoned "$(owner "$id")"
 echo libsigc++-2.12.2-1.src.tar.gz >"$ARCHCI_HOME/released/omarchy-src"
 id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
 grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "listed as released, the claim names the source package at once: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
 (( $(grep -c '^sources=' "$ARCHCI_HOME/queue/running/$id.job") == 1 )) || fail "a claim after a requeue must name the source package once, not once per claim: $(grep '^sources=' "$ARCHCI_HOME/queue/running/$id.job")"
-"$job" report "$id" abandoned
+"$job" report "$id" abandoned "$(owner "$id")"
 rm -r "$ARCHCI_HOME/released"
 "$job" enqueue linux 0 src >/dev/null
 [[ $(claim_id sourcer src) == 0-*omarchy,linux,*,src ]] || fail "a package's sources can be enqueued by hand with ARCH=src"
@@ -128,9 +128,9 @@ rm -r "$ARCHCI_HOME/released"
 "$job" enqueue linux 0 x86_64 >/dev/null
 held=$(ARCHCI_SOURCES_REQUIRED=1 claim_id worker-2 x86_64)   # libsigc++'s retry, whose source package is released, may come instead
 [[ $held != *linux* ]] || fail "a queued build without a released source package must wait when sources are required: $held"
-[[ -z $held ]] || "$job" report "$held" abandoned
+[[ -z $held ]] || "$job" report "$held" abandoned "$(owner "$held")"
 [[ $(claim_id worker-2 x86_64) == 0-*omarchy,linux,*,x86_64 ]] || fail "without the requirement the queued build is claimed"
-for f in "$ARCHCI_HOME"/queue/running/*linux*x86_64.job; do id=${f##*/}; "$job" report "${id%.job}" abandoned; done; rm -f "$ARCHCI_HOME"/queue/pending/*linux*x86_64.job
+for f in "$ARCHCI_HOME"/queue/running/*linux*x86_64.job; do id=${f##*/}; "$job" report "${id%.job}" abandoned "$(owner "${id%.job}")"; done; rm -f "$ARCHCI_HOME"/queue/pending/*linux*x86_64.job
 echo "--- the network exemption: package.json \"network\": true reaches the job"
 mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch", "network": true}'
 commit_pkgs netpkg
@@ -140,7 +140,7 @@ commit_pkgs netpkg
 nid=$(claim_id worker-9 x86_64)
 [[ $nid == *omarchy,netpkg,* ]] || fail "the enqueued job is claimed first: $nid"
 grep -q '^network=full$' "$ARCHCI_HOME/queue/running/$nid.job" || fail "the job must carry network=full: $(cat "$ARCHCI_HOME/queue/running/$nid.job")"
-"$job" report "$nid" failure >/dev/null
+"$job" report "$nid" failure "$(owner "$nid")" >/dev/null
 grep -q '^network=full$' "$ARCHCI_HOME/queue/failed/$nid.job" || fail "a failure keeps the flag"
 mkpkgbuild loopy 1-1 x86_64 '{"source": "arch", "network": "loopback"}'
 commit_pkgs loopy; "$scan" >/dev/null 2>&1
@@ -148,13 +148,13 @@ commit_pkgs loopy; "$scan" >/dev/null 2>&1
 "$job" enqueue loopy 0 x86_64 >/dev/null
 lid=$(claim_id worker-9 x86_64)
 grep -q '^network=loopback$' "$ARCHCI_HOME/queue/running/$lid.job" || fail "the job must carry network=loopback: $(cat "$ARCHCI_HOME/queue/running/$lid.job")"
-"$job" report "$lid" abandoned >/dev/null; rm -rf "$ARCHCI_HOME"/queue/pending/*loopy* "$pkgs/pkgbuilds/loopy"
+"$job" report "$lid" abandoned "$(owner "$lid")" >/dev/null; rm -rf "$ARCHCI_HOME"/queue/pending/*loopy* "$pkgs/pkgbuilds/loopy"
 rm -rf "$ARCHCI_HOME"/queue/failed/*netpkg* "$pkgs/pkgbuilds/netpkg"; commit_pkgs "netpkg gone"; "$scan" >/dev/null 2>&1
 echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
 grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim must name the source package: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
-"$job" report "$id" failure
+"$job" report "$id" failure "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
 mkdir -p "$ARCHCI_HOME/logs/omarchy/libsigc++/2.12.2-1/x86_64"
 printf 'building\n==> ERROR: A failure occurred in build().\n' >"$ARCHCI_HOME/logs/omarchy/libsigc++/2.12.2-1/x86_64/attempt-1.log"
@@ -171,7 +171,7 @@ grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be fin
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "attempt kept across requeue"
 id2=$(claim_id worker-2 x86_64)
 [[ $id2 == "$id" ]] || fail "retry should be claimed first (prio 5 vs linux prio 5, older ts)"
-"$job" report "$id" failure
+"$job" report "$id" failure "$(owner "$id")"
 grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final after max attempts"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "final job must stay failed"
@@ -180,7 +180,7 @@ grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final
 echo "--- success reported with empty upload counts as failure"
 id=$(claim_id worker-3 x86_64)
 [[ $id == *linux* ]] || fail "expected linux, got $id"
-"$job" report "$id" success
+"$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "empty success must fail"
 
 echo "--- stale running job is requeued by housekeeping; abandoned does not count"
@@ -190,7 +190,7 @@ touch -d '1 hour ago' "$ARCHCI_HOME/queue/running/$id.job"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "stale job not requeued"
 id=$(claim_id worker-4 x86_64)
-"$job" report "$id" abandoned
+"$job" report "$id" abandoned "$(owner "$id")"
 grep -q '^attempt=1$' "$ARCHCI_HOME/queue/pending/$id.job" || fail "abandoned must not count an attempt"
 
 echo "--- a new commit of a package supersedes a pending job and a final failure"
@@ -253,7 +253,7 @@ touch -d '20 minutes ago' "$ARCHCI_HOME/hosts/idle-host-1"; sed -i "s/^seen=.*/s
 # the sourcer's idle claim (arch src) keeps its host in the table with no
 # worker, ahead of the workers; a malformed stat is refused
 out=$("$job" claim srcr src load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean archci=0.4.13-1)
-[[ -z $out ]] || "$job" report "$(sed -n 's/^id=//p' <<<"$out")" abandoned   # handed back: the host is idle again
+[[ -z $out ]] || "$job" report "$(sed -n 's/^id=//p' <<<"$out")" abandoned srcr   # handed back: the host is idle again
 "$top" | grep "^srcr  *DigitalOcean  *src  *0.10  *30  *5  *1  *1  *0  0.4.13-1$" >/dev/null || fail "archci-top must list the idle sourcer host as one worker: $("$top" | grep ^srcr)"
 order=$("$top" | sed -n '/^HOST/,/^$/p' | awk '/^srcr |^sourcer |^idle-host |^worker /{printf "%s ", $1}')
 [[ $order == "sourcer srcr worker " ]] || fail "the sourcers must come before the workers in the hosts table: $order"
@@ -273,6 +273,8 @@ tid=$(claim_id taken-1 x86_64)
 [[ $(claim_id taker-1 x86_64) == "$tid" ]] || fail "the retried job goes to the next claim"
 ! "$job" heartbeat "$tid" worker=taken-1 load=1 2>/dev/null || fail "the old worker's heartbeat must be refused"
 ! "$job" report "$tid" failure taken-1 2>/dev/null || fail "the old worker's report must be refused"
+! "$job" heartbeat "$tid" load=1 2>/dev/null || fail "a heartbeat that names no worker must be refused"
+! "$job" report "$tid" failure 2>/dev/null || fail "a report that names no worker must be refused"
 [[ -f $ARCHCI_HOME/queue/running/$tid.job ]] || fail "the job must still be running for its new worker"
 "$job" heartbeat "$tid" worker=taker-1 load=1 || fail "the new worker's heartbeat is taken"
 "$job" report "$tid" abandoned taker-1 || fail "the new worker's report is taken"

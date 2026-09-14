@@ -69,10 +69,10 @@ chmod +x "$tmp/fakessh-sourcer"
 ! "$tmp/fakessh" master claim worker-5 src >/dev/null 2>&1 || fail "a worker key must not claim src jobs"
 sid=$(sed -n 's/^id=//p' < <("$tmp/fakessh-sourcer" master claim srcr src))
 [[ $sid == *,src ]] || fail "the sourcer key must get a src job: $sid"
-"$tmp/fakessh-sourcer" master heartbeat "$sid" || fail "the sourcer key beats for its src job"
-"$tmp/fakessh-sourcer" master report "$sid" abandoned || fail "the sourcer key reports its src job"
+"$tmp/fakessh-sourcer" master heartbeat "$sid" worker=srcr || fail "the sourcer key beats for its src job"
+"$tmp/fakessh-sourcer" master report "$sid" abandoned srcr || fail "the sourcer key reports its src job"
 ! rsync -a -e "$tmp/fakessh" "$tmp/out/" "master:../escape/" 2>/dev/null || fail "rrsync must refuse paths outside incoming"
 ! "$tmp/fakessh" master housekeeping 2>/dev/null || fail "shell must refuse non-worker commands"
-"$tmp/fakessh" master report "$id" success
+"$tmp/fakessh" master report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "report through shell"
 echo "ALL OK"

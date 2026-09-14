@@ -173,8 +173,7 @@ for the job's commit and it is released, and is printed. The worker then:
    the network. The container is `archci-build-<arch>-<instance>-<pkgbase>`
    to `machinectl`, its scope under `archci.slice`, where the heartbeat
    reads its CPU and memory. The clean chroot is
-   `/var/lib/archbuild/<profile>-<arch>` (before 0.4.20 the build was
-   `makechrootpkg -c -l archci-N` there); devtools creates it as a
+   `/var/lib/archbuild/<profile>-<arch>`; devtools creates it as a
    btrfs subvolume and each build gets a fresh snapshot of it. The root is
    upgraded from the mirrors alone, every `ARCHCI_CHROOT_UPDATE_MINUTES`
    (10), with the farm's repository first in the copies' `pacman.conf` and
@@ -209,8 +208,8 @@ phase (makepkg's step, from the build's output), CPU, memory and build-tree
 size read from its cgroup; the master keeps them
 with the job for `archci top`. A job without a heartbeat for 30 minutes is
 put back in `pending/` by housekeeping (a 5-minute timer), so a worker can
-be destroyed at any time; a heartbeat or report names its worker, and one
-from a worker the job was since taken from is refused. On `systemctl stop`
+be destroyed at any time; a heartbeat or report names its worker, and the
+master refuses one from a worker the job was since taken from. On `systemctl stop`
 the worker reports `abandoned`, which requeues without counting an attempt.
 
 **Sourcer.** Sources are jobs of the arch `src`. `archci-sourcer` is a

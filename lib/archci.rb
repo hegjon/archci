@@ -198,8 +198,8 @@ module Archci
       h['building'] += 1 if running_now
       h['arch'] ||= (j['arch'] == 'any' ? any_arch : j['arch']) unless port
       h['vendor'] ||= j['vendor']   # constant for a host: any worker that sent it will do
-      # the archci version: from the newest beat that carries one (a worker
-      # still running older code sends none, and may well be the newest beat)
+      # the archci version: from the newest beat that carries one (an idle
+      # poll and a heartbeat both do; a finished job's record may not)
       if j['archci'] && beat && (h['archci_at'].nil? || beat > h['archci_at'])
         h['archci'] = j['archci']
         h['archci_at'] = beat
