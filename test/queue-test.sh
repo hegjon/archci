@@ -258,6 +258,18 @@ touch -d '2 days ago' "$ARCHCI_HOME/hosts/idle-host-1"
 "$housekeeping"
 [[ ! -e $ARCHCI_HOME/hosts/idle-host-1 ]] || fail "housekeeping must drop a poll older than a day"
 
+echo "--- a report or heartbeat from a worker the job was taken from is refused"
+tid=$(claim_id taken-1 x86_64)
+[[ -n $tid ]] || fail "taken-1 should have got a job"
+"$job" retry "$tid" >/dev/null                      # requeued while taken-1 still builds it
+[[ $(claim_id taker-1 x86_64) == "$tid" ]] || fail "the retried job goes to the next claim"
+! "$job" heartbeat "$tid" worker=taken-1 load=1 2>/dev/null || fail "the old worker's heartbeat must be refused"
+! "$job" report "$tid" failure taken-1 2>/dev/null || fail "the old worker's report must be refused"
+[[ -f $ARCHCI_HOME/queue/running/$tid.job ]] || fail "the job must still be running for its new worker"
+"$job" heartbeat "$tid" worker=taker-1 load=1 || fail "the new worker's heartbeat is taken"
+"$job" report "$tid" abandoned taker-1 || fail "the new worker's report is taken"
+[[ -f $ARCHCI_HOME/queue/pending/$tid.job ]] || fail "abandoned by its worker: back in pending/"
+rm -f "$ARCHCI_HOME/queue/pending/$tid.job"
 echo "--- a claim from a worker whose job is still running hands that job back"
 id=$(claim_id dup-1 x86_64)
 [[ -n $id ]] || fail "dup-1 should have got a pending job"

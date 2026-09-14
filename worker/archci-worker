@@ -50,7 +50,7 @@ on_term() {
 	[[ -n $unit ]] && systemctl stop "$unit.service" 2>/dev/null || true
 	if [[ -n $job_id && $reported == 0 ]]; then
 		archci_log "shutting down, handing $job_id back to the master"
-		archci_master report "$job_id" abandoned || true
+		archci_master report "$job_id" abandoned "$worker" || true
 	fi
 	exit 0   # a stop is not a failure: the unit ends inactive, not failed
 }
@@ -98,7 +98,7 @@ while true; do
 			jobstats=$(archci_job_stats "$jobdir" "$unit")
 			wait=$(( ${#jobstats} ? ARCHCI_HEARTBEAT_SECONDS : 10 ))
 			# shellcheck disable=SC2046,SC2086  # the stats are separate key=value words on purpose
-			if archci_master heartbeat "$job_id" $(archci_worker_stats) $jobstats; then
+			if archci_master heartbeat "$job_id" "worker=$worker" $(archci_worker_stats) $jobstats; then
 				(( hb_down )) && archci_log "heartbeat for $job_id reaches the master again"
 				hb_down=0
 			else
@@ -123,7 +123,7 @@ while true; do
 	unit=
 
 	# the results to the master (kept and retried while it is away)
-	archci_deliver "$job_id" "$outdir" "$status" && reported=1
+	archci_deliver "$job_id" "$outdir" "$status" "$worker" && reported=1
 	rm -rf "$jobdir"
 	job_id=
 done

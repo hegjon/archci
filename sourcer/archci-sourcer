@@ -293,7 +293,7 @@ on_term() {
 	[[ -n $machine ]] && archci_container_stop "$machine"
 	if [[ -n $job_id && $reported == 0 ]]; then
 		archci_log "shutting down, handing $job_id back to the master"
-		archci_master report "$job_id" abandoned || true
+		archci_master report "$job_id" abandoned "$me" || true
 	fi
 	exit 0
 }
@@ -328,7 +328,7 @@ while true; do
 				[[ -n $s ]] && jobstats=$s
 			fi
 			# shellcheck disable=SC2046,SC2086  # the stats are separate key=value words on purpose
-			archci_master heartbeat "$job_id" $(archci_worker_stats "$home") $jobstats >/dev/null 2>&1 || true
+			archci_master heartbeat "$job_id" "worker=$me" $(archci_worker_stats "$home") $jobstats >/dev/null 2>&1 || true
 		done
 	) &
 	heartbeat=$!
@@ -341,7 +341,7 @@ while true; do
 	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min: $(tail -n 1 "$jobdir/out/build.log" 2>/dev/null | cut -c1-160)"
 
 	# the results to the master (kept and retried while it is away)
-	archci_deliver "$job_id" "$jobdir/out" "$status" && reported=1
+	archci_deliver "$job_id" "$jobdir/out" "$status" "$me" && reported=1
 	rm -rf "$jobdir"
 	job_id=
 done

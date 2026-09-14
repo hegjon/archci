@@ -691,8 +691,9 @@ archci_claim() {
 	return 1
 }
 
-# archci_deliver ID DIR STATUS -- upload DIR, the job's results, into the
-# master's incoming/ID/ and report STATUS. While the master is unreachable
+# archci_deliver ID DIR STATUS WORKER -- upload DIR, the job's results, into
+# the master's incoming/ID/ and report STATUS as WORKER (a job requeued and
+# claimed elsewhere meanwhile refuses it). While the master is unreachable
 # (a reboot, a night, a weekend) the results are kept and retried every
 # ARCHCI_DELIVERY_RETRY_SECONDS for as long as it takes; a heartbeat first
 # keeps the master's housekeeping from requeueing the job as stale when it
@@ -701,10 +702,10 @@ archci_claim() {
 # by housekeeping, or re-claimed elsewhere), and only then are the results
 # dropped. 0: reported; 1: dropped.
 archci_deliver() {
-	local id=$1 dir=$2 status=$3 uploaded=0 try=0 rc
+	local id=$1 dir=$2 status=$3 who=$4 uploaded=0 try=0 rc
 	while true; do
 		(( ++try ))
-		rc=0; archci_master heartbeat "$id" phase=upload || rc=$?
+		rc=0; archci_master heartbeat "$id" "worker=$who" phase=upload || rc=$?
 		if (( rc == 255 )); then
 			(( try == 1 )) && archci_log "master unreachable, keeping $id's results until it is back"
 			sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
@@ -719,7 +720,7 @@ archci_deliver() {
 				sleep "$ARCHCI_DELIVERY_RETRY_SECONDS"; continue
 			fi
 		fi
-		rc=0; archci_master report "$id" "$status" || rc=$?
+		rc=0; archci_master report "$id" "$status" "$who" || rc=$?
 		if (( rc == 0 )); then
 			(( try > 1 )) && archci_log "$id delivered after $try tries"
 			return 0
