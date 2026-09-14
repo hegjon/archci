@@ -169,13 +169,10 @@ module Archci
   end
 
   # One entry per host seen among RUNNING and RECENT jobs and the workers'
-  # POLLS (hosts/<worker>, written by every claim and by archci-job poll),
-  # from the newest stats any of its workers sent: a running job's heartbeat,
-  # an idle worker's poll, or the last beat a finished job kept. A worker
-  # whose last poll is older than POLL_TTL is gone. The native arch is what a
-  # worker without an arch in its name builds ("any" jobs are the any
-  # arch's). The sourcer claims and runs src jobs: a worker of the src arch,
-  # counted as one. Order: the master, the sourcers, then the workers by name.
+  # POLLS (hosts/<worker>), from the newest stats any of its workers sent; a
+  # host whose last poll is older than POLL_TTL is dropped. Its arch is what a
+  # worker without one in its name builds; the sourcer is a worker of arch src.
+  # Order: the master, the sourcers, then the workers by name.
   POLL_TTL = 600
 
   def self.hosts(running, recent, polls, now)
@@ -252,14 +249,10 @@ module Archci
     end
   end
 
-  # The dependency graph over the candidates, for the claim order: each
-  # package's weight is how many packages need it directly, so what
-  # unblocks the most builds goes first. Direct, not transitive: through
-  # makedepends and checkdepends the graph is one big tangle of cycles, and
-  # a transitive count puts a third of the packages at "everything".
-  # Dependencies are matched by the names the packages provide as pkgname
-  # (the index records depends, makedepends and checkdepends); a dependency
-  # on a name only `provides` gives is not seen.
+  # The dependency graph over the candidates: each package's weight is how many
+  # need it directly (direct, not transitive -- makedepends/checkdepends make a
+  # transitive count one big cycle). Dependencies match the names packages
+  # provide as pkgname; one on a `provides`-only name is not seen.
   #   -> { pkgbase => weight }
   def self.dependents
     return @dependents[1] if @dependents && @dependents[0].equal?(packages)
@@ -274,29 +267,12 @@ module Archci
     weights
   end
 
-  # Packages whose PKGBUILD version is not the one we last built, in claim
-  # order: the farm's own packages (ARCHCI_PKG_ALSO, i.e. archci) first, then
-  # packages whose dependencies from this repository are all built, at their
-  # current version, before those still waiting for one (so a library goes
-  # before what links it, and a build is not tried before it can succeed:
-  # an update waiting for a library's update comes after the whole backlog);
-  # within those, updates of packages we already publish before the
-  # never-built backlog; then by the dependency graph, the package needed by
-  # the most others first (dependents, direct); then by
-  # origin: Arch's core, then extra, then multilib, then the repository's
-  # local packages, then those from the AUR; an arch's own packages before
-  # the any packages; alphabetically last.
-  # An entry whose waited-for dependency has a job running or queued (a
-  # retry pending too) is 'expected': claim (archci-next) passes it over,
-  # since the build would only fail before the dependency lands; one whose
-  # dependency is merely unbuilt is claimed once nothing better is left,
-  # so a dependency cycle still gets its builds tried.
-  # Nothing is stored; this is computed from the package index, built/ and the
-  # queue on every call.
-  #   arch:   only jobs a worker of this arch may build (its own, plus "any" if
-  #           it is ARCHCI_ANY_ARCH); nil for every enabled arch
-  #   limit:  return only this many candidates
-  #   queued: include packages with a job running or queued (for waiting_for)
+  # Packages whose PKGBUILD version is not the one last built, in claim order:
+  # ALSO first; deps-built before still-waiting; updates before never-built; then
+  # by dependency graph, origin (core/extra/multilib/local/aur), own-arch, name.
+  # A package waiting on a running/queued dep is 'expected' and passed over; one
+  # on an unbuilt dep is claimed last, so cycles build. arch: jobs this worker may
+  # build (nil=all); limit: cap; queued: count running/queued too (waiting_for).
   def self.outstanding(arch: nil, limit: nil, queued: false)
     cfg = config
     repo = cfg['ARCHCI_REPO']
@@ -317,26 +293,18 @@ module Archci
     sources_required = cfg['ARCHCI_SOURCES_REQUIRED'] != '0'
     candidates = self.candidates
 
-    # An arch-independent package is one job, for workers of the any arch,
-    # and is pooled for every arch; those come after the arch's own packages.
-    # Anything else is offered to every enabled arch that its arch array
-    # lists, and Arch's own packages (source arch, which list x86_64 only by
-    # convention) to a port arch too, built with --ignorearch
-    # (ARCHCI_IGNOREARCH; archci-build passes it on a port arch); an AUR or
-    # local package lists the arches it has binaries or a port for.
+    # An "any" package is one job for the any arch, pooled to every arch, after
+    # the arch's own. Everything else goes to each enabled arch its array
+    # lists, and Arch's x86_64-only packages to port arches too with
+    # --ignorearch (ARCHCI_IGNOREARCH); AUR/local packages only where listed.
     per_arch, any_pkgs = candidates.partition { |p| p['arches'] != ['any'] }
     # which pkgbase of this repository provides each name a dependency may use
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
-    # a dependency is met once its pkgbase is built at its current version
-    # for the arch, or as an any package (built at an older one, its update
-    # is waited for: the dependent's new version usually needs it), and the
-    # signer has released it (released?: one of its packages at that version
-    # in the dependent's arch's released database, every arch's holds the
-    # any packages; the chroot installs from the release); one that gave up
-    # at its current commit is not waited for (the chroot falls back on the
-    # mirrors' copy, if any). The built names come from one listing per
-    # arch, the versions from the built records (cached): the check runs
-    # for every dependency of every package on every archci top frame.
+    # a dependency is met once its pkgbase is built at its current version for
+    # the arch (or as an any package) and the signer has released it
+    # (released?: in the arch's released database, from which the chroot
+    # installs); one that gave up at its commit is not waited for. Built names
+    # come from one listing per arch, versions from the cached built records.
     by_base = candidates.to_h { |p| [p['pkgbase'], p] }
     weight = dependents
     built_names = Hash.new do |h, a|
@@ -409,14 +377,11 @@ module Archci
     end
   end
 
-  # The packages without a source package for their current commit, in claim
-  # order, as src jobs for the sourcer: like outstanding, less the waiting
-  # (sources have no dependencies): the farm's own packages first, then
-  # those the sourcer has fetched before (their update) before the never
-  # fetched, then the package needed by the most others (its sources unblock
-  # the most builds), then by origin and name. One src job per package at a
-  # time; a queued or failed one at the current commit is not offered again.
-  #   queued: include packages with a src job running or queued (for the counts)
+  # Packages without a source package for their current commit, in claim order,
+  # as src jobs: like outstanding but without the waiting (sources have no
+  # deps) -- ALSO first, then re-fetches before never-fetched, then by graph,
+  # origin, name. One src job per package; a queued or failed one at the commit
+  # is not re-offered.  queued: include running/queued src jobs (for the counts).
   def self.outstanding_sources(queued: false)
     repo = config['ARCHCI_REPO']
     also = config['ARCHCI_PKG_ALSO'].to_s.split
