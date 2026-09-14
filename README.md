@@ -8,12 +8,29 @@ btrfs-snapshotted chroots with devtools, and a separate signer verifies,
 signs, and publishes the pacman repository to Cloudflare R2. The master holds
 no signing key.
 
-The PKGBUILD repository is the manifest: what gets built is exactly what is
-merged there, at the commit the master saw. Packages carried from Arch Linux
-itself (`source: arch` in omarchy-pkgs, refreshed by its `bin/sync-arch`),
-from the AUR, or written locally all look the same to the farm. The
-repository URL is one config line (`ARCHCI_PKGBUILDS_URL`), so moving from
-one fork to another, say to `omacom/omarchy-pkgs`, is a config change.
+The PKGBUILD repository is a Git repository with the structure of
+[omacom/omarchy-pkgs](https://github.com/omacom/omarchy-pkgs): one
+directory per package under `pkgbuilds/`, holding the `PKGBUILD` and a
+`.omarchy/package.json` beside it. archci needs nothing else of the
+repository, and reads these keys of that file:
+
+- `source`: `arch` for a package carried from Arch Linux (refreshed by the
+  repository's `bin/sync-arch`), `aur`, or `local` for one written there;
+  they all look the same to the farm, and `ARCHCI_PKG_SOURCES` can limit
+  the farm to some of them
+- `arch_repo`: the Arch repository the package comes from, `core`, `extra`
+  or `multilib`; `ARCHCI_PKG_REPOS` filters on it, and `multilib` picks the
+  devtools profile
+- `skip_build`: `true` leaves the package out
+- `network`: archci's own, `"loopback"` or `"full"`, for the few builds that
+  cannot run without the network (see "How it works"); absent otherwise
+
+The repository is the manifest: what gets built is exactly what is merged
+there, at the commit the master saw, and a package's version is what its
+PKGBUILD declares. The URL and branch are one config line each
+(`ARCHCI_PKGBUILDS_URL`, `ARCHCI_PKGBUILDS_BRANCH`), so any repository with
+that structure works, and moving from one fork to another, say from
+`hegjon/omarchy-pkgs` to `omacom/omarchy-pkgs`, is a config change.
 
 
 > **Status: prototype.** This runs end to end but is not production-hardened.
