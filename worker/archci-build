@@ -382,7 +382,8 @@ elif ! archci_firewall; then
 	build_slice=archci-online
 	echo "==> WARNING: the firewall could not be set up (see above); building with the network"
 fi
-machine=$(archci_machine_name archci-build "$job_pkgbase")
+# unique on the host: the arch and instance this worker is, then the package
+machine=$(archci_machine_name "archci-build-$ARCHCI_ARCH-$instance" "$job_pkgbase")
 printf '%s\n' "$machine" >"$jobdir/machine"   # for the worker's per-job heartbeat stats
 container=(arch-nspawn -c "$cachedir" "$copydir" --machine="$machine"
 	--bind="$srcdir:/startdir" --bind="$SRCDEST:/srcdest" --bind="$outdir:/pkgdest" --bind="$outdir:/logdest" --bind="$outdir:/srcpkgdest"

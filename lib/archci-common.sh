@@ -585,9 +585,11 @@ archci_srcpkg_add_vendor() {
 # network, loopback included. nspawn names the container's scope
 # <machine>.<pid>.scope under the slice.
 # archci_container_cgroup MACHINE -> the scope's cgroup path, empty for none
+# (nspawn names the scope <machine>.scope; a machine name is a host's one
+# container at a time, so archci-build makes it unique per worker instance)
 archci_container_cgroup() {
 	local c
-	for c in /sys/fs/cgroup/archci.slice/*/"$1".*.scope; do [[ -d $c ]] && { printf '%s\n' "$c"; return 0; }; done
+	for c in /sys/fs/cgroup/archci.slice/*/"$1".scope /sys/fs/cgroup/archci.slice/*/"$1".*.scope; do [[ -d $c ]] && { printf '%s\n' "$c"; return 0; }; done
 	return 0
 }
 # archci_container_stop MACHINE -- stop the container's scope, if it runs
@@ -597,7 +599,8 @@ archci_container_stop() {
 	[[ -n $cg ]] && systemctl stop "${cg##*/}" 2>/dev/null || true
 }
 # archci_machine_name PREFIX NAME -> a machine name (a hostname: 64 characters
-# of letters, digits and dashes) for the container of NAME
+# of letters, digits and dashes) for the container of NAME; the prefix must
+# make it unique among a host's containers (nspawn refuses a second of a name)
 archci_machine_name() { printf '%s-%s' "$1" "$(printf '%s' "$2" | tr -c 'A-Za-z0-9-' '-' | cut -c1-$(( 63 - ${#1} )))"; }
 
 # archci_chroot_copy ROOT COPY -- a fresh copy of the clean chroot ROOT at
