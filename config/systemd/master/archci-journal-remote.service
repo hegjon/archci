@@ -10,6 +10,7 @@ Description=archci: the workers' journals, received from their ssh tunnels
 Documentation=man:systemd-journal-remote(8) man:journal-remote.conf(5)
 # the workers reach it through sshd only
 Wants=sshd.service
+PartOf=archci-master.target
 After=network.target sshd.service
 
 [Service]

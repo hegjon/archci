@@ -1,5 +1,6 @@
 [Unit]
 Description=archci: sync the PKGBUILD repository every 10 minutes
+PartOf=archci-master.target
 
 [Timer]
 OnBootSec=2min

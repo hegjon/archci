@@ -80,7 +80,7 @@ package_archci-master() {
   conflicts=(archci-signer)
   optdepends=('libmicrohttpd: receive worker journals with systemd-journal-remote')
 
-  _install_role master archci-scan.service archci-scan.timer \
+  _install_role master archci-master.target archci-scan.service archci-scan.timer \
     archci-housekeeping.service archci-housekeeping.timer archci-stage.service archci-stage.timer \
     archci-signer-status.service archci-signer-status.timer
   _install_cli master

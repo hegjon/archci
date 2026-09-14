@@ -1,5 +1,6 @@
 [Unit]
 Description=archci: refresh the signer status every 2 minutes
+PartOf=archci-master.target
 
 [Timer]
 OnBootSec=2min

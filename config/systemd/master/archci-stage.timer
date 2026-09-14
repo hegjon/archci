@@ -1,5 +1,6 @@
 [Unit]
 Description=archci: stage packages every 2 minutes
+PartOf=archci-master.target
 
 [Timer]
 OnBootSec=3min

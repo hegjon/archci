@@ -354,8 +354,8 @@ arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
   archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
-  systemd/  archci.sysusers, then one folder per role: master/ (units, timers,
-            the journal receiver and its conf, tmpfiles), worker/ (units, tmpfiles),
+  systemd/  archci.sysusers, then one folder per role: master/ (the archci-master.target
+            that is the role, its units, timers, the journal receiver and its conf, tmpfiles), worker/ (units, tmpfiles),
             signer/ (units, timers, tmpfiles), sourcer/ (unit, timer, tmpfiles),
             remote-logging/ (the journal tunnel and namespace, the upload drop-in)
   ssh/      sshd_config.d/60-archci.conf: worker keys from /etc/archci/authorized_keys
@@ -460,9 +460,16 @@ template does this).
 
 ```
 pacman -S archci-master
-systemctl enable --now archci-scan.timer archci-housekeeping.timer archci-stage.timer archci-signer-status.timer
-systemctl enable --now sshd archci-journal-remote    # workers come in over ssh; their journals
+systemctl enable --now archci-master.target
 ```
+
+The target is the role: it starts the master's timers (`archci-scan`,
+`archci-housekeeping`, `archci-stage`, `archci-signer-status`), the
+receiver for the workers' journals (`archci-journal-remote`) and sshd,
+which the workers come in over, and has them start at boot; stopping it
+stops them all, disabling it keeps them from starting at boot. Each can
+still be enabled or stopped on its own (`systemctl stop archci-scan.timer`
+pauses the sync alone).
 
 The package creates the `archci` user and the state directories under
 `/var/lib/archci`, on btrfs. Make `repo` and `incoming` there subvolumes.

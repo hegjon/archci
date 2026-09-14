@@ -1,5 +1,6 @@
 [Unit]
 Description=archci: queue housekeeping every 5 minutes
+PartOf=archci-master.target
 
 [Timer]
 OnBootSec=5min
