@@ -151,7 +151,7 @@ prepare_root() {
 		# cache of its own, to what the host has installed (pacman -Sc)
 		if (( ARCHCI_CACHE_KEEP > 0 )); then
 			archci_prune_cache "$cachedir" "$ARCHCI_CACHE_KEEP"
-			if ! pacman-conf CacheDir | grep -qx "$cachedir"; then
+			if ! grep -qx "$cachedir" <<<"$(pacman-conf CacheDir)"; then
 				pacman -Sc --noconfirm >/dev/null 2>&1 || true
 			else
 				while IFS= read -r d; do archci_prune_cache "$d" "$ARCHCI_CACHE_KEEP"; done < <(pacman-conf CacheDir)

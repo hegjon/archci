@@ -43,8 +43,9 @@ for k in rust go npm pip maven; do archci_vendor_supported "$k" || fail "$k is s
 echo "--- archci_firewall: the table for the offline slice (needs nft and root; skipped without)"
 if command -v nft >/dev/null && [[ $EUID == 0 ]]; then
 	archci_firewall || fail "archci_firewall must install its table"
-	nft list table inet archci | grep -q 'archci.slice/archci-offline.slice" counter reject' || fail "the offline slice must reach nothing"
-	nft list table inet archci | grep -q 'archci.slice/archci-loopback.slice" oifname != "lo"' || fail "the loopback slice must reach loopback only"
+	table=$(nft list table inet archci)
+	grep -q 'archci.slice/archci-offline.slice" counter reject' <<<"$table" || fail "the offline slice must reach nothing"
+	grep -q 'archci.slice/archci-loopback.slice" oifname != "lo"' <<<"$table" || fail "the loopback slice must reach loopback only"
 	nft delete table inet archci
 else
 	echo "(not root, or no nft: skipped)"
@@ -59,7 +60,9 @@ mkdir -p "$tmp/pkg/hello" "$tmp/vendor/rust/registry/cache"
 echo pkg >"$tmp/pkg/hello/PKGBUILD"; echo crate >"$tmp/vendor/rust/registry/cache/serde-1.0.crate"
 tar -czf "$tmp/hello-1-1.src.tar.gz" -C "$tmp/pkg" hello
 archci_srcpkg_add_vendor "$tmp/hello-1-1.src.tar.gz" hello "$tmp/vendor" || fail "adding vendor/ failed"
-tar -tzf "$tmp/hello-1-1.src.tar.gz" | grep -qx "hello/vendor/rust/registry/cache/serde-1.0.crate" || fail "the crate must sit under hello/vendor/rust: $(tar -tzf "$tmp/hello-1-1.src.tar.gz")"
-tar -tzf "$tmp/hello-1-1.src.tar.gz" | grep -qx "hello/PKGBUILD" || fail "the PKGBUILD must still be there"
+# (into a variable first: a pipe into grep -q ends with tar's SIGPIPE under pipefail when grep quits at the first entry)
+entries=$(tar -tzf "$tmp/hello-1-1.src.tar.gz")
+grep -qx "hello/vendor/rust/registry/cache/serde-1.0.crate" <<<"$entries" || fail "the crate must sit under hello/vendor/rust: $entries"
+grep -qx "hello/PKGBUILD" <<<"$entries" || fail "the PKGBUILD must still be there: $entries"
 [[ ! -e $tmp/hello-1-1.src.tar.gz.tar ]] || fail "the plain tar must be cleaned up"
 echo "ALL OK"

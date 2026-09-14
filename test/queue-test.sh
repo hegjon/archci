@@ -163,7 +163,8 @@ out=$("$master/archci-jobs")
 grep -q "^libsigc++ 2.12.2-1 " <<<"$out" || fail "archci jobs must list the package as a tree root: $out"
 grep -q "^  ._ x86_64  *failed  *worker-2  *1/2 .*: ==> ERROR: A failure occurred in build()" <<<"$out" || fail "archci jobs must list the failed job under it with its first error line: $out"
 [[ $("$master/archci-jobs" failed libsigc | grep -c "_ ") == 1 && -z $("$master/archci-jobs" failed nosuchpkg) ]] || fail "archci jobs must filter by words: $("$master/archci-jobs" failed libsigc)"
-"$master/archci-jobs" 'done' acl | grep -q "^  ._ x86_64  *done  " || fail "archci jobs must list done jobs too: $("$master/archci-jobs" 'done' acl)"
+listing=$("$master/archci-jobs" 'done' acl)
+grep -q "^  ._ x86_64  *done  " <<<"$listing" || fail "archci jobs must list done jobs too: $("$master/archci-jobs" 'done' acl)"
 grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be final yet"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "housekeeping should have requeued"
