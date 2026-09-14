@@ -83,202 +83,76 @@ flowchart LR
 
 ## How it works
 
-**Scanning.** `archci-scan` (ruby, every 2 min) pulls the PKGBUILD
-repository (`ARCHCI_PKGBUILDS_URL`, branch `ARCHCI_PKGBUILDS_BRANCH`) into
-`pkgbuilds/` and refreshes the package index. `archci-pkgindex` builds that index
-from every `pkgbuilds/<name>/` holding a PKGBUILD and `.omarchy/package.json`:
-the version the PKGBUILD declares (read the way makepkg does, by sourcing it
-at file scope with `CARCH` set), the last commit that touched the directory,
-its `arch` array, the devtools profile (`multilib` for `arch_repo: multilib`
-or a `lib32-` name, else `extra`), the package's `source`, and whether
-`skip_build` is set. The index is cached per clone HEAD, so a claim reads
-one file, and each directory's line by its git tree hash (in
-`/var/cache/archci/pkgbuilds.cache`), so a new commit re-reads only the PKGBUILDs
-it touched. The backlog is never written down: when a worker asks for work,
-`archci next <arch>` walks the index and compares each package's version with
-`built/<repo>-<arch>/<name>` (`version commit` of the last successful build;
-for an `any` package also the arches it was pooled for, so enabling an arch
-later makes those packages outstanding again),
-skipping packages that are running, queued, waiting for a retry or given up
-on. The farm's own packages (`ARCHCI_PKG_ALSO`) come first, then updates to
-packages already in our repo before the never-built rest; within each of
-those, packages whose dependencies from this repository are all built
-before those still waiting for one (the index records each PKGBUILD's
-`depends`, `makedepends` and `checkdepends`, so a library goes before what
-links it), then by the dependency graph, the package needed directly by the
-most others first (`archci next --graph` shows the order with each
-package's count and what it waits for),
-then Arch's core before extra before multilib, then local and AUR packages,
-alphabetically. A commit that changes a package directory without
-changing its version does not rebuild it, the same rule omarchy-pkgs' own
-pipeline follows; it does drop a pending or failed job for the older commit.
-`ARCHCI_PKG_SOURCES` restricts the farm to packages with a given `source`,
-for example `arch` for those carried from Arch Linux, and `ARCHCI_PKG_REPOS`
-to those of given Arch repositories, for example `core`; `ARCHCI_PKG_ALSO`
-names packages built regardless, such as archci itself. A filter set while
-jobs wait in `pending/` holds those too, until it is lifted.
+Each role is a short script run by a systemd timer or unit; there is no
+daemon and no central database, only the job files moving through the queue.
 
-**Architectures.** `ARCHCI_ARCHES` on the master lists the arches it builds
-(default `x86_64`); each worker sends its own `ARCHCI_ARCH` with every claim
-and only gets jobs for it. A package whose PKGBUILD says `arch=(any)` is one
-job, given to workers of `ARCHCI_ANY_ARCH` (default: the first arch listed),
-and the resulting package is pooled into every arch's directory, because
-pacman fetches all packages from the client's own `$repo/os/$arch`. Every
-other package is offered to the enabled arches its arch array lists; Arch's
-own PKGBUILDs, which list x86_64 only, a port arch builds anyway with
-`--ignorearch` (see [docs/ports.md](docs/ports.md)), unless
-`ARCHCI_IGNOREARCH=0` limits it to packages that list the arch. An AUR or
-local package is built only where its arch array says.
+**Scanning.** Every couple of minutes the master pulls the PKGBUILD
+repository and refreshes an index of every package: the version its PKGBUILD
+declares, the commit that last touched it, its architectures, and the keys
+from `.omarchy/package.json`. A package is outstanding when the version in
+the repository is not the one last built. The backlog is never stored; when
+a worker asks for work the master picks the next outstanding package just in
+time. The order puts the farm's own packages first, then updates to packages
+already published, then the never-built rest, and within each of those a
+library before what links it (by the dependency graph) and Arch's core
+before extra. `ARCHCI_PKG_SOURCES` and `ARCHCI_PKG_REPOS` narrow what is
+built. A commit that changes a package without changing its version does not
+rebuild it.
 
-**Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>` every
-`ARCHCI_IDLE_SLEEP` (30 s) while idle, with the host's load, memory, disk and
-vendor, which the master keeps
-per worker for `archci top` while the worker is idle. The
-master's forced command (`archci-shell`) takes the first file in
-`queue/pending/` (manual enqueues and retries) the worker's arch can build,
-or else asks `archci next` for the next outstanding package and writes a job
-for it. The job goes to `running/` stamped with the worker name and attempt,
-and with the source package's name (`sources=`) when the sourcer has made one
-for the job's commit and it is released, and is printed. The worker then:
+**Architectures.** `ARCHCI_ARCHES` lists the arches the farm builds. Each
+worker builds one arch and only claims jobs for it. An `arch=(any)` package
+is built once and pooled into every arch. Arch's own PKGBUILDs list x86_64
+only, so a port arch builds them under emulation with `--ignorearch`; AUR
+and local packages build only where their arch array says (see
+[docs/ports.md](docs/ports.md)).
 
-1. takes the source package from the release (`<repo>/os/src/`), checks its
-   release signature, and has the PKGBUILD directory with every source in
-   it, verified by the sourcer, and the dependencies its prepare() fetches
-   from cargo, go, npm, pip or maven, captured there (`vendor/`), and
-   builds with `--holdver` (VCS sources come as snapshots); or, with no
-   source package or no store configured, exports `pkgbuilds/<name>/` from
-   the PKGBUILD repository at exactly the job's commit (`git archive` out of
-   a bare mirror the worker keeps) and lets makepkg fetch upstream,
-2. starts `archci-build@<repo>-<pkgbase>-<version>-a<attempt>.service`, a
-   oneshot template unit, with a blocking `systemctl start`. The build has its
-   own unit, cgroup and journal, runs at low CPU and I/O priority (`Nice=15`,
-   inherited by everything inside the chroot, so sshd and the worker loop
-   stay responsive on a busy build machine), and the unit's `TimeoutStartSec` (48 h, change
-   with `systemctl edit archci-build@.service`) is the ceiling. A build whose
-   output stops for `ARCHCI_BUILD_MAX_IDLE_MINUTES` (90) is killed long before
-   that: a hung test suite otherwise holds the worker for the whole 48 h, while
-   an emulated build that keeps compiling (emacs took over 12 h) is left alone,
-3. inside that unit, builds in a fresh snapshot of the clean chroot, entered
-   with `arch-nspawn` twice: once with the network, in the `archci-online`
-   slice, to install the dependencies (makepkg up to "sources are ready"),
-   then in `archci-offline`, where an nftables table of archci's own lets
-   nothing out, loopback included, to build: the sources sit in the source
-   package or were verified on the host, and what the sourcer vendored
-   replays from it, the ecosystem told to fetch nothing. A package whose build
-   talks to itself, a test suite with a server, gets `"network":
-   "loopback"` in its package.json and builds in `archci-loopback`, where
-   only loopback is open; one whose prepare() fetches what no vendoring
-   serves gets `"network": "full"` and builds in `archci-online`. Both are
-   the package's own, approved by hand. `ARCHCI_BUILD_LOOPBACK=1` on a
-   worker opens loopback for every build there, `ARCHCI_BUILD_OFFLINE=0`
-   the network. The container is `archci-build-<arch>-<instance>-<pkgbase>`
-   to `machinectl`, its scope under `archci.slice`, where the heartbeat
-   reads its CPU and memory. The clean chroot is
-   `/var/lib/archbuild/<profile>-<arch>`; devtools creates it as a
-   btrfs subvolume and each build gets a fresh snapshot of it. The root is
-   upgraded from the mirrors alone, every `ARCHCI_CHROOT_UPDATE_MINUTES`
-   (10), with the farm's repository first in the copies' `pacman.conf` and
-   its databases synced: a build's dependencies come from the farm, but
-   nothing of the farm's is installed into the root, whose tools a build
-   relies on (a port lags Arch, and a farm-built library can carry an ABI
-   the mirrors' binaries were not built against). The chroot's `makepkg.conf` and
-   pacman `<profile>.conf` come from `/etc/archci/<arch>/`, then
-   `arch/<arch>/` in the archci tree, then devtools; `ARCHCI_BUILD_ENV`
-   adds a makepkg.conf drop-in with variables every build sees (by default
-   CMake's policy minimum, so projects with an old `cmake_minimum_required`
-   still configure). A worker building another arch than the machine's runs
-   under qemu user-mode emulation and skips `check()` there
-   (`ARCHCI_EMULATED_NOCHECK`),
-4. signs each package with the worker's own builder key (`<pkg>.buildsig`,
-   internal provenance, see Signing below),
-5. takes the build's journal as `build.log`, and rsyncs it with the packages,
-   their builder signatures and makepkg logs to `incoming/<jobid>/` on the
-   master (the ssh key is jailed to that directory by `rrsync`),
-6. reports `success` or `failure`; while the master is unreachable (a
-   reboot, a night, a weekend) the results are kept and upload and report
-   retried every 30 s until it is back, with a heartbeat first so the master
-   does not requeue the job as stale when it returns. The verdict comes from a `result` file
-   `archci-build` writes last, not from the unit's exit status, because systemd
-   counts a build killed by SIGTERM (an external stop) as a clean exit. A
-   `TimeoutStartSec` timeout does fail the unit, but the result file also covers
-   the stop/kill case, so the worker relies on it uniformly.
+**Workers.** A worker polls the master for a job over ssh, builds it, and
+hands back the result. For each job it:
 
-While building, the worker sends heartbeats to the master, carrying the
-machine's load, memory, chroot disk use and core count, and the job's own
-phase (makepkg's step, from the build's output), CPU, memory and build-tree
-size read from its cgroup; the master keeps them
-with the job for `archci top`. A job without a heartbeat for 30 minutes is
-put back in `pending/` by housekeeping (a 5-minute timer), so a worker can
-be destroyed at any time; a heartbeat or report names its worker, and the
-master refuses one from a worker the job was since taken from. On `systemctl stop`
-the worker reports `abandoned`, which requeues without counting an attempt.
+1. takes the source package the sourcer prepared (the recipe, every verified
+   source, and the vendored dependencies), or, when there is none, exports
+   the PKGBUILD at the job's commit and lets makepkg fetch upstream;
+2. builds in a fresh snapshot of a clean devtools chroot, in its own systemd
+   unit with its own cgroup and journal, at low priority and under a long
+   timeout, killed early only if it goes silent;
+3. installs dependencies in a container that has the network, then builds in
+   one that has none: the sources come from the package and the vendored
+   caches replay offline. A package that must reach itself or the network
+   carries a `"network"` flag in its `package.json`, approved per package;
+4. signs each package with its own builder key, uploads the packages,
+   signatures and log to the master, and reports success or failure.
 
-**Sourcer.** Sources are jobs of the arch `src`. `archci-sourcer` is a
-worker for that arch: it claims (`claim <host> src`, with the host's stats,
-every `ARCHCI_IDLE_SLEEP` while idle), and `archci next src` picks the next package
-without a source package for its current commit, in the same order builds
-are claimed. For the job it exports the PKGBUILD directory at the commit
-from its own mirror of the repository and runs the fetch in a clean chroot
-of its own (`mkarchroot`, refreshed like a build's; a fresh copy per job,
-entered with `arch-nspawn` with the network kept, since this is the online
-pass): `makepkg --allsource` there, as the build user, downloads every
-source of every arch, checksums and signature-checks them and packs
-`<pkgbase>-<version>.src.tar.gz`; a PKGBUILD is sourced only inside the
-container, and `SRCDEST` is the host's, kept between jobs. A PKGBUILD
-whose prepare() fetches an ecosystem's packages (`cargo fetch`, `go mod
-download`, `npm ci`, pip, maven or gradle) gets that fetch run there too,
-`makepkg -o` with the makedepends installed and the ecosystem's cache
-directed into `vendor/<kind>/`, which goes into the source package; the
-worker builds with the same cache and the ecosystem told to fetch nothing
-(cargo's `--offline`, `GOPROXY=off`, npm's offline mode, maven's
-`--offline`, a gradle init script). For Rust it also writes a CycloneDX
-SBOM of the vendored crates into the source package (`<pkgbase>/sbom.cdx.json`:
-one `pkg:cargo` component per crate, with its SHA-256). It then signs
-the source package with its builder key and hands it in like a
-build's packages (rsync into `incoming/`, then `report`). The master pools
-it under `<repo>/os/src` and records it in `built/<repo>-src/` ("version
-commit file"); `archci-stage` and the signer treat it as a package without
-a database: verified, release-signed and published beside the arches, the
-older versions of the package pruned. A build claim names the source
-package (`sources=`) once `archci-signer-status` has seen it in the
-release (it lists the released packages and source packages every 2
-minutes, and dependencies count as available by the same listing;
-`ARCHCI_RELEASE_LAG_MINUTES` after the build stands in without one), and
-the worker takes it from `ARCHCI_RELEASE_URL/<repo>/os/src/`, checks
-the release signature with pacman's keyring, and fetches nothing upstream;
-with `ARCHCI_SOURCES_REQUIRED=1` the master holds a build until that is
-so. A failed fetch is a failed job: its makepkg log is the attempt's log,
-housekeeping retries it, `archci failed` lists it. The sourcer is the one
-host that talks to upstream, and holds no credential but its keys. `archci
-top` lists the sourcer host after the master, its fetch a running job like
-a build, and shows how many packages are packaged, still to fetch and failed.
+Results are held and retried while the master is unreachable, so a worker
+can be destroyed at any time. While building, a worker heartbeats its own and
+the job's stats to the master for `archci top`; a job that stops
+heartbeating is requeued.
 
-**Master.** The master holds no signing key and builds no database. On `report
-success` the packages and their builder signatures are pooled into
-`repo/<repo>/os/<arch>/` by the arch in the package's file name (debug
-packages go to `<repo>-debug`, `-any` packages into every enabled arch; a
-package of another arch fails the job) and the built record is written.
-`archci-stage` (a timer) then `rclone move`s the pool to the R2 staging area,
-so the master keeps only packages not yet staged. Failures keep their log
-under `logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log` and are retried
-after 3 hours, up to 3 attempts. A newer commit of the package drops any
-pending or failed job for the older one; if its version is still not the
-built one it is simply outstanding again.
+**Sourcer.** One host talks to upstream. It claims `src` jobs, and for each
+runs `makepkg --allsource` in a clean chroot: it downloads every source for
+every arch, checksums and signature-checks them, and packs a source package.
+When a PKGBUILD fetches an ecosystem's dependencies in prepare() (cargo, go,
+npm, pip, maven), it captures that fetch into the package so the build can
+replay it offline, and for Rust it adds a CycloneDX SBOM of the crates. It
+signs the source package and hands it in like a build's; the signer
+publishes it beside the arches, and a build claim then names it so the
+worker fetches nothing upstream. The sourcer holds no credential but its
+keys.
 
-**Signer.** Everything from staging on is the signer's job; see Signing below.
-It verifies each package's builder signature, adds the client-facing release
-signature, runs `repo-add`, publishes packages + `.sig` + database to the R2
-release area that clients use, and deletes the package from staging.
+**Master.** The master holds no signing key and no database. It pools each
+reported package into its repository directory, records the build, and a
+timer moves the pool to the R2 staging area, so it keeps only what is not
+yet staged. Failures keep their log and are retried a few times before being
+given up on.
 
-With `ARCHCI_RELEASE_URL` set on a worker, its chroots list the farm's own
-released repository above the Arch mirrors, so a build resolves its
-dependencies from what the farm has built (a package that depends on a
-sibling from this repository, as most `omarchy-*` packages do, or a port
-that must not mix in x86_64-built `any` packages) and falls back to the
-mirrors for the rest. The host's pacman keyring must trust the release key,
-which it does when the worker installs archci from that repository. Without
-the setting, builds use the mirrors only, plus whatever an
-`/etc/archci/<arch>/extra.conf` adds.
+**Signer.** Everything from staging on is the signer's job, on its own host
+with the release key. It verifies each package's builder signature, adds the
+client-facing release signature, runs `repo-add`, and publishes the signed
+repository to R2 for clients (see [Signing](#signing) below).
+
+With a release URL configured, a worker's chroots install dependencies from
+the farm's own published repository above the Arch mirrors, so a package can
+build against a sibling the farm just made and falls back to the mirrors for
+everything else.
 
 ## Signing
 
