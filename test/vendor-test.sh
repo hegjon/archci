@@ -94,7 +94,7 @@ jq -e . <<<"$bom" >/dev/null || fail "SBOM with go must be valid JSON: $bom"
 
 echo "--- archci_sbom: npm packages (pkg:npm from the cacache index, incl. scoped)"
 ni="$tmp/sbomvendor/npm/_cacache/index-v5/aa/bb"; mkdir -p "$ni"
-b64=$(printf 'x' | sha512sum | cut -d' ' -f1 | xxd -r -p | base64 -w0 2>/dev/null || printf '')
+b64=$(head -c 64 /dev/zero | base64 -w0)   # a valid 64-byte (sha512-length) base64, coreutils only (no xxd in the build chroot)
 printf 'deadbeef\t{"key":"make-fetch-happen:request-cache:https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz","integrity":"sha512-%s"}\n' "$b64" >"$ni/idx1"
 printf 'deadbeef\t{"key":"make-fetch-happen:request-cache:https://registry.npmjs.org/@types%%2fnode/-/node-20.11.0.tgz","integrity":"sha512-%s"}\n' "$b64" >"$ni/idx2"
 bom=$(archci_sbom "$tmp/sbomvendor" eza 0.23.5-2.1)
