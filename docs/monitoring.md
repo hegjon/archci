@@ -16,10 +16,13 @@ after `restrict`, and the sshd drop-in adds `PermitOpen`), and with `-N` no
 session is opened, so the forced command never runs. Same direction as the
 job protocol, and the last lines of a worker that died are already on the
 master. journal-remote keeps the received journals under
-`/var/lib/archci/journal/` (on the archci volume, not the root disk), capped
-by `journal-remote.conf` (20 GB, 200 files); since every worker arrives from
-127.0.0.1 they share one `archci-workers.journal` file, so select a worker
-with `_HOSTNAME=`.
+`/var/lib/archci/journal/` (on the archci volume, not the root disk).
+`journal-remote.conf` sets no size or file-count cap, so the journal keeps
+every build's log and grows to fill the volume, vacuuming the oldest only
+to keep `KeepFree` (5 GB) free; it shares the volume with the queue, the
+pool and the text logs under `logs/`, so those and the journal compete for
+the space. Since every worker arrives from 127.0.0.1 they share one
+`archci-workers.journal` file, so select a worker with `_HOSTNAME=`.
 
 ```
 journalctl -D /var/lib/archci/journal -f                     all workers, live
@@ -30,10 +33,13 @@ journalctl -D /var/lib/archci/journal _HOSTNAME=worker1      one worker
 journalctl -D /var/lib/archci/journal -D /var/log/journal -f  master and workers together
 ```
 
-Because full build output goes through journald and journal-upload, size the
-master's `journal-remote.conf` limits and the workers' `journald@archci.conf`
-`SystemMaxUse` for it; large builds such as browsers produce hundreds of
-megabytes of log.
+Because full build output goes through journald and journal-upload, the
+master's journal fills the archci volume down to `KeepFree`; watch the disk,
+and lower `journal-remote.conf`'s `KeepFree` or add a `MaxUse` if the queue
+and pool need more room. A worker's own `journald@archci.conf` `SystemMaxUse`
+(4 GB) bounds its local buffer, which matters only while the master is
+unreachable, since upload is live. Large builds such as browsers produce
+hundreds of megabytes of log.
 
 ## The signer, through R2
 

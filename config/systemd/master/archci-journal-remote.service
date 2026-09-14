@@ -4,7 +4,7 @@
 # name too. Only the tunnels reach it. A unit of archci's own rather than
 # the stock systemd-journal-remote.service, whose socket activation cannot
 # be dropped from a drop-in; the stock socket stays disabled. Sizes and
-# splitting: /usr/lib/systemd/journal-remote.conf.d/archci.conf.
+# retention (no cap; grows to KeepFree): /usr/lib/systemd/journal-remote.conf.d/archci.conf.
 [Unit]
 Description=archci: the workers' journals, received from their ssh tunnels
 Documentation=man:systemd-journal-remote(8) man:journal-remote.conf(5)
