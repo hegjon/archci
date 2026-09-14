@@ -50,7 +50,7 @@ else
 	echo "(not root, or no nft: skipped)"
 fi
 echo "--- archci_machine_name: a hostname from a package name"
-[[ $(archci_machine_name archci-build-x86_64-1 'libsigc++') == archci-build-x86_64-1-libsigc-- ]] || fail "machine name: $(archci_machine_name archci-build-x86_64-1 'libsigc++')"
+[[ $(archci_machine_name archci-build-x86_64-1 'libsigc++') == archci-build-x86-64-1-libsigc-- ]] || fail "machine name: $(archci_machine_name archci-build-x86_64-1 'libsigc++')"
 long=$(archci_machine_name archci-build "$(printf 'x%.0s' {1..100})")
 (( ${#long} <= 64 )) || fail "a machine name is at most 64 characters: ${#long}"
 

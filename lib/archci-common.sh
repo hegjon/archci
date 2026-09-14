@@ -599,9 +599,10 @@ archci_container_stop() {
 	[[ -n $cg ]] && systemctl stop "${cg##*/}" 2>/dev/null || true
 }
 # archci_machine_name PREFIX NAME -> a machine name (a hostname: 64 characters
-# of letters, digits and dashes) for the container of NAME; the prefix must
-# make it unique among a host's containers (nspawn refuses a second of a name)
-archci_machine_name() { printf '%s-%s' "$1" "$(printf '%s' "$2" | tr -c 'A-Za-z0-9-' '-' | cut -c1-$(( 63 - ${#1} )))"; }
+# of letters, digits and dashes, so x86_64 becomes x86-64) for the container
+# of NAME; the prefix must make it unique among a host's containers (nspawn
+# refuses a second of a name)
+archci_machine_name() { printf '%s-%s' "$1" "$2" | tr -c 'A-Za-z0-9-' '-' | cut -c1-64; }
 
 # archci_chroot_copy ROOT COPY -- a fresh copy of the clean chroot ROOT at
 # COPY: a btrfs snapshot where the filesystem allows, an rsync otherwise
