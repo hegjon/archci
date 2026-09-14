@@ -213,7 +213,7 @@ fetch_one() {
 	# pacman.conf and makepkg.conf, which prepare_copy just wrote to)
 	in_copy() {   # in_copy MODE ARGS... -- /chrootfetch in the copy, within the fetch's time
 		timeout "$(( ARCHCI_SOURCER_TIMEOUT_MINUTES * 60 ))" \
-			arch-nspawn -c "$cachedir" "$copy" --slice=archci-online --machine="$machine" \
+			arch-nspawn -c "$cachedir" "$copy" --slice=archci-online --machine="$machine" --hostname="${HOSTNAME%%.*}" \
 				--bind="$w/pkg:/startdir" --bind="$srcdest:/srcdest" --bind="$w/out:/srcpkgdest" --bind="$gnupghome:/build/.gnupg" --bind="$w/vendor:/vendor" \
 				"$ARCHCI_CONTAINER_TMP" /chrootfetch "$@" 2>&1 | tee -a "$log"
 	}

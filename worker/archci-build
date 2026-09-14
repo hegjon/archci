@@ -382,10 +382,13 @@ elif ! archci_firewall; then
 	build_slice=archci-online
 	echo "==> WARNING: the firewall could not be set up (see above); building with the network"
 fi
-# unique on the host: the arch and instance this worker is, then the package
+# unique on the host: the arch and instance this worker is, then the package.
+# The hostname the build sees is the host's, as it would be for makepkg on the
+# host (a build that records where it was made then names the worker, as the
+# journal does), not the machine name nspawn would copy into it.
 machine=$(archci_machine_name "archci-build-$ARCHCI_ARCH-$instance" "$job_pkgbase")
 printf '%s\n' "$machine" >"$jobdir/machine"   # for the worker's per-job heartbeat stats
-container=(arch-nspawn -c "$cachedir" "$copydir" --machine="$machine"
+container=(arch-nspawn -c "$cachedir" "$copydir" --machine="$machine" --hostname="${HOSTNAME%%.*}"
 	--bind="$srcdir:/startdir" --bind="$SRCDEST:/srcdest" --bind="$outdir:/pkgdest" --bind="$outdir:/logdest" --bind="$outdir:/srcpkgdest"
 	"$ARCHCI_CONTAINER_TMP")
 [[ -n $vendor_conf ]] && container+=(--bind-ro="$vendor_conf:/build/.config")
