@@ -569,10 +569,48 @@ archci_vendor_replay_files() {
 # package (a plain tar, gzipped, its entries under PKGBASE/) as
 # PKGBASE/vendor/, root's, in place
 archci_srcpkg_add_vendor() {
-	local srcpkg=$1 pkgbase=$2 dir=$3 tar=$1.tar
-	gzip -dc "$srcpkg" >"$tar" || return 1
-	tar -rf "$tar" -C "$(dirname "$dir")" --owner=0 --group=0 --transform="s|^$(basename "$dir")|$pkgbase/vendor|" "$(basename "$dir")" || return 1
-	gzip -c "$tar" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tar"
+	local srcpkg=$1 pkgbase=$2 dir=$3 tarball=$1.tar
+	gzip -dc "$srcpkg" >"$tarball" || return 1
+	tar -rf "$tarball" -C "$(dirname "$dir")" --owner=0 --group=0 --transform="s|^$(basename "$dir")|$pkgbase/vendor|" "$(basename "$dir")" || return 1
+	gzip -c "$tarball" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tarball"
+}
+
+# archci_srcpkg_add_file SRCPKG PKGBASE FILE DEST -- put FILE into the source
+# package as PKGBASE/DEST, root's, in place (as add_vendor does for a tree).
+archci_srcpkg_add_file() {
+	local srcpkg=$1 pkgbase=$2 file=$3 destname=$4 tarball=$1.tar
+	gzip -dc "$srcpkg" >"$tarball" || return 1
+	tar -rf "$tarball" -C "$(dirname "$file")" --owner=0 --group=0 --transform="s|^$(basename "$file")|$pkgbase/$destname|" "$(basename "$file")" || return 1
+	gzip -c "$tarball" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tarball"
+}
+
+# archci_sbom_rust VENDORDIR PKGBASE PKGVER -- a CycloneDX 1.5 SBOM (JSON on
+# stdout) of the Rust crates vendored under VENDORDIR/rust: one component per
+# .crate archive with its pkg:cargo PURL and SHA-256, the package itself the
+# top component. Crate names and versions are [A-Za-z0-9._+-], so no JSON
+# escaping is needed. The sourcer writes it into the source package.
+archci_sbom_rust() {
+	local dir=$1 pkgbase=$2 pkgver=$3 f base name ver sum first=1 uuid
+	uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)
+	printf '{\n  "bomFormat": "CycloneDX",\n  "specVersion": "1.5",\n'
+	[[ -n $uuid ]] && printf '  "serialNumber": "urn:uuid:%s",\n' "$uuid"
+	printf '  "version": 1,\n  "metadata": {\n'
+	printf '    "timestamp": "%s",\n' "$(archci_now)"
+	printf '    "tools": [{ "vendor": "archci", "name": "archci-sourcer", "version": "%s" }],\n' "$(archci_version)"
+	printf '    "component": { "type": "application", "bom-ref": "%s@%s", "name": "%s", "version": "%s", "purl": "pkg:generic/%s@%s" }\n' \
+		"$pkgbase" "$pkgver" "$pkgbase" "$pkgver" "$pkgbase" "$pkgver"
+	printf '  },\n  "components": ['
+	for f in "$dir"/rust/registry/cache/*/*.crate; do
+		[[ -e $f ]] || continue
+		base=${f##*/}; base=${base%.crate}
+		[[ $base =~ ^(.+)-([0-9].*)$ ]] || continue
+		name=${BASH_REMATCH[1]}; ver=${BASH_REMATCH[2]}
+		sum=$(sha256sum "$f" | cut -d' ' -f1)
+		(( first )) && first=0 || printf ','
+		printf '\n    { "type": "library", "bom-ref": "pkg:cargo/%s@%s", "name": "%s", "version": "%s", "purl": "pkg:cargo/%s@%s", "hashes": [{ "alg": "SHA-256", "content": "%s" }] }' \
+			"$name" "$ver" "$name" "$ver" "$name" "$ver" "$sum"
+	done
+	printf '\n  ]\n}\n'
 }
 
 # --- containers: what the worker's builds and the sourcer's fetches share -

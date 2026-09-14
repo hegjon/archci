@@ -231,7 +231,9 @@ download`, `npm ci`, pip, maven or gradle) gets that fetch run there too,
 directed into `vendor/<kind>/`, which goes into the source package; the
 worker builds with the same cache and the ecosystem told to fetch nothing
 (cargo's `--offline`, `GOPROXY=off`, npm's offline mode, maven's
-`--offline`, a gradle init script). It then signs
+`--offline`, a gradle init script). For Rust it also writes a CycloneDX
+SBOM of the vendored crates into the source package (`<pkgbase>/sbom.cdx.json`:
+one `pkg:cargo` component per crate, with its SHA-256). It then signs
 the source package with its builder key and hands it in like a
 build's packages (rsync into `incoming/`, then `report`). The master pools
 it under `<repo>/os/src` and records it in `built/<repo>-src/` ("version
@@ -377,7 +379,7 @@ built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
                             (one directory per arch, plus <repo>-any); for
                             <repo>-src the source package's file name
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
-repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume); os/src the source packages
+repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume); os/src the source packages (each carries <pkgbase>/sbom.cdx.json for a Rust package)
 logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log   also copied to ARCHCI_R2_LOGS if set (archci-stage; local kept)
 released/<repo>-<arch>      what the release holds, "name version" per line, and <repo>-src its
                             source packages (archci-signer-status, a timer); a claim reads them

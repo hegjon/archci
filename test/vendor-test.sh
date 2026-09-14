@@ -65,4 +65,25 @@ entries=$(tar -tzf "$tmp/hello-1-1.src.tar.gz")
 grep -qx "hello/vendor/rust/registry/cache/serde-1.0.crate" <<<"$entries" || fail "the crate must sit under hello/vendor/rust: $entries"
 grep -qx "hello/PKGBUILD" <<<"$entries" || fail "the PKGBUILD must still be there: $entries"
 [[ ! -e $tmp/hello-1-1.src.tar.gz.tar ]] || fail "the plain tar must be cleaned up"
+
+echo "--- archci_sbom_rust: a CycloneDX SBOM of the vendored crates"
+sb=$tmp/sbomvendor/rust/registry/cache/index.crates.io-abc
+mkdir -p "$sb"
+for c in serde-1.0.228 time-core-0.1.8 openssl-src-300.5.5+3.5.5 clap_derive-4.5.55; do echo "$c" >"$sb/$c.crate"; done
+bom=$(archci_sbom_rust "$tmp/sbomvendor" eza 0.23.5-2.1)
+jq -e . <<<"$bom" >/dev/null || fail "the SBOM must be valid JSON: $bom"
+[[ $(jq -r .bomFormat <<<"$bom") == CycloneDX && $(jq -r .specVersion <<<"$bom") == 1.5 ]] || fail "SBOM must be CycloneDX 1.5"
+[[ $(jq -r .metadata.component.name <<<"$bom") == eza && $(jq -r .metadata.component.version <<<"$bom") == 0.23.5-2.1 ]] || fail "the package is the top component"
+[[ $(jq '.components | length' <<<"$bom") == 4 ]] || fail "one component per crate: $(jq '.components|length' <<<"$bom")"
+# the name/version split handles hyphens and build metadata
+[[ $(jq -r '.components[] | select(.name=="time-core") | .version' <<<"$bom") == 0.1.8 ]] || fail "time-core split wrong"
+[[ $(jq -r '.components[] | select(.name=="openssl-src") | .version' <<<"$bom") == "300.5.5+3.5.5" ]] || fail "openssl-src build metadata split wrong"
+[[ $(jq -r '.components[] | select(.name=="serde") | .purl' <<<"$bom") == "pkg:cargo/serde@1.0.228" ]] || fail "purl wrong"
+[[ $(jq -r '.components[] | select(.name=="serde") | .hashes[0].alg' <<<"$bom") == "SHA-256" ]] || fail "each crate has a SHA-256"
+[[ $(jq -r '.components[] | select(.name=="serde") | .hashes[0].content' <<<"$bom") == "$(sha256sum "$sb/serde-1.0.228.crate" | cut -d' ' -f1)" ]] || fail "the hash must be the crate's sha256"
+
+echo "--- archci_srcpkg_add_file: the SBOM joins the source package under its pkgbase"
+echo "$bom" >"$tmp/sbom.cdx.json"
+archci_srcpkg_add_file "$tmp/hello-1-1.src.tar.gz" hello "$tmp/sbom.cdx.json" sbom.cdx.json || fail "adding the SBOM failed"
+tar -tzf "$tmp/hello-1-1.src.tar.gz" | grep -qx "hello/sbom.cdx.json" || fail "the SBOM must sit at hello/sbom.cdx.json"
 echo "ALL OK"
