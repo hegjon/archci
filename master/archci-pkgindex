@@ -4,7 +4,7 @@
 # One line per directory under <clone>/$ARCHCI_PKGBUILDS_DIR holding a PKGBUILD
 # and .omarchy/package.json (the omarchy-pkgs layout):
 #
-#   <name> <version> <commit> <arch> <profile> <source> <build|skip|network> <arch_repo> <pkgnames> <deps>
+#   <name> <version> <commit> <arch> <profile> <source> <build|skip|network|loopback> <arch_repo> <pkgnames> <deps>
 #
 #   name     the directory name; it is the job's pkgbase (the PKGBUILD's own
 #            pkgbase may differ for a split package)
@@ -156,7 +156,7 @@ calculate() {
 	fi
 	commit=$(git -C "$clone" log -1 --format=%H -- "$ARCHCI_PKGBUILDS_DIR/$name")
 	read -r source build repo < <(jq -r '
-		[(.source // "local"), (if .skip_build == true then "skip" elif .network == true then "network" else "build" end), (.arch_repo // "-")]
+		[(.source // "local"), (if .skip_build == true then "skip" elif (.network == true or .network == "full") then "network" elif .network == "loopback" then "loopback" else "build" end), (.arch_repo // "-")]
 		| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; return 1; }
 	if [[ $repo == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
 	printf '%s %s %s %s %s %s %s %s %s\n' "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build" "$repo" "${pkgnames:-$name}" "${deps:--}"

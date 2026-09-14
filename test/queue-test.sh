@@ -139,9 +139,16 @@ commit_pkgs netpkg
 "$job" enqueue netpkg 0 x86_64 >/dev/null
 nid=$(claim_id worker-9 x86_64)
 [[ $nid == *omarchy,netpkg,* ]] || fail "the enqueued job is claimed first: $nid"
-grep -q '^network=1$' "$ARCHCI_HOME/queue/running/$nid.job" || fail "the job must carry network=1: $(cat "$ARCHCI_HOME/queue/running/$nid.job")"
+grep -q '^network=full$' "$ARCHCI_HOME/queue/running/$nid.job" || fail "the job must carry network=full: $(cat "$ARCHCI_HOME/queue/running/$nid.job")"
 "$job" report "$nid" failure >/dev/null
-grep -q '^network=1$' "$ARCHCI_HOME/queue/failed/$nid.job" || fail "a failure keeps the flag"
+grep -q '^network=full$' "$ARCHCI_HOME/queue/failed/$nid.job" || fail "a failure keeps the flag"
+mkpkgbuild loopy 1-1 x86_64 '{"source": "arch", "network": "loopback"}'
+commit_pkgs loopy; "$scan" >/dev/null 2>&1
+[[ $("$master/archci-pkgindex" loopy | awk '{print $7}') == loopback ]] || fail "the index must know the loopback state: $("$master/archci-pkgindex" loopy)"
+"$job" enqueue loopy 0 x86_64 >/dev/null
+lid=$(claim_id worker-9 x86_64)
+grep -q '^network=loopback$' "$ARCHCI_HOME/queue/running/$lid.job" || fail "the job must carry network=loopback: $(cat "$ARCHCI_HOME/queue/running/$lid.job")"
+"$job" report "$lid" abandoned >/dev/null; rm -rf "$ARCHCI_HOME"/queue/pending/*loopy* "$pkgs/pkgbuilds/loopy"
 rm -rf "$ARCHCI_HOME"/queue/failed/*netpkg* "$pkgs/pkgbuilds/netpkg"; commit_pkgs "netpkg gone"; "$scan" >/dev/null 2>&1
 echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)

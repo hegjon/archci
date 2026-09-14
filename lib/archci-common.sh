@@ -135,13 +135,17 @@ archci_load_conf
 : "${ARCHCI_CACHE_KEEP:=1}"
 # the worker's own source cache: files not used for this many days are deleted
 : "${ARCHCI_SRCDEST_KEEP_DAYS:=7}"
-# Builds run off the network (archci_firewall: the build's container may
-# reach loopback only; its dependencies are installed in a container of its
-# own first, with the network, and its sources come from the source
-# package or were fetched on the host). 0: every container keeps the
-# network, as before. A package with "network": true in its package.json
-# builds with the network either way.
+# Builds run off the network (archci_firewall: the build's container
+# reaches nothing, loopback included; its dependencies are installed in a
+# container of its own first, with the network, and its sources come from
+# the source package or were fetched on the host). 0: every container
+# keeps the network, as before. package.json "network": "loopback" lets a
+# package's build talk to itself (a test suite with a server), "full" (or
+# true) gives it the network; both are the package's own, approved by hand.
+# ARCHCI_BUILD_LOOPBACK=1 lets every build on this host reach loopback (the
+# lenient default while the packages that need it are being found).
 : "${ARCHCI_BUILD_OFFLINE:=1}"
+: "${ARCHCI_BUILD_LOOPBACK:=0}"
 # Pass --ignorearch to makepkg on a port arch (PKGBUILDs only list x86_64).
 : "${ARCHCI_IGNOREARCH:=1}"
 # PACKAGER stamped into every package (.PKGINFO / pacman -Si). Set to your identity.
@@ -575,9 +579,11 @@ archci_srcpkg_add_vendor() {
 # Both enter a copy of a clean chroot with arch-nspawn (devtools'), in a
 # slice of archci's own: archci-online for what may reach the network (a
 # build's dependency install, the sourcer's fetch, a build with the network
-# exemption), archci-offline for a build itself, which archci_firewall keeps
-# off the network. nspawn names the container's scope <machine>.<pid>.scope
-# under the slice.
+# exemption), archci-loopback for a build that may talk to itself (a test
+# suite with a server of its own; package.json "network": "loopback"), and
+# archci-offline for a build itself, which archci_firewall keeps off every
+# network, loopback included. nspawn names the container's scope
+# <machine>.<pid>.scope under the slice.
 # archci_container_cgroup MACHINE -> the scope's cgroup path, empty for none
 archci_container_cgroup() {
 	local c
@@ -634,25 +640,27 @@ archci_chroot_prepare() {
 # The tmpfs every container gets on /tmp (makepkg's mktemp needs it writable)
 ARCHCI_CONTAINER_TMP='--tmpfs=/tmp:mode=1777,strictatime,nodev,nosuid,size=50%'
 
-# archci_firewall -- the nftables table that keeps an offline container
-# off the network: a socket of a cgroup under archci.slice/archci-offline.slice
-# (a build's, --slice=archci-offline) may reach loopback and nothing else,
-# rejected so tools fail at once; archci-online is untouched. The table is
-# archci's own, beside whatever else the host runs; idempotent (rewritten
-# at every build). nft resolves the cgroup path when the rule is loaded, so
-# the slice is started first (it exists from then on). Needs root and
+# archci_firewall -- the nftables table that keeps a build's container off
+# the network: a socket of a cgroup under archci.slice/archci-offline.slice
+# (--slice=archci-offline) reaches nothing, loopback included; one under
+# archci-loopback.slice reaches loopback and nothing else; both rejected,
+# so tools fail at once; archci-online is untouched. The table is archci's
+# own, beside whatever else the host runs; idempotent (rewritten at every
+# build). nft resolves the cgroup paths when the rules are loaded, so the
+# slices are started first (they exist from then on). Needs root and
 # nftables; 1, with the reason on stderr, when the table cannot be set up.
 archci_firewall() {
 	command -v nft >/dev/null || { echo "nft is not installed" >&2; return 1; }
-	systemctl start archci-offline.slice archci-online.slice 2>/dev/null ||
-		mkdir -p /sys/fs/cgroup/archci.slice/archci-offline.slice /sys/fs/cgroup/archci.slice/archci-online.slice 2>/dev/null || true
+	systemctl start archci-offline.slice archci-loopback.slice archci-online.slice 2>/dev/null ||
+		mkdir -p /sys/fs/cgroup/archci.slice/archci-{offline,loopback,online}.slice 2>/dev/null || true
 	nft -f - <<-'NFT'
 		table inet archci
 		delete table inet archci
 		table inet archci {
 			chain output {
 				type filter hook output priority filter; policy accept;
-				socket cgroupv2 level 2 "archci.slice/archci-offline.slice" oifname != "lo" counter reject
+				socket cgroupv2 level 2 "archci.slice/archci-offline.slice" counter reject
+				socket cgroupv2 level 2 "archci.slice/archci-loopback.slice" oifname != "lo" counter reject
 			}
 		}
 	NFT

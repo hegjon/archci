@@ -243,7 +243,7 @@ module Archci
           next unless build
 
           { 'pkgbase' => name, 'version' => version, 'commit' => commit, 'arches' => arch.split(','),
-            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'network' => build == 'network', 'arch_repo' => arch_repo.to_s,
+            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'network' => (build if %w[network loopback].include?(build)), 'arch_repo' => arch_repo.to_s,
             'pkgnames' => (pkgnames || name).split(','), 'deps' => (deps == '-' ? [] : deps.to_s.split(',')) }
         end
       else

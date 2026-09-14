@@ -61,7 +61,7 @@ write_job() {
 		attempt=0
 		created=$(archci_now)
 	JOB
-	[[ $flags == network ]] && echo 'network=1' >>"$dest/$id.job.tmp"
+	case $flags in network) echo 'network=full' >>"$dest/$id.job.tmp" ;; loopback) echo 'network=loopback' >>"$dest/$id.job.tmp" ;; esac
 	mv "$dest/$id.job.tmp" "$dest/$id.job"
 	printf '%s\n' "$id.job"
 }

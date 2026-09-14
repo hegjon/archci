@@ -43,7 +43,8 @@ for k in rust go npm pip maven; do archci_vendor_supported "$k" || fail "$k is s
 echo "--- archci_firewall: the table for the offline slice (needs nft and root; skipped without)"
 if command -v nft >/dev/null && [[ $EUID == 0 ]]; then
 	archci_firewall || fail "archci_firewall must install its table"
-	nft list table inet archci | grep -q 'archci.slice/archci-offline.slice' || fail "the table must key on the offline slice"
+	nft list table inet archci | grep -q 'archci.slice/archci-offline.slice" counter reject' || fail "the offline slice must reach nothing"
+	nft list table inet archci | grep -q 'archci.slice/archci-loopback.slice" oifname != "lo"' || fail "the loopback slice must reach loopback only"
 	nft delete table inet archci
 else
 	echo "(not root, or no nft: skipped)"

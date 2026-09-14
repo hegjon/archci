@@ -145,9 +145,14 @@ for the job's commit and it is released, and is printed. The worker then:
    then in `archci-offline`, where an nftables table of archci's own lets
    nothing but loopback out, to build: the sources sit in the source
    package or were verified on the host, and what the sourcer vendored
-   replays from it. A package with `"network": true` in its package.json
-   builds in `archci-online` (its prepare() fetches what no vendoring
-   serves); `ARCHCI_BUILD_OFFLINE=0` keeps the network for every build.
+   replays from it, and loopback is closed too. A package whose build
+   talks to itself, a test suite with a server, gets `"network":
+   "loopback"` in its package.json and builds in `archci-loopback`, where
+   only loopback is open; one whose prepare() fetches what no vendoring
+   serves gets `"network": "full"` and builds in `archci-online`. Both are
+   the package's own, approved by hand. `ARCHCI_BUILD_LOOPBACK=1` on a
+   worker opens loopback for every build there, `ARCHCI_BUILD_OFFLINE=0`
+   the network.
    (Before 0.4.20 this was `makechrootpkg -c -l archci-N`) in
    `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
    btrfs subvolume and each build gets a fresh snapshot of it. The root is

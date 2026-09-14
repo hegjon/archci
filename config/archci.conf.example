@@ -164,10 +164,14 @@ ARCHCI_SRCDEST_KEEP_DAYS=7
 # installed first in a container with the network, its sources come from the
 # source package or were fetched on the host, and the dependencies the
 # sourcer vendored replay from the source package. 0: every container keeps
-# the network. A package with "network": true in its package.json builds
-# with the network either way (its prepare() fetches what no vendoring
-# serves).
+# the network. package.json "network": "loopback" lets a package's build
+# talk to itself (a test suite that starts a server), "full" gives it the
+# network (its prepare() fetches what no vendoring serves); both are
+# decided per package, by hand.
 ARCHCI_BUILD_OFFLINE=1
+# 1 lets every build on this host reach loopback: the lenient setting while
+# the packages that need "loopback" are being found. 0: only those.
+ARCHCI_BUILD_LOOPBACK=0
 # On a port arch (anything but x86_64) also pass --ignorearch, since PKGBUILDs
 # carried from Arch declare arch=(x86_64) only. 0 to build just packages that
 # list the arch (read on the master too: such packages are then not offered).

@@ -366,14 +366,17 @@ rm -rf "$verifydir"
 # archci-offline, where archci_firewall lets nothing but loopback through:
 # the sources are in /startdir and /srcdest, the vendored dependencies
 # replay from /startdir/vendor, and pacman has nothing left to fetch. A
-# package with the network exemption (package.json "network": true,
-# network=1 in the job) builds in archci-online; so does everything with
-# ARCHCI_BUILD_OFFLINE=0, or where nft is missing.
+# package that talks to itself (package.json "network": "loopback",
+# network=loopback in the job) builds in archci-loopback, one with the
+# network exemption ("full", network=full) in archci-online; so does
+# everything with ARCHCI_BUILD_OFFLINE=0, or where nft is missing.
 build_slice=archci-offline
-if [[ ${job_network:-} == 1 ]]; then
-	build_slice=archci-online
-	say "Building with the network: the package is exempt (package.json)"
-elif [[ $ARCHCI_BUILD_OFFLINE != 1 ]]; then
+case ${job_network:-} in
+	1|full) build_slice=archci-online; say "Building with the network: the package is exempt (package.json)" ;;
+	loopback) build_slice=archci-loopback; say "Building with loopback: the package talks to itself (package.json)" ;;
+	*) [[ $ARCHCI_BUILD_LOOPBACK == 1 ]] && build_slice=archci-loopback ;;
+esac
+if [[ $ARCHCI_BUILD_OFFLINE != 1 ]]; then
 	build_slice=archci-online
 elif ! archci_firewall; then
 	build_slice=archci-online
