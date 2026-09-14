@@ -1,0 +1,24 @@
+# The test suite on every push and pull request: what test/run.sh runs, in
+# an Arch container, as an unprivileged user (makepkg refuses root). The
+# suite needs neither network nor root: a throwaway ARCHCI_HOME, a fake
+# PKGBUILD repository, a fake rclone; the firewall test skips without root.
+# The farm builds the release with the same suite in check(), later; this
+# is the same verdict, on the commit.
+name: tests
+on:
+  push:
+    branches: [master]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install what the tests need (the PKGBUILD's checkdepends, and base-devel for makepkg)
+        run: pacman -Syu --noconfirm --needed base-devel ruby jq git rsync openssh gnupg zstd shellcheck attr procps-ng
+      - uses: actions/checkout@v4
+      - name: Run the suite
+        run: |
+          useradd -m tester
+          chown -R tester .
+          runuser -u tester -- test/run.sh
