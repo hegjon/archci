@@ -171,6 +171,7 @@ snap=$("$master/archci-web" snapshot)
 [[ $(jq -r '.queue.failed' <<<"$snap") == $(find "$ARCHCI_HOME/queue/failed" -name "*.job" | wc -l) && $(jq -r '.generated' <<<"$snap") == 20*Z ]] || fail "the snapshot is archci top's plus jobs and generated: $(jq -c '[.queue, .generated]' <<<"$snap")"
 log=$("$master/archci-web" log "$id")
 [[ $(jq -r '.error_at' <<<"$log") == 1 && $(jq -r '.lines[1]' <<<"$log") == "==> ERROR: A failure occurred in build()." ]] || fail "archci web log gives the lines and the first error: $log"
+! "$master/archci-web" follow "$id" 2>/dev/null || fail "follow of a job that is not running must fail"
 grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be final yet"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "housekeeping should have requeued"
@@ -186,8 +187,13 @@ grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$id.job" || fail "should be final
 echo "--- success reported with empty upload counts as failure"
 id=$(claim_id worker-3 x86_64)
 [[ $id == *linux* ]] || fail "expected linux, got $id"
+# archci-web follow runs while the job does (its stdin open, as the front
+# end's ssh keeps it): it ends by itself once the job is reported
+sleep 60 | timeout 30 "$master/archci-web" follow "$id" >"$tmp/follow.out" 2>&1 & follow=$!
+sleep 1
 "$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "empty success must fail"
+wait "$follow" || fail "archci-web follow must end cleanly when the job leaves running/: $(<"$tmp/follow.out")"
 
 echo "--- stale running job is requeued by housekeeping; abandoned does not count"
 "$job" retry "$id"

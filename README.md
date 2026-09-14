@@ -606,11 +606,12 @@ signer is a host of its own on the other side of R2:
 archci authorize --web web_key.pub        # on the master
 ssh archci@master snapshot | jq .         # from the web host: the farm and every job, as JSON
 ssh archci@master log <jobid>             # one job's log: its archived log, or the journal a running build streams
+ssh archci@master follow <jobid>          # a running job's journal live, line by line, until it finishes
 ssh archci@master retry <jobid>           # and requeue, enqueue: the operator's queue commands, logged as the web key's
 ```
 
-`archci web snapshot` and `archci web log ID` are the same commands on the
-master itself. The snapshot is what `archci top` shows (queue, hosts, running
+`archci web snapshot`, `archci web log ID` and `archci web follow ID` are
+the same commands on the master itself. The snapshot is what `archci top` shows (queue, hosts, running
 and failed jobs, the signer) plus every job the master holds with its state,
 origin and story, so a front end polls one command and filters in the
 browser. The web key claims nothing, uploads nothing and reads no file the

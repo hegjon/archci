@@ -16,6 +16,9 @@ After=network.target sshd.service
 [Service]
 ExecStart=/usr/lib/systemd/systemd-journal-remote --listen-http=127.0.0.1:19533 --output=/var/lib/archci/journal/archci-workers.journal
 User=systemd-journal-remote
+# the received journals get the systemd-journal group, so the archci user
+# (in that group) can read them for archci top and the web role's live logs
+Group=systemd-journal
 # on the archci volume (/var/lib/archci), not the small root disk; the
 # directory is the service user's, so the receiver may write under
 # ProtectSystem=strict

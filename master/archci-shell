@@ -11,7 +11,7 @@
 # The worker and sourcer roles run the job protocol and rsync into
 # incoming/. A sourcer key claims, beats for and reports src jobs only (a
 # job id ends in ,src); a worker key anything but. The web role reads
-# (archci-web snapshot, log ID) and runs the operator's queue commands
+# (archci-web snapshot, log ID, follow ID) and runs the operator's queue commands
 # (retry, requeue, enqueue), each logged; it claims nothing and uploads
 # nothing. The signer does not use ssh at all: it exchanges packages with
 # the master through R2.
@@ -29,7 +29,7 @@ case ${argv[0]:-} in
 		[[ $role == sourcer && ${argv[1]:-} == *,src || $role == worker && ${argv[1]:-} != *,src ]] || refuse
 		exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
 	# the web key: what a front end reads, and the operator's queue commands
-	snapshot|log)
+	snapshot|log|follow)
 		[[ $role == web ]] || refuse
 		exec "$ARCHCI_MASTER_DIR/archci-web" "${argv[@]}" ;;
 	retry|requeue|enqueue)

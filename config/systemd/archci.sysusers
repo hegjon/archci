@@ -1,3 +1,8 @@
 # archci user for every role: master (ssh forced command needs a shell),
 # worker (makechrootpkg -U), signer.
 u archci - "archci build farm" /var/lib/archci /bin/bash
+# so the master's web role (archci-shell web, run as archci) may read the
+# workers' journals the receiver writes; the receiver writes that group too
+# (archci-journal-remote.service Group=). systemd-journal exists on every
+# systemd host, so this is harmless on the worker and signer.
+m archci systemd-journal
