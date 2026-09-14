@@ -136,7 +136,8 @@ runs `makepkg --allsource` in a clean chroot: it downloads every source for
 every arch, checksums and signature-checks them, and packs a source package.
 When a PKGBUILD fetches an ecosystem's dependencies in prepare() (cargo, go,
 npm, pip, maven), it captures that fetch into the package so the build can
-replay it offline, and for Rust it adds a CycloneDX SBOM of the crates. It
+replay it offline, and for cargo, go and npm it adds a CycloneDX SBOM of the
+vendored dependencies (`sbom.cdx.json`). It
 signs the source package and hands it in like a build's; the signer
 publishes it beside the arches, and a build claim then names it so the
 worker fetches nothing upstream. The sourcer holds no credential but its

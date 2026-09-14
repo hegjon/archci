@@ -66,11 +66,11 @@ grep -qx "hello/vendor/rust/registry/cache/serde-1.0.crate" <<<"$entries" || fai
 grep -qx "hello/PKGBUILD" <<<"$entries" || fail "the PKGBUILD must still be there: $entries"
 [[ ! -e $tmp/hello-1-1.src.tar.gz.tar ]] || fail "the plain tar must be cleaned up"
 
-echo "--- archci_sbom_rust: a CycloneDX SBOM of the vendored crates"
+echo "--- archci_sbom: a CycloneDX SBOM of the vendored rust/go/npm deps"
 sb=$tmp/sbomvendor/rust/registry/cache/index.crates.io-abc
 mkdir -p "$sb"
 for c in serde-1.0.228 time-core-0.1.8 openssl-src-300.5.5+3.5.5 clap_derive-4.5.55; do echo "$c" >"$sb/$c.crate"; done
-bom=$(archci_sbom_rust "$tmp/sbomvendor" eza 0.23.5-2.1)
+bom=$(archci_sbom "$tmp/sbomvendor" eza 0.23.5-2.1)
 jq -e . <<<"$bom" >/dev/null || fail "the SBOM must be valid JSON: $bom"
 [[ $(jq -r .bomFormat <<<"$bom") == CycloneDX && $(jq -r .specVersion <<<"$bom") == 1.5 ]] || fail "SBOM must be CycloneDX 1.5"
 [[ $(jq -r .metadata.component.name <<<"$bom") == eza && $(jq -r .metadata.component.version <<<"$bom") == 0.23.5-2.1 ]] || fail "the package is the top component"
@@ -81,6 +81,27 @@ jq -e . <<<"$bom" >/dev/null || fail "the SBOM must be valid JSON: $bom"
 [[ $(jq -r '.components[] | select(.name=="serde") | .purl' <<<"$bom") == "pkg:cargo/serde@1.0.228" ]] || fail "purl wrong"
 [[ $(jq -r '.components[] | select(.name=="serde") | .hashes[0].alg' <<<"$bom") == "SHA-256" ]] || fail "each crate has a SHA-256"
 [[ $(jq -r '.components[] | select(.name=="serde") | .hashes[0].content' <<<"$bom") == "$(sha256sum "$sb/serde-1.0.228.crate" | cut -d' ' -f1)" ]] || fail "the hash must be the crate's sha256"
+
+echo "--- archci_sbom: go modules (pkg:golang, name unescaped, sha256 of the zip)"
+gm="$tmp/sbomvendor/go/cache/download/github.com/!burnt!sushi/toml/@v"
+mkdir -p "$gm"; echo zip >"$gm/v1.4.0.zip"
+gm2="$tmp/sbomvendor/go/cache/download/golang.org/x/net/@v"; mkdir -p "$gm2"; echo zip >"$gm2/v0.38.0.zip"
+bom=$(archci_sbom "$tmp/sbomvendor" eza 0.23.5-2.1)
+jq -e . <<<"$bom" >/dev/null || fail "SBOM with go must be valid JSON: $bom"
+[[ $(jq -r '.components[] | select(.name=="github.com/BurntSushi/toml") | .purl' <<<"$bom") == "pkg:golang/github.com/BurntSushi/toml@v1.4.0" ]] || fail "go module name must be unescaped (!burnt!sushi -> BurntSushi): $(jq -c '[.components[]|select(.purl|startswith("pkg:golang"))]' <<<"$bom")"
+[[ $(jq -r '.components[] | select(.name=="golang.org/x/net") | .version' <<<"$bom") == "v0.38.0" ]] || fail "go module version from the zip name"
+[[ $(jq -r '.components[] | select(.name=="golang.org/x/net") | .hashes[0].content' <<<"$bom") == "$(sha256sum "$gm2/v0.38.0.zip" | cut -d' ' -f1)" ]] || fail "go module hash must be the zip sha256"
+
+echo "--- archci_sbom: npm packages (pkg:npm from the cacache index, incl. scoped)"
+ni="$tmp/sbomvendor/npm/_cacache/index-v5/aa/bb"; mkdir -p "$ni"
+b64=$(printf 'x' | sha512sum | cut -d' ' -f1 | xxd -r -p | base64 -w0 2>/dev/null || printf '')
+printf 'deadbeef\t{"key":"make-fetch-happen:request-cache:https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz","integrity":"sha512-%s"}\n' "$b64" >"$ni/idx1"
+printf 'deadbeef\t{"key":"make-fetch-happen:request-cache:https://registry.npmjs.org/@types%%2fnode/-/node-20.11.0.tgz","integrity":"sha512-%s"}\n' "$b64" >"$ni/idx2"
+bom=$(archci_sbom "$tmp/sbomvendor" eza 0.23.5-2.1)
+jq -e . <<<"$bom" >/dev/null || fail "SBOM with npm must be valid JSON: $bom"
+[[ $(jq -r '.components[] | select(.name=="lodash") | .purl' <<<"$bom") == "pkg:npm/lodash@4.17.21" ]] || fail "npm unscoped package: $(jq -c '[.components[]|select(.purl|startswith("pkg:npm"))]' <<<"$bom")"
+[[ $(jq -r '.components[] | select(.name=="@types/node") | .purl' <<<"$bom") == "pkg:npm/%40types/node@20.11.0" ]] || fail "npm scoped package must decode @types/node and %40-encode the PURL"
+[[ $(jq -r '.components[] | select(.name=="lodash") | .hashes[0].alg' <<<"$bom") == "SHA-512" ]] || fail "npm hash from the integrity is SHA-512"
 
 echo "--- archci_srcpkg_add_file: the SBOM joins the source package under its pkgbase"
 echo "$bom" >"$tmp/sbom.cdx.json"

@@ -584,13 +584,34 @@ archci_srcpkg_add_file() {
 	gzip -c "$tarball" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tarball"
 }
 
-# archci_sbom_rust VENDORDIR PKGBASE PKGVER -- a CycloneDX 1.5 SBOM (JSON on
-# stdout) of the Rust crates vendored under VENDORDIR/rust: one component per
-# .crate archive with its pkg:cargo PURL and SHA-256, the package itself the
-# top component. Crate names and versions are [A-Za-z0-9._+-], so no JSON
-# escaping is needed. The sourcer writes it into the source package.
-archci_sbom_rust() {
-	local dir=$1 pkgbase=$2 pkgver=$3 f base name ver sum first=1 uuid
+# _sbom_emit PURL NAME VERSION [ALG HEX] -- one CycloneDX component, preceded
+# by a comma except the first (the _sbom_first caller variable). Identifiers
+# are package-registry values (safe charset), so no JSON escaping is needed.
+_sbom_emit() {
+	local purl=$1 name=$2 ver=$3 alg=${4:-} hex=${5:-} hashes=''
+	[[ -n $alg && -n $hex ]] && hashes=$(printf ', "hashes": [{ "alg": "%s", "content": "%s" }]' "$alg" "$hex")
+	(( _sbom_first )) && _sbom_first=0 || printf ','
+	printf '\n    { "type": "library", "bom-ref": "%s", "name": "%s", "version": "%s", "purl": "%s"%s }' \
+		"$purl" "$name" "$ver" "$purl" "$hashes"
+}
+
+# _go_unescape ESCAPED -> the real module path (go's cache escapes an uppercase
+# letter as !<lowercase>, so !b -> B)
+_go_unescape() {
+	local s=$1 out='' next
+	while [[ $s == *'!'* ]]; do out+=${s%%!*}; s=${s#*!}; next=${s:0:1}; out+=${next^^}; s=${s:1}; done
+	printf '%s%s' "$out" "$s"
+}
+
+# archci_sbom VENDORDIR PKGBASE PKGVER -- a CycloneDX 1.5 SBOM (JSON on stdout)
+# of the dependencies vendored under VENDORDIR: rust crates (pkg:cargo, from
+# the .crate archives), go modules (pkg:golang, from the module cache zips) and
+# npm packages (pkg:npm, from the cacache index), each a component with its PURL
+# and a hash; the package itself is the top component. The sourcer writes it
+# into the source package.
+archci_sbom() {
+	local dir=$1 pkgbase=$2 pkgver=$3 uuid f base name ver sum rel mod key integ json b64 hex purl
+	local _sbom_first=1
 	uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)
 	printf '{\n  "bomFormat": "CycloneDX",\n  "specVersion": "1.5",\n'
 	[[ -n $uuid ]] && printf '  "serialNumber": "urn:uuid:%s",\n' "$uuid"
@@ -600,16 +621,45 @@ archci_sbom_rust() {
 	printf '    "component": { "type": "application", "bom-ref": "%s@%s", "name": "%s", "version": "%s", "purl": "pkg:generic/%s@%s" }\n' \
 		"$pkgbase" "$pkgver" "$pkgbase" "$pkgver" "$pkgbase" "$pkgver"
 	printf '  },\n  "components": ['
+
+	# rust: one .crate archive per crate
 	for f in "$dir"/rust/registry/cache/*/*.crate; do
 		[[ -e $f ]] || continue
 		base=${f##*/}; base=${base%.crate}
 		[[ $base =~ ^(.+)-([0-9].*)$ ]] || continue
-		name=${BASH_REMATCH[1]}; ver=${BASH_REMATCH[2]}
 		sum=$(sha256sum "$f" | cut -d' ' -f1)
-		(( first )) && first=0 || printf ','
-		printf '\n    { "type": "library", "bom-ref": "pkg:cargo/%s@%s", "name": "%s", "version": "%s", "purl": "pkg:cargo/%s@%s", "hashes": [{ "alg": "SHA-256", "content": "%s" }] }' \
-			"$name" "$ver" "$name" "$ver" "$name" "$ver" "$sum"
+		_sbom_emit "pkg:cargo/${BASH_REMATCH[1]}@${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" SHA-256 "$sum"
 	done
+
+	# go: cache/download/<escaped module>/@v/<version>.zip
+	while IFS= read -r f; do
+		[[ -n $f ]] || continue
+		rel=${f#"$dir"/go/cache/download/}
+		[[ $rel == *"/@v/"*.zip ]] || continue
+		ver=${rel##*/@v/}; ver=${ver%.zip}
+		mod=$(_go_unescape "${rel%%/@v/*}")
+		sum=$(sha256sum "$f" | cut -d' ' -f1)
+		_sbom_emit "pkg:golang/$mod@$ver" "$mod" "$ver" SHA-256 "$sum"
+	done < <(find "$dir/go/cache/download" -type f -name '*.zip' -path '*/@v/*' 2>/dev/null | sort)
+
+	# npm: the cacache index (index-v5) maps each tarball URL to its integrity
+	while IFS= read -r json; do
+		[[ $json == \{* ]] || continue
+		key=$(jq -r '.key // empty' <<<"$json" 2>/dev/null) || continue
+		[[ $key == *"/-/"*.tgz ]] || continue
+		base=${key##*/-/}; base=${base%.tgz}
+		[[ $base =~ ^(.+)-([0-9].*)$ ]] || continue
+		ver=${BASH_REMATCH[2]}
+		name=${key%%/-/*}; name=${name##*://*/}   # drop scheme://host/ , keep the package path
+		name=${name//%2f//}; name=${name//%2F//}; name=${name//%40/@}
+		[[ -n $name ]] || continue
+		integ=$(jq -r '.integrity // empty' <<<"$json" 2>/dev/null)
+		hex=''
+		[[ $integ == sha512-* ]] && { b64=${integ#sha512-}; hex=$(printf '%s' "$b64" | base64 -d 2>/dev/null | od -An -v -tx1 | tr -d ' \n'); }
+		purl="pkg:npm/${name/@/%40}@$ver"
+		if [[ -n $hex ]]; then _sbom_emit "$purl" "$name" "$ver" SHA-512 "$hex"; else _sbom_emit "$purl" "$name" "$ver"; fi
+	done < <(find "$dir/npm/_cacache/index-v5" -type f -exec cat {} \; 2>/dev/null | cut -f2-)
+
 	printf '\n  ]\n}\n'
 }
 

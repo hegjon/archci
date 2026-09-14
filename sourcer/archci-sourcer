@@ -265,13 +265,14 @@ fetch_one() {
 				rm -rf "$w/vendor/rust/.package-cache" "$w/vendor/rust/registry/src"
 				if archci_srcpkg_add_vendor "$f" "$job_pkgbase" "$w/vendor"; then
 					say "==> vendored: $(du -sh "$w/vendor" | cut -f1) of ${capture[*]} dependencies in the source package"
-					# a CycloneDX SBOM of the vendored Rust crates, into the source package
-					if [[ " ${capture[*]} " == *" rust "* ]]; then
-						archci_sbom_rust "$w/vendor" "$job_pkgbase" "$job_version" >"$w/sbom.cdx.json"
+					# a CycloneDX SBOM of the vendored deps (rust/go/npm), into the source package
+					case " ${capture[*]} " in
+					*" rust "*|*" go "*|*" npm "*)
+						archci_sbom "$w/vendor" "$job_pkgbase" "$job_version" >"$w/sbom.cdx.json"
 						if archci_srcpkg_add_file "$f" "$job_pkgbase" "$w/sbom.cdx.json" "sbom.cdx.json"; then
-							say "==> SBOM: $(grep -c '"purl": "pkg:cargo' "$w/sbom.cdx.json") crates in sbom.cdx.json"
-						else say "==> could not add the SBOM to ${f##*/}"; fi
-					fi
+							say "==> SBOM: $(jq '.components | length' "$w/sbom.cdx.json") components in sbom.cdx.json"
+						else say "==> could not add the SBOM to ${f##*/}"; fi ;;
+					esac
 				else
 					say "==> could not add vendor/ to ${f##*/}"; rc=1
 				fi
