@@ -124,6 +124,13 @@ grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$i
 rm -r "$ARCHCI_HOME/released"
 "$job" enqueue linux 0 src >/dev/null
 [[ $(claim_id sourcer src) == 0-*omarchy,linux,*,src ]] || fail "a package's sources can be enqueued by hand with ARCH=src"
+# with sources required, a queued build waits in pending/ too until its source package is released
+"$job" enqueue linux 0 x86_64 >/dev/null
+held=$(ARCHCI_SOURCES_REQUIRED=1 claim_id worker-2 x86_64)   # libsigc++'s retry, whose source package is released, may come instead
+[[ $held != *linux* ]] || fail "a queued build without a released source package must wait when sources are required: $held"
+[[ -z $held ]] || "$job" report "$held" abandoned
+[[ $(claim_id worker-2 x86_64) == 0-*omarchy,linux,*,x86_64 ]] || fail "without the requirement the queued build is claimed"
+for f in "$ARCHCI_HOME"/queue/running/*linux*x86_64.job; do id=${f##*/}; "$job" report "${id%.job}" abandoned; done; rm -f "$ARCHCI_HOME"/queue/pending/*linux*x86_64.job
 echo "--- the network exemption: package.json \"network\": true reaches the job"
 mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch", "network": true}'
 commit_pkgs netpkg

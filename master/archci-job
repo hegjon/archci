@@ -53,6 +53,21 @@ record_poll() {
 	mv "$ARCHCI_HOME/hosts/$worker.tmp" "$ARCHCI_HOME/hosts/$worker"
 }
 
+# source_package_for REPO PKGBASE COMMIT -> the source package the sourcer
+# made for the package at this commit, once the signer has released it
+# (archci-signer-status' listing; without one, once it has been out
+# ARCHCI_RELEASE_LAG_MINUTES); nothing otherwise
+source_package_for() {
+	local rec=$ARCHCI_HOME/built/$1-src/$2 listing=$ARCHCI_HOME/released/$1-src v c f
+	[[ -f $rec ]] || return 0
+	read -r v c f <"$rec"
+	[[ $c == "$3" && -n $f ]] || return 0
+	if [[ -f $listing ]]; then grep -qxF "$f" "$listing" && printf '%s\n' "$f"
+	elif (( $(date +%s) - $(stat -c %Y "$rec") >= ARCHCI_RELEASE_LAG_MINUTES * 60 )); then printf '%s\n' "$f"
+	fi
+	return 0
+}
+
 cmd_claim() {
 	local worker=$1 warch=$2
 	shift 2
@@ -80,11 +95,16 @@ cmd_claim() {
 	shopt -s nullglob; pend=("$Q_PENDING"/*.job); shopt -u nullglob
 	# The first pending job this worker's arch can build (its own arch, or "any"
 	# if it is the any arch) of a package the farm builds (a retry of one a
-	# filter has since excluded waits in pending/ until the filter is lifted).
+	# filter has since excluded waits in pending/ until the filter is lifted),
+	# and, with ARCHCI_SOURCES_REQUIRED, whose source package is released
+	# (a build waits for it in pending/ as it would among the outstanding).
 	for p in "${pend[@]}"; do
 		archci_read_job "$p" || continue
 		archci_can_build "$warch" "$job_arch" || continue
 		archci_pkg_wanted "$job_pkgbase" || continue
+		if [[ $ARCHCI_SOURCES_REQUIRED == 1 && $job_arch != src ]]; then
+			[[ -n $(source_package_for "$job_repo" "$job_pkgbase" "$job_commit") ]] || continue
+		fi
 		name=${p##*/}; break
 	done
 	if [[ -z $name ]]; then
@@ -97,18 +117,9 @@ cmd_claim() {
 	mv "$Q_PENDING/$name" "$Q_RUNNING/$name"
 	archci_read_job "$Q_RUNNING/$name" || archci_die "corrupt job file $name"
 	# the source package the sourcer made for this commit, once the signer
-	# has released it (archci-signer-status' listing; without one, once it
-	# has been out ARCHCI_RELEASE_LAG_MINUTES): the worker builds from it
-	# instead of fetching upstream
-	local rec=$ARCHCI_HOME/built/$job_repo-src/$job_pkgbase listing=$ARCHCI_HOME/released/$job_repo-src srcpkg='' v c f
-	if [[ $job_arch != src && -f $rec ]]; then
-		read -r v c f <"$rec"
-		if [[ $c == "$job_commit" && -n $f ]]; then
-			if [[ -f $listing ]]; then grep -qxF "$f" "$listing" && srcpkg=$f
-			elif (( $(date +%s) - $(stat -c %Y "$rec") >= ARCHCI_RELEASE_LAG_MINUTES * 60 )); then srcpkg=$f
-			fi
-		fi
-	fi
+	# has released it: the worker builds from it instead of fetching upstream
+	local srcpkg=''
+	[[ $job_arch == src ]] || srcpkg=$(source_package_for "$job_repo" "$job_pkgbase" "$job_commit")
 	rewrite_job "$Q_RUNNING/$name" "$Q_RUNNING/$name" \
 		"worker=$worker" "claimed=$(archci_now)" ${srcpkg:+"sources=$srcpkg"}
 	set_attempt "$Q_RUNNING/$name" $((job_attempt + 1))
