@@ -534,11 +534,12 @@ module Archci
   end
 
   # the job's log lines and the index of its first error: the archived log for
-  # a finished job, the journal's last lines for a running one
-  def self.read_log(j, lines: 400)
+  # a finished job, the whole journal so far for a running one (not a tail: a
+  # long build streams well past any fixed window, and the page wants it all)
+  def self.read_log(j)
     journal = config['ARCHCI_REMOTE_JOURNAL']
     text = if j['state'] == 'running' && journal && File.directory?(journal)
-             out, = Open3.capture2('journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '-n', lines.to_s, *journal_matches(j), err: File::NULL)
+             out, = Open3.capture2('journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '--lines=all', *journal_matches(j), err: File::NULL)
              out.scrub.lines(chomp: true)
            else
              File.exist?(j['log']) ? File.read(j['log']).scrub.lines(chomp: true) : []
