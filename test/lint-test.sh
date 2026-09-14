@@ -61,15 +61,11 @@ if command -v systemd-analyze >/dev/null; then
 	done
 	# verify needs /run/systemd, which a host running systemd has; in a
 	# chroot (makepkg's check()) it does not exist and the build user cannot
-	# make it, so there it runs in a user and mount namespace with a /run of
-	# its own.
-	verify=(systemd-analyze verify --root="$root" --man=no --recursive-errors=no "$root"/usr/lib/systemd/system/archci-*)
+	# make it, so there the check is skipped (CI and the developers' hosts run it).
 	if [[ -d /run/systemd ]]; then
-		"${verify[@]}" || fail "systemd-analyze verify"
-	elif unshare -rm true 2>/dev/null; then
-		unshare -rm sh -c 'mount -t tmpfs none /run && mkdir /run/systemd && exec "$@"' sh "${verify[@]}" || fail "systemd-analyze verify (in a namespace with its own /run)"
+		systemd-analyze verify --root="$root" --man=no --recursive-errors=no "$root"/usr/lib/systemd/system/archci-* || fail "systemd-analyze verify"
 	else
-		note "(no /run/systemd and no user namespace: skipped)"
+		note "(no /run/systemd here: skipped)"
 	fi
 	rm -rf "$root"
 else
