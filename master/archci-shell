@@ -29,7 +29,7 @@ case ${argv[0]:-} in
 		[[ $role == sourcer && ${argv[1]:-} == *,src || $role == worker && ${argv[1]:-} != *,src ]] || refuse
 		exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
 	# the web key: what a front end reads, and the operator's queue commands
-	snapshot|log|follow)
+	snapshot|job|log|follow)
 		[[ $role == web ]] || refuse
 		exec "$ARCHCI_MASTER_DIR/archci-web" "${argv[@]}" ;;
 	retry|requeue|enqueue)

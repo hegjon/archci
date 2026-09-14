@@ -20,7 +20,7 @@ commands=(
 	"top the farm live: queue, hosts, jobs, failures (one frame into a pipe)"
 	"failed the failed builds and each one's story: the job, its retry, its log (a list into a pipe)"
 	"jobs every job as a tree per package, pending to failed, filtered as you type, with its story and log (WORD... filters a list into a pipe)"
-	"web what a web front end reads: snapshot (the farm and every job) and log ID (a job's log) as JSON, follow ID (a running job's journal, live)"
+	"web what a web front end reads: snapshot, job ID, log ID as JSON, follow ID (a running job's journal, live)"
 )
 
 sub=${1:-help}

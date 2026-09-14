@@ -520,6 +520,20 @@ module Archci
     File.join(home, 'logs', j['repo'] || config['ARCHCI_REPO'], j['pkgbase'], j['version'], j['arch'], "attempt-#{j['attempt']}.log")
   end
 
+  # one job by id, read from whichever queue holds it (no scan of the rest);
+  # nil if no queue has it. Same shape as an all_jobs entry.
+  def self.find_job(id)
+    QUEUES.each do |q|
+      path = File.join(queue(q), "#{id}.job")
+      next unless File.exist?(path)
+
+      j = read_job(path) or next
+      pkg = packages.find { |p| p['pkgbase'] == j['pkgbase'] }
+      return j.merge('state' => q, 'origin' => origin(pkg) || '-', 'log' => log_path(j))
+    end
+    nil
+  end
+
   # every job the master holds, each with its queue as 'state', its package's
   # origin and its log path
   def self.all_jobs
