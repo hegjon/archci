@@ -234,6 +234,16 @@ fetch_one() {
 	fi
 	(( rc == 124 )) && say "==> timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
 	f=$(find "$w/out" -maxdepth 1 -name '*.src.tar.gz' -print -quit)
+	# what makepkg's "-> Adding <name>..." packed, with each source's size and
+	# kind (a git checkout, or a plain file), read back from the source package
+	if (( rc == 0 )) && [[ -n $f ]]; then
+		say "==> packaged sources:"
+		tar -tzvf "$f" 2>/dev/null | awk -v pb="$job_pkgbase" '
+			{ n=$NF; sub("^"pb"/","",n); top0=n; sub("/.*","",top0); if (n=="" || n=="PKGBUILD" || n==".SRCINFO" || top0=="keys") next
+			  i=index(n,"/"); top=(i? substr(n,1,i-1):n); sz[top]+=$3; if(i) dir[top]=1 }
+			END { for (t in sz) printf "      %8.1f MiB  %s%s\n", sz[t]/1048576, t, (dir[t]?" (git checkout)":"") }' \
+			| sort -k1 -rn | while IFS= read -r line; do say "$line"; done
+	fi
 	# the dependencies prepare() fetches (archci_vendor_kinds): captured
 	# into vendor/ by a makepkg -o in the same copy, the makedepends
 	# installed, and put into the source package as <pkgbase>/vendor/<kind>;
