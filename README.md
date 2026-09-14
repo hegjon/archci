@@ -342,7 +342,7 @@ baked into the worker image (see `cloud-init/worker.yaml`), registered once.
 bin/      archci-master, archci-signer, archci-sourcer, archci-worker: the role's command line, installed as /usr/bin/archci; `archci <name>` runs archci-<name> of the role (a worker's: version only)
 tools/    release-pkgbuild: writes the fork's PKGBUILD for a tag from PKGBUILD here (developers)
 lib/      archci-common.sh, archci-queue.sh (bash), archci.rb (ruby): config, the job queue, paths
-master/   archci-scan, archci-pkgindex, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top, archci-failed, archci-jobs
+master/   archci-scan, archci-pkgindex, archci-next, archci-job, archci-stage, archci-shell, archci-authorize, archci-signer-status, archci-top, archci-failed, archci-jobs, archci-web
           archci-housekeeping: the queue's timer pass, run by its timer, not a command
 worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
@@ -498,7 +498,8 @@ Then:
 3. Authorize worker keys: `archci authorize worker_key.pub`. This appends
    `command="/usr/lib/archci/master/archci-shell",restrict <key>` to
    `/etc/archci/authorized_keys`, so a worker key can do nothing but the
-   protocol. sshd reads that file for the archci user through
+   protocol (`--sourcer` restricts a key to `src` jobs, `--web` to what a
+   web front end does, see below). sshd reads that file for the archci user through
    `/etc/ssh/sshd_config.d/60-archci.conf` (installed by the master package,
    whose pacman hook reloads sshd). It is root's on
    purpose: the archci user, which the forced command and queue scripts run
@@ -594,6 +595,28 @@ packages; the signer releases it under `<repo>/os/src/`. Workers with
 `ARCHCI_RELEASE_URL` take source packages from there; without it they fetch
 upstream as before. `archci job enqueue PKGBASE 0 src` on the master
 fetches a package's sources now.
+
+### Web front end
+
+The farm has no web server. A front end runs on a host of its own and
+reads the master over ssh with a key of the `web` role, the way the
+signer is a host of its own on the other side of R2:
+
+```
+archci authorize --web web_key.pub        # on the master
+ssh archci@master snapshot | jq .         # from the web host: the farm and every job, as JSON
+ssh archci@master log <jobid>             # one job's log: its archived log, or the journal a running build streams
+ssh archci@master retry <jobid>           # and requeue, enqueue: the operator's queue commands, logged as the web key's
+```
+
+`archci web snapshot` and `archci web log ID` are the same commands on the
+master itself. The snapshot is what `archci top` shows (queue, hosts, running
+and failed jobs, the signer) plus every job the master holds with its state,
+origin and story, so a front end polls one command and filters in the
+browser. The web key claims nothing, uploads nothing and reads no file the
+master does not hand it. The front end in use is
+[archci-web](https://github.com/hegjon/archci-web), a Rails application
+without a database, which talks to the master this way.
 
 ### Signer
 

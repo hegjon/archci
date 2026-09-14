@@ -1,16 +1,20 @@
 #!/bin/bash
 # archci-shell [ROLE] -- forced command for the keys the master authorizes:
-# a worker's (ROLE worker, the default) or the sourcer's (sourcer, written
-# by archci authorize --sourcer).
+# a worker's (ROLE worker, the default), the sourcer's (sourcer, written by
+# archci authorize --sourcer) or a web front end's (web, --web).
 #
 # authorized_keys (written by archci-authorize):
 #   command="/usr/lib/archci/master/archci-shell",restrict  ssh-ed25519 AAAA... worker
 #   command="/usr/lib/archci/master/archci-shell sourcer",restrict  ssh-ed25519 AAAA... sourcer
+#   command="/usr/lib/archci/master/archci-shell web",restrict  ssh-ed25519 AAAA... web
 #
-# Both roles run the job protocol and rsync into incoming/. A sourcer key
-# claims, beats for and reports src jobs only (a job id ends in ,src); a
-# worker key anything but. The signer does not use ssh at all: it exchanges
-# packages with the master through R2.
+# The worker and sourcer roles run the job protocol and rsync into
+# incoming/. A sourcer key claims, beats for and reports src jobs only (a
+# job id ends in ,src); a worker key anything but. The web role reads
+# (archci-web snapshot, log ID) and runs the operator's queue commands
+# (retry, requeue, enqueue), each logged; it claims nothing and uploads
+# nothing. The signer does not use ssh at all: it exchanges packages with
+# the master through R2.
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -24,9 +28,17 @@ case ${argv[0]:-} in
 	heartbeat|report)
 		[[ $role == sourcer && ${argv[1]:-} == *,src || $role == worker && ${argv[1]:-} != *,src ]] || refuse
 		exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
+	# the web key: what a front end reads, and the operator's queue commands
+	snapshot|log)
+		[[ $role == web ]] || refuse
+		exec "$ARCHCI_MASTER_DIR/archci-web" "${argv[@]}" ;;
+	retry|requeue|enqueue)
+		[[ $role == web ]] || refuse
+		archci_log "web key: ${argv[*]}"
+		exec "$ARCHCI_MASTER_DIR/archci-job" "${argv[@]}" ;;
 	# -no-lock: rrsync 3.5 otherwise holds a lock on incoming/ for the whole
 	# transfer, and every other worker's upload fails while one is running
 	# (a debug package can take minutes to arrive).
-	rsync) exec rrsync -wo -no-del -no-lock "$ARCHCI_HOME/incoming" ;;
+	rsync) [[ $role != web ]] || refuse; exec rrsync -wo -no-del -no-lock "$ARCHCI_HOME/incoming" ;;
 	*) refuse ;;
 esac

@@ -50,6 +50,8 @@ archci jobs                         every job as a tree, a package and its src, 
                                     the job picked shows its story (worker, attempt, sources, network, stats), its file (i), its log
 archci jobs failed aarch64 | cat    the tree into a pipe, the jobs filtered by words (state, package, version, arch, worker, origin)
 archci next                         what the next claim would build
+archci web snapshot | jq .          the farm and every job as JSON, what the web front end polls
+archci web log <jobid>              a job's log as JSON: the lines and the index of the first error
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
 journalctl -u archci-stage          staging to R2

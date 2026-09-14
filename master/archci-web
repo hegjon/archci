@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# archci-web snapshot | log ID -- what a web front end reads of the master,
+# as JSON on stdout:
+#   snapshot   the farm as archci top shows it (Archci.snapshot: queue, hosts,
+#              running and failed jobs, the signer) plus "jobs": every job
+#              the master holds, pending to failed, with its state, origin,
+#              story and log path, and "generated"
+#   log ID     one job's log: {"id", "state", "lines": [...], "error_at": N}
+#              (null without an error), the archived log of a finished job,
+#              the last lines of the journal a running one streams
+# These are the read side of the web key (archci authorize --web): a front end
+# on its own host runs them over ssh, where archci-shell web allows them, and
+# archci-job's retry, requeue and enqueue. Safe to run by hand.
+
+require_relative '../lib/archci'
+require 'json'
+require 'time'
+
+def plain(j)
+  j.merge('mtime' => j['mtime'].utc.iso8601, 'story' => Archci.story(j))
+end
+
+case ARGV
+in ['snapshot']
+  now = Time.now
+  snap = Archci.snapshot(now)
+  puts JSON.generate(snap.merge('generated' => now.utc.iso8601, 'jobs' => Archci.all_jobs.map { |j| plain(j) }))
+in ['log', id]
+  j = Archci.all_jobs.find { |x| x['id'] == id } or abort "archci-web: no job #{id}"
+  lines, err = Archci.read_log(j)
+  puts JSON.generate('id' => j['id'], 'state' => j['state'], 'lines' => lines, 'error_at' => err)
+else
+  abort 'usage: archci-web snapshot | log ID'
+end

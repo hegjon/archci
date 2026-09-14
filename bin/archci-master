@@ -10,7 +10,7 @@ source "$root/lib/archci-common.sh"
 
 # the commands: "name what it does"
 commands=(
-	"authorize let a worker key talk to this master, or stop it"
+	"authorize let a worker key talk to this master (--sourcer, --web: the sourcer's, a web front end's), or stop it"
 	"job the queue: enqueue, retry, requeue, report (runs as the archci user)"
 	"next the next package a worker of ARCH would build"
 	"pkgindex the packages in the PKGBUILD repository clone: the index (a package name for its line)"
@@ -20,6 +20,7 @@ commands=(
 	"top the farm live: queue, hosts, jobs, failures (one frame into a pipe)"
 	"failed the failed builds and each one's story: the job, its retry, its log (a list into a pipe)"
 	"jobs every job as a tree per package, pending to failed, filtered as you type, with its story and log (WORD... filters a list into a pipe)"
+	"web what a web front end reads, as JSON: snapshot (the farm and every job), log ID (a job's log)"
 )
 
 sub=${1:-help}

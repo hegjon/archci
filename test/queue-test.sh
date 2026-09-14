@@ -165,6 +165,12 @@ grep -q "^  ._ x86_64  *failed  *worker-2  *1/2 .*: ==> ERROR: A failure occurre
 [[ $("$master/archci-jobs" failed libsigc | grep -c "_ ") == 1 && -z $("$master/archci-jobs" failed nosuchpkg) ]] || fail "archci jobs must filter by words: $("$master/archci-jobs" failed libsigc)"
 listing=$("$master/archci-jobs" 'done' acl)
 grep -q "^  ._ x86_64  *done  " <<<"$listing" || fail "archci jobs must list done jobs too: $("$master/archci-jobs" 'done' acl)"
+snap=$("$master/archci-web" snapshot)
+[[ $(jq -r '.jobs | length' <<<"$snap") == $(find "$ARCHCI_HOME"/queue -name "*.job" | wc -l) ]] || fail "archci web snapshot must list every job"
+[[ $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap") == "failed "*" on worker-2, attempt 1 of 2; sources libsigc++-2.12.2-1.src.tar.gz" ]] || fail "each job tells its story: $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap")"
+[[ $(jq -r '.queue.failed' <<<"$snap") == $(find "$ARCHCI_HOME/queue/failed" -name "*.job" | wc -l) && $(jq -r '.generated' <<<"$snap") == 20*Z ]] || fail "the snapshot is archci top's plus jobs and generated: $(jq -c '[.queue, .generated]' <<<"$snap")"
+log=$("$master/archci-web" log "$id")
+[[ $(jq -r '.error_at' <<<"$log") == 1 && $(jq -r '.lines[1]' <<<"$log") == "==> ERROR: A failure occurred in build()." ]] || fail "archci web log gives the lines and the first error: $log"
 grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be final yet"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "housekeeping should have requeued"

@@ -20,30 +20,13 @@
 #   q, Esc         quit
 require_relative '../lib/archci'
 require 'io/console'
-require 'open3'
 
 # a line that names the failure; the second set names one without being it
-ERROR_RE = /error:|ERROR|FAILED|Unmet dependencies|target not found|Failure while downloading|did not pass the validity|returned error: 4\d\d/
-NOT_ERROR_RE = /gpg:|Verifying|Build failed, check|makechrootpkg exited|the build exited|archci-build finished|-Werror|ERRORFUNC|_error|error_/
-def error_line?(line) = line.match?(ERROR_RE) && !line.match?(NOT_ERROR_RE)
-
 MAX_ATTEMPTS = Archci.config['ARCHCI_MAX_ATTEMPTS'].to_i
-JOURNAL = Archci.config['ARCHCI_REMOTE_JOURNAL']
 FIELDS = %w[state pkgbase version arch worker origin].freeze
 ARCH_ORDER = %w[src any x86_64 aarch64 riscv64].freeze
 
 # every job with its state, origin and log path
-def all_jobs
-  repo = Archci.config['ARCHCI_REPO']
-  by_name = Archci.packages.to_h { |p| [p['pkgbase'], p] }
-  Archci::QUEUES.flat_map do |q|
-    Archci.jobs(q).map do |j|
-      j.merge('state' => q, 'origin' => Archci.origin(by_name[j['pkgbase']]) || '-',
-              'log' => File.join(Archci.home, 'logs', j['repo'] || repo, j['pkgbase'], j['version'], j['arch'], "attempt-#{j['attempt']}.log"))
-    end
-  end
-end
-
 # the jobs whose fields hold every word of the filter
 def filtered(jobs, words)
   return jobs if words.empty?
@@ -65,44 +48,6 @@ def tree(jobs)
   rows
 end
 
-# the journal's matches for a running job: a build's unit, or the sourcer's
-# service on its host for a src job (what archci-top keys on)
-def journal_matches(j)
-  if j['arch'] == 'src'
-    ['_SYSTEMD_UNIT=archci-sourcer.service', "_HOSTNAME=#{j['worker']}", 'SYSLOG_IDENTIFIER=archci-sourcer']
-  else
-    name = "#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9:_.-]/, '_')
-    ["_SYSTEMD_UNIT=archci-build@#{name}.service"]
-  end
-end
-
-# the job's log lines and the index of its first error: the archived log for
-# a finished job, the journal's last lines for a running one
-def read_log(j)
-  lines = if j['state'] == 'running' && JOURNAL && File.directory?(JOURNAL)
-            out, = Open3.capture2('journalctl', '-D', JOURNAL, '--no-pager', '-a', '-o', 'cat', '-n', '400', *journal_matches(j), err: File::NULL)
-            out.scrub.lines(chomp: true)
-          else
-            File.exist?(j['log']) ? File.read(j['log']).scrub.lines(chomp: true) : []
-          end
-  [lines, j['state'] == 'done' ? nil : lines.index { |l| error_line?(l) }]   # a done job's line of interest is its last
-end
-
-# the job's story in one line: state, where, when, what it had
-def story(j)
-  s = case j['state']
-      when 'pending' then "pending since #{j['created']}, attempt #{j['attempt'] + 1} of #{MAX_ATTEMPTS} next"
-      when 'running' then "running on #{j['worker']} since #{j['claimed']}, attempt #{j['attempt']} of #{MAX_ATTEMPTS}#{j['phase'] ? ", in #{j['phase']}" : ''}"
-      when 'done' then "done #{j['finished']} on #{j['worker']}, attempt #{j['attempt']}"
-      when 'failed' then "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{MAX_ATTEMPTS}#{j['final'] ? ': gave up' : ''}"
-      end
-  had = []
-  had << "sources #{j['sources']}" if j['sources']
-  had << 'network' if j['network'] == '1'
-  had << "#{j['rss']}M rss, #{j['peak']}M peak" if j['rss']
-  had.empty? ? s : "#{s}; #{had.join(', ')}"
-end
-
 # a job's row in the tree: its arch (and version, when the package has several
 # among the jobs shown), state, worker, tries, when
 def job_row(j, versions, last)
@@ -120,11 +65,11 @@ words = ARGV.dup
 
 # ---- into a pipe: the list, with the first error line ----
 unless $stdout.tty? && $stdin.tty?
-  tree(filtered(all_jobs, words)).each do |kind, a, b, versions|
+  tree(filtered(Archci.all_jobs, words)).each do |kind, a, b, versions|
     if kind == :pkg
       puts pkg_row(a, b)
     else
-      lines, err = read_log(a)
+      lines, err = Archci.read_log(a)
       puts "#{job_row(a, versions, b)}: #{err ? lines[err].strip[0, 160] : (lines.empty? ? '-' : lines.last.strip[0, 160])}"
     end
   end
@@ -136,7 +81,7 @@ def reverse(s) = "\e[7m#{s}\e[0m"
 def bold(s) = "\e[1m#{s}\e[0m"
 def dim(s) = "\e[2m#{s}\e[0m"
 
-every = all_jobs
+every = Archci.all_jobs
 rows = tree(filtered(every, words))
 job_rows = rows.each_index.select { |i| rows[i][0] == :job }   # the rows a selection can rest on
 selected = 0       # index into job_rows
@@ -156,7 +101,7 @@ load_log = lambda do
   mtime = File.exist?(j['log']) ? File.mtime(j['log']) : j['mtime']
   return if log_of == j['id'] && log_mtime == mtime
 
-  log_lines, err = read_log(j)
+  log_lines, err = Archci.read_log(j)
   log_at = err ? [err - 3, 0].max : [log_lines.size - 1, 0].max
   log_of = j['id']
   log_mtime = mtime
@@ -184,7 +129,7 @@ frame = lambda do
   if (j = current.call)
     load_log.call
     out << "#{bold("#{j['pkgbase']} #{j['version']}")}  #{j['arch']}, from #{j['origin']}   job #{j['id']}"
-    out << story(j)[0, cols]
+    out << Archci.story(j)[0, cols]
     body = height - out.size - 2
     if show_job
       out << dim("job file #{j['path']}")
@@ -194,7 +139,7 @@ frame = lambda do
       out << (message ? bold(message) : dim("#{what}#{log_lines.empty? ? ' (none)' : " (#{log_lines.size} lines)"}"))
       log_lines[log_at.to_i, body].to_a.each do |l|
         l = l[0, cols]
-        out << (error_line?(l) ? bold(l) : l)
+        out << (Archci.error_line?(l) ? bold(l) : l)
       end
     end
   end
@@ -202,11 +147,11 @@ frame = lambda do
 end
 
 next_error = lambda do |from|
-  i = log_lines.each_index.find { |k| k > from && error_line?(log_lines[k]) }
+  i = log_lines.each_index.find { |k| k > from && Archci.error_line?(log_lines[k]) }
   i ? [i - 3, 0].max : log_at
 end
 prev_error = lambda do |from|
-  i = log_lines.each_index.reverse_each.find { |k| k < from && error_line?(log_lines[k]) }
+  i = log_lines.each_index.reverse_each.find { |k| k < from && Archci.error_line?(log_lines[k]) }
   i ? [i - 3, 0].max : log_at
 end
 rebuild = lambda do
@@ -225,7 +170,7 @@ loop do
   frame.call
   key = IO.select([$stdin], nil, nil, 5) ? $stdin.read_nonblock(16, exception: false) : nil
   if key.nil?   # the interval passed: the queue may have changed
-    every = all_jobs
+    every = Archci.all_jobs
     rebuild.call
     next
   end
@@ -271,7 +216,7 @@ loop do
     if (j = current.call) && j['state'] == 'failed'
       out, st = Open3.capture2e(File.join(Archci::ROOT, 'master', 'archci-job'), 'retry', j['id'])
       message = st.success? ? "retrying #{j['pkgbase']} #{j['version']} #{j['arch']}: queued as a fresh first attempt" : "retry failed: #{out.strip}"
-      every = all_jobs
+      every = Archci.all_jobs
       rebuild.call
     end
   end

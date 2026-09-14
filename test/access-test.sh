@@ -75,4 +75,28 @@ sid=$(sed -n 's/^id=//p' < <("$tmp/fakessh-sourcer" master claim srcr src))
 ! "$tmp/fakessh" master housekeeping 2>/dev/null || fail "shell must refuse non-worker commands"
 "$tmp/fakessh" master report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "report through shell"
+
+echo "--- the web role: reads the farm, runs the queue commands, claims and uploads nothing"
+ssh-keygen -q -t ed25519 -N '' -C archci-web@site -f "$tmp/webkey"
+ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" --web "$tmp/webkey.pub"
+grep -q '^command="[^"]*/master/archci-shell web",restrict' "$akf" || fail "--web must set the web role: $(cat "$akf")"
+cat >"$tmp/fakessh-web" <<'SH'
+#!/bin/bash
+shift
+SSH_ORIGINAL_COMMAND="$*" exec "$ARCHCI_SHELL" web
+SH
+chmod +x "$tmp/fakessh-web"
+snap=$("$tmp/fakessh-web" master snapshot) || fail "the web key reads the snapshot"
+[[ $(jq -r '.queue.done' <<<"$snap") == 1 ]] || fail "the snapshot has the queue counts: $(jq -c .queue <<<"$snap")"
+[[ $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .state' <<<"$snap") == 'done' ]] || fail "the snapshot lists every job with its state"
+log=$("$tmp/fakessh-web" master log "$id") || fail "the web key reads a job's log"
+[[ $(jq -r '.state' <<<"$log") == 'done' && $(jq -r '.lines | type' <<<"$log") == array ]] || fail "log ID is JSON with the lines: $log"
+! "$tmp/fakessh-web" master log "9-1-omarchy,nope,1-1,x86_64" >/dev/null 2>&1 || fail "log of an unknown job must fail"
+"$tmp/fakessh-web" master enqueue acl 0 x86_64 >/dev/null || fail "the web key enqueues"
+[[ -n $(ls "$ARCHCI_HOME"/queue/pending/*acl*x86_64.job 2>/dev/null) ]] || fail "the enqueued job must be pending"
+! "$tmp/fakessh-web" master claim web-1 x86_64 >/dev/null 2>&1 || fail "a web key must not claim"
+! "$tmp/fakessh-web" master heartbeat "$id" worker=web-1 >/dev/null 2>&1 || fail "a web key must not beat"
+! "$tmp/fakessh-web" master report "$id" success web-1 >/dev/null 2>&1 || fail "a web key must not report"
+! rsync -a -e "$tmp/fakessh-web" "$tmp/out/" "master:$id/" 2>/dev/null || fail "a web key must not upload"
+! "$tmp/fakessh" master snapshot >/dev/null 2>&1 || fail "a worker key must not read the snapshot"
 echo "ALL OK"

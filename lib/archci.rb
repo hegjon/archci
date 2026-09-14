@@ -510,6 +510,65 @@ module Archci
     }
   end
 
+  # ---- every job, its log and its story: what archci jobs and archci web show ----
+  ERROR_RE = /error:|ERROR|FAILED|Unmet dependencies|target not found|Failure while downloading|did not pass the validity|returned error: 4\d\d/
+  NOT_ERROR_RE = /gpg:|Verifying|Build failed, check|makechrootpkg exited|the build exited|archci-build finished|-Werror|ERRORFUNC|_error|error_/
+  def self.error_line?(line) = line.match?(ERROR_RE) && !line.match?(NOT_ERROR_RE)
+
+  # the attempt's archived log (written when the job finishes)
+  def self.log_path(j)
+    File.join(home, 'logs', j['repo'] || config['ARCHCI_REPO'], j['pkgbase'], j['version'], j['arch'], "attempt-#{j['attempt']}.log")
+  end
+
+  # every job the master holds, each with its queue as 'state', its package's
+  # origin and its log path
+  def self.all_jobs
+    by_name = packages.to_h { |p| [p['pkgbase'], p] }
+    QUEUES.flat_map do |q|
+      jobs(q).map { |j| j.merge('state' => q, 'origin' => origin(by_name[j['pkgbase']]) || '-', 'log' => log_path(j)) }
+    end
+  end
+
+  # the journal's matches for a running job: a build's unit, or the sourcer's
+  # service on its host for a src job (what archci-top keys on)
+  def self.journal_matches(j)
+    if j['arch'] == 'src'
+      ['_SYSTEMD_UNIT=archci-sourcer.service', "_HOSTNAME=#{j['worker']}", 'SYSLOG_IDENTIFIER=archci-sourcer']
+    else
+      name = "#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9:_.-]/, '_')
+      ["_SYSTEMD_UNIT=archci-build@#{name}.service"]
+    end
+  end
+
+  # the job's log lines and the index of its first error: the archived log for
+  # a finished job, the journal's last lines for a running one
+  def self.read_log(j, lines: 400)
+    journal = config['ARCHCI_REMOTE_JOURNAL']
+    text = if j['state'] == 'running' && journal && File.directory?(journal)
+             out, = Open3.capture2('journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '-n', lines.to_s, *journal_matches(j), err: File::NULL)
+             out.scrub.lines(chomp: true)
+           else
+             File.exist?(j['log']) ? File.read(j['log']).scrub.lines(chomp: true) : []
+           end
+    [text, j['state'] == 'done' ? nil : text.index { |l| error_line?(l) }]   # a done job's line of interest is its last
+  end
+
+  # the job's story in one line: state, where, when, what it had
+  def self.story(j)
+    max = config['ARCHCI_MAX_ATTEMPTS'].to_i
+    s = case j['state']
+        when 'pending' then "pending since #{j['created']}, attempt #{j['attempt'] + 1} of #{max} next"
+        when 'running' then "running on #{j['worker']} since #{j['claimed']}, attempt #{j['attempt']} of #{max}#{j['phase'] ? ", in #{j['phase']}" : ''}"
+        when 'done' then "done #{j['finished']} on #{j['worker']}, attempt #{j['attempt']}"
+        when 'failed' then "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{max}#{j['final'] ? ': gave up' : ''}"
+        end
+    had = []
+    had << "sources #{j['sources']}" if j['sources']
+    had << "network #{j['network']}" if j['network']
+    had << "#{j['rss']}M rss, #{j['peak']}M peak" if j['rss']
+    had.empty? ? s : "#{s}; #{had.join(', ')}"
+  end
+
   # Claim order among packages of one class: Arch's core before extra before
   # multilib, then this repository's own (local) packages, then AUR ones.
   ORIGIN_RANK = { %w[arch core] => 0, %w[arch extra] => 1, %w[arch multilib] => 2 }.freeze
