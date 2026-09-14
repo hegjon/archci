@@ -80,6 +80,12 @@ ARCHCI_DONE_KEEP_DAYS=30
 # what clients use. rclone remotes, e.g. "r2:archci/staging" and "r2:archci".
 ARCHCI_R2_STAGING=""
 ARCHCI_R2_RELEASE=""
+# Off-volume archive of the per-attempt build logs (logs/<repo>/<pkgbase>/...
+# /attempt-N.log). archci-stage copies new logs here and keeps the local
+# copies (the journal and the files stay on the master; this is a durable
+# copy). The master's rclone token must be allowed to write this prefix.
+# Empty: logs stay only on the master. e.g. "r2:archci/logs".
+ARCHCI_R2_LOGS=""
 ARCHCI_RCLONE_CONFIG=/etc/archci/rclone.conf
 # The released repo's public URL, as clients use it, e.g.
 # "https://pub-xxxx.r2.dev". On the master, archci-signer-status shows the

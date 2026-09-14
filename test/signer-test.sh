@@ -31,13 +31,14 @@ echo "--- R2 transport: master stages, signer verifies+signs+publishes (fake rcl
 # A faithful stand-in for rclone: every remote is a local path.
 cat >"$tmp/rclone" <<'SH'
 #!/bin/bash
-sub=""; pos=(); fmt=""; sep=""; list=/dev/null
+sub=""; pos=(); fmt=""; sep=""; list=/dev/null; ignore=
 while [[ $# -gt 0 ]]; do
   case $1 in
     --format) fmt=$2; shift 2;;
     --separator) sep=$2; shift 2;;
     --files-from) list=$2; shift 2;;
     --transfers|--checkers|--config|--stats|--timeout|--contimeout) shift 2;;
+    --ignore-existing) ignore=1; shift;;
     -R|--*) shift;;
     *) [[ -z $sub ]] && sub=$1 || pos+=("$1"); shift;;
   esac
@@ -48,7 +49,11 @@ case $sub in
          else (cd "${pos[0]}" && find . -type f -printf '%P\n'); fi; fi;;
   copyto) [[ -f ${pos[0]} ]] || exit 1; mkdir -p "$(dirname "${pos[1]}")"; cp "${pos[0]}" "${pos[1]}";;
   deletefile) rm -f "${pos[0]}";;
-  copy) while IFS= read -r f; do [[ -f ${pos[0]}/$f ]] || continue; mkdir -p "$(dirname "${pos[1]}/$f")"; cp "${pos[0]}/$f" "${pos[1]}/$f"; done <"$list";;
+  copy) if [[ $list == /dev/null && -d ${pos[0]} ]]; then   # recursive dir copy (archci-stage logs)
+          (cd "${pos[0]}" && find . -type f -printf '%P\n') | while IFS= read -r f; do
+            [[ -n $ignore && -f ${pos[1]}/$f ]] && continue
+            mkdir -p "$(dirname "${pos[1]}/$f")"; cp "${pos[0]}/$f" "${pos[1]}/$f"; done
+        else while IFS= read -r f; do [[ -f ${pos[0]}/$f ]] || continue; mkdir -p "$(dirname "${pos[1]}/$f")"; cp "${pos[0]}/$f" "${pos[1]}/$f"; done <"$list"; fi;;
   delete) while IFS= read -r f; do rm -f "${pos[0]}/$f"; done <"$list";;
   move) if [[ -d ${pos[0]} ]]; then (cd "${pos[0]}" && find . -type f -printf '%P\n') | while IFS= read -r f; do
           mkdir -p "$(dirname "${pos[1]}/$f")"; mv "${pos[0]}/$f" "${pos[1]}/$f"; done; fi;;
@@ -74,9 +79,21 @@ mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" evil 1-1
 ep=$ARCHCI_HOME/repo/omarchy/os/x86_64/evil-1-1-x86_64.pkg.tar.zst
 gpg --homedir "$gpgx" --batch --detach-sign -u evil -o "$ep.buildsig" "$ep"
 
-"$master/archci-stage" --force
+# a build log in the archive tree; stage copies it to R2 and keeps the local file
+logdir=$ARCHCI_HOME/logs/omarchy/hello/1-1/x86_64
+mkdir -p "$logdir"; printf 'building hello\n==> done\n' >"$logdir/attempt-1.log"
+ARCHCI_R2_LOGS=$R2/logs "$master/archci-stage" --force
 [[ ! -e $hp && ! -e $ep ]] || fail "stage must move packages out of the pool"
 [[ -f $staging/omarchy/os/x86_64/hello-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not staged"
+[[ -f $R2/logs/omarchy/hello/1-1/x86_64/attempt-1.log ]] || fail "the build log must be archived to R2"
+[[ -f $logdir/attempt-1.log ]] || fail "stage must keep the local log (archive is a copy)"
+# a log already in R2 is not re-uploaded (ignore-existing): change it locally,
+# add a new one, restage; R2 keeps the old content and gains only the new file
+printf 'CHANGED\n' >"$logdir/attempt-1.log"
+printf 'second attempt\n' >"$logdir/attempt-2.log"
+ARCHCI_R2_LOGS=$R2/logs "$master/archci-stage" --force
+[[ -f $R2/logs/omarchy/hello/1-1/x86_64/attempt-2.log ]] || fail "a new log must be archived on the next stage"
+[[ $(<"$R2/logs/omarchy/hello/1-1/x86_64/attempt-1.log") != CHANGED ]] || fail "an already-archived log must not be re-uploaded (--ignore-existing)"
 
 "$sign"
 # the trusted package is released and signed; the attacker package is rejected

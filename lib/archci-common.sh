@@ -84,6 +84,7 @@ archci_load_conf
 # empty = the R2 hand-off is idle. See README "Signing".
 : "${ARCHCI_R2_STAGING:=}"
 : "${ARCHCI_R2_RELEASE:=}"
+: "${ARCHCI_R2_LOGS:=}"
 : "${ARCHCI_RCLONE_CONFIG:=/etc/archci/rclone.conf}"
 # Master: the released repo's public URL, as clients use it (the master's
 # rclone token need not read RELEASE). archci-signer-status reports the

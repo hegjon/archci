@@ -20,9 +20,22 @@ flock 9
 rm -f "$flag"
 
 export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
+
+# Archive the per-attempt build logs to R2, if a log remote is set. A finished
+# attempt's log never changes, so --ignore-existing uploads only new ones and
+# skips the rest without a per-file check. The local copies stay (the journal
+# and these files remain the master's own; R2 is the off-volume archive).
+logs=$ARCHCI_HOME/logs
+if [[ -n $ARCHCI_R2_LOGS && -d $logs ]]; then
+	rclone copy "$logs" "$ARCHCI_R2_LOGS" --ignore-existing --transfers 8 --checkers 16
+	archci_log "archived logs to $ARCHCI_R2_LOGS"
+fi
+
+# Move packages and their builder signatures to staging; nothing else lives
+# in the pool. rclone move copies then removes, so the master keeps only what
+# is not yet staged.
 pool=$ARCHCI_HOME/repo
 [[ -d $pool ]] || exit 0
-# Move packages and their builder signatures; nothing else lives in the pool.
 before=$(find "$pool" -name '*.pkg.tar.zst' | wc -l)
 rclone move "$pool" "$ARCHCI_R2_STAGING" --transfers 8 --checkers 16 --no-traverse
 find "$pool" -type d -empty -delete 2>/dev/null || true
