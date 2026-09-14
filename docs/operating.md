@@ -76,7 +76,9 @@ change in `/etc/archci/archci.conf`. Environment variables override the
 file, which is how the tests run without network or root. Run them with
 `test/run.sh` (add a name substring to filter, e.g. `test/run.sh lint`);
 the PKGBUILD's `check()` runs the same suite, so a release that fails a
-test does not get built:
+test does not get built, and GitHub Actions
+(`.github/workflows/test.yml`) runs it in an Arch container on every push
+and pull request:
 
 - `test/lint-test.sh` — `bash -n` and `ruby -c` on every script, plus
   `shellcheck` when installed.
@@ -93,6 +95,8 @@ test does not get built:
 - `test/worker-test.sh` — archci-worker end to end with ssh, systemctl and the
   build faked: a normal job, a master outage, self-reload. `pool-test.sh`,
   `watchdog-test.sh` and `config-test.sh` cover one function or file each.
+- `test/vendor-test.sh` — which ecosystems a PKGBUILD fetches, the
+  capture and replay environments, the vendor directory in a source package.
 
 ## Releasing
 

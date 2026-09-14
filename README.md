@@ -125,7 +125,8 @@ for the job's commit and it is released, and is printed. The worker then:
 
 1. takes the source package from the release (`<repo>/os/src/`), checks its
    release signature, and has the PKGBUILD directory with every source in
-   it, verified by the sourcer, and
+   it, verified by the sourcer, and the dependencies its prepare() fetches
+   from cargo, go, npm, pip or maven, captured there (`vendor/`), and
    builds with `--holdver` (VCS sources come as snapshots); or, with no
    source package or no store configured, exports `pkgbuilds/<name>/` from
    the PKGBUILD repository at exactly the job's commit (`git archive` out of
@@ -143,18 +144,20 @@ for the job's commit and it is released, and is printed. The worker then:
    with `arch-nspawn` twice: once with the network, in the `archci-online`
    slice, to install the dependencies (makepkg up to "sources are ready"),
    then in `archci-offline`, where an nftables table of archci's own lets
-   nothing but loopback out, to build: the sources sit in the source
+   nothing out, loopback included, to build: the sources sit in the source
    package or were verified on the host, and what the sourcer vendored
-   replays from it, and loopback is closed too. A package whose build
+   replays from it, the ecosystem told to fetch nothing. A package whose build
    talks to itself, a test suite with a server, gets `"network":
    "loopback"` in its package.json and builds in `archci-loopback`, where
    only loopback is open; one whose prepare() fetches what no vendoring
    serves gets `"network": "full"` and builds in `archci-online`. Both are
    the package's own, approved by hand. `ARCHCI_BUILD_LOOPBACK=1` on a
    worker opens loopback for every build there, `ARCHCI_BUILD_OFFLINE=0`
-   the network.
-   (Before 0.4.20 this was `makechrootpkg -c -l archci-N`) in
-   `/var/lib/archbuild/<profile>-<arch>`; devtools creates the chroot as a
+   the network. The container is `archci-build-<arch>-<instance>-<pkgbase>`
+   to `machinectl`, its scope under `archci.slice`, where the heartbeat
+   reads its CPU and memory. The clean chroot is
+   `/var/lib/archbuild/<profile>-<arch>` (before 0.4.20 the build was
+   `makechrootpkg -c -l archci-N` there); devtools creates it as a
    btrfs subvolume and each build gets a fresh snapshot of it. The root is
    upgraded from the mirrors alone, every `ARCHCI_CHROOT_UPDATE_MINUTES`
    (10), with the farm's repository first in the copies' `pacman.conf` and
@@ -189,8 +192,9 @@ phase (makepkg's step, from the build's output), CPU, memory and build-tree
 size read from its cgroup; the master keeps them
 with the job for `archci top`. A job without a heartbeat for 30 minutes is
 put back in `pending/` by housekeeping (a 5-minute timer), so a worker can
-be destroyed at any time. On `systemctl stop` the worker reports
-`abandoned`, which requeues without counting an attempt.
+be destroyed at any time; a heartbeat or report names its worker, and one
+from a worker the job was since taken from is refused. On `systemctl stop`
+the worker reports `abandoned`, which requeues without counting an attempt.
 
 **Sourcer.** Sources are jobs of the arch `src`. `archci-sourcer` is a
 worker for that arch: it claims (`claim <host> src`, with the host's stats,
@@ -203,7 +207,14 @@ entered with `arch-nspawn` with the network kept, since this is the online
 pass): `makepkg --allsource` there, as the build user, downloads every
 source of every arch, checksums and signature-checks them and packs
 `<pkgbase>-<version>.src.tar.gz`; a PKGBUILD is sourced only inside the
-container, and `SRCDEST` is the host's, kept between jobs. It then signs
+container, and `SRCDEST` is the host's, kept between jobs. A PKGBUILD
+whose prepare() fetches an ecosystem's packages (`cargo fetch`, `go mod
+download`, `npm ci`, pip, maven or gradle) gets that fetch run there too,
+`makepkg -o` with the makedepends installed and the ecosystem's cache
+directed into `vendor/<kind>/`, which goes into the source package; the
+worker builds with the same cache and the ecosystem told to fetch nothing
+(cargo's `--offline`, `GOPROXY=off`, npm's offline mode, maven's
+`--offline`, a gradle init script). It then signs
 the source package with its builder key and hands it in like a
 build's packages (rsync into `incoming/`, then `report`). The master pools
 it under `<repo>/os/src` and records it in `built/<repo>-src/` ("version
@@ -220,8 +231,8 @@ with `ARCHCI_SOURCES_REQUIRED=1` the master holds a build until that is
 so. A failed fetch is a failed job: its makepkg log is the attempt's log,
 housekeeping retries it, `archci failed` lists it. The sourcer is the one
 host that talks to upstream, and holds no credential but its keys. `archci
-top` lists the sourcer host beside the workers, with no worker of its own,
-and shows how many packages are packaged, still to fetch and failed.
+top` lists the sourcer host after the master, its fetch a running job like
+a build, and shows how many packages are packaged, still to fetch and failed.
 
 **Master.** The master holds no signing key and builds no database. On `report
 success` the packages and their builder signatures are pooled into
@@ -321,6 +332,7 @@ worker/   archci-worker, archci-build, archci-worker-setup, archci-qemu-setup
 signer/   archci-sign, archci-sign-health, archci-authorize-builder
 sourcer/  archci-sourcer: the outstanding packages' sources fetched into source packages on R2 for the workers
 remote-logging/  archci-logging-setup: the journal streaming configuration from ARCHCI_JOURNAL_URL
+test/     the test suite (test/run.sh), run by the PKGBUILD's check() and by GitHub Actions (.github/workflows/test.yml) on every push
 arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf (and .d/) and qemu/ for aarch64 and riscv64
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
@@ -342,15 +354,16 @@ one package per role (see Install).
 ```
 pkgbuilds/                  clone of the PKGBUILD repository (ARCHCI_PKGBUILDS_BRANCH)
 pkgbuilds.index             package index over it, keyed by the clone's HEAD (archci-pkgindex)
-sources/{pkg,files}/        what src jobs handed in, until archci-stage pushes it to the store
 queue/{pending,running,done,failed}/<jobid>.job
 built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
                             package also the arches it was pooled for
                             (one directory per arch, plus <repo>-any); for
                             <repo>-src the source package's file name
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
-repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume)
+repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume); os/src the source packages
 logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log
+released/<repo>-<arch>      what the release holds, "name version" per line, and <repo>-src its
+                            source packages (archci-signer-status, a timer); a claim reads them
 hosts/<worker>              the last idle poll of each worker, with its host stats (for archci top)
 signer.status               the signer as seen through R2 (archci-signer-status, a timer)
 ```
@@ -358,9 +371,12 @@ signer.status               the signer as seen through R2 (archci-signer-status,
 The released repository lives on R2, not on the master. The signer keeps only
 the databases locally, in `/var/lib/archci-signer/repo/`.
 
-A job file (the id ends with the arch; `any` for an arch-independent package;
-`pkgbase` is the package directory, `commit` the PKGBUILD repository commit
-the build is pinned to, `profile` the devtools build profile):
+A job file (the id ends with the arch; `any` for an arch-independent package,
+`src` for the sourcer's fetch; `pkgbase` is the package directory, `commit`
+the PKGBUILD repository commit the build is pinned to, `profile` the
+devtools build profile, `sources` the released source package the claim
+found for the commit, `network` the package's `"network"` flag, `loopback`
+or `full`, when it has one):
 
 ```
 id=1-1788594133-omarchy,linux,7.2.3.arch1-2,x86_64
@@ -374,6 +390,7 @@ attempt=1
 created=2026-09-05T07:40:00Z
 worker=build-a-1
 claimed=2026-09-05T07:41:12Z
+sources=linux-7.2.3.arch1-2.src.tar.gz
 ```
 
 ## Install
@@ -546,7 +563,9 @@ systemctl enable --now archci-sourcer.service
 It claims `src` jobs from the master, in claim order, and for each runs
 `makepkg --allsource` on the PKGBUILD at the job's commit in a clean
 chroot (devtools; `ARCHCI_CHROOTS` on btrfs for a snapshot per job): every
-source of every arch downloaded, checksummed and signature-checked, and packed as
+source of every arch downloaded, checksummed and signature-checked, the
+cargo, go, npm, pip or maven packages its prepare() fetches captured
+under `vendor/`, and packed as
 `<pkgbase>-<version>.src.tar.gz`, which it hands in like a build's
 packages; the signer releases it under `<repo>/os/src/`. Workers with
 `ARCHCI_RELEASE_URL` take source packages from there; without it they fetch
@@ -641,8 +660,8 @@ download, not from that field.
 
 - Nothing is queued up front: with an empty `built/`, every package in the
   PKGBUILD repository (minus `skip_build` and anything `ARCHCI_PKG_SOURCES`
-  excludes) is outstanding and gets built in the claim order above, as
-  workers ask for work.
+  or `ARCHCI_PKG_REPOS` excludes) is outstanding and gets built in the
+  claim order above, as workers ask for work.
 - Packages are built independently against the farm's own repository and
   the official mirrors (plus whatever `/etc/archci/<arch>/extra.conf` adds).
   If a build needs a newer dependency than either has, or a sibling from
@@ -652,7 +671,8 @@ download, not from that field.
   --printsrcinfo` does. The PKGBUILD repository is trusted input; do not
   point `ARCHCI_PKGBUILDS_URL` at one you would not run.
 - Upstream source PGP signatures are verified against the keys each
-  PKGBUILD names in `validpgpkeys`: `archci-build` imports the copies the
+  PKGBUILD names in `validpgpkeys`: the sourcer (or `archci-build`, for a
+  build without a source package) imports the copies the
   package ships in `keys/pgp/<fingerprint>.asc`, as Arch's packaging
   repositories do, then refreshes those fingerprints from `ARCHCI_KEYSERVERS`,
   since the shipped copies lag a maintainer's new signing subkey or extended
@@ -673,8 +693,10 @@ download, not from that field.
 - Prototype gaps to close before production: the release key is generated with a
   passphrase but must be a real key you control (not a throwaway); serve the
   release bucket from a custom domain rather than the rate-limited r2.dev URL;
-  give workers enough RAM (1 GB is too little for large packages); and decide on
-  release-key longevity (see the signing section).
+  give workers enough RAM (1 GB is too little for large packages); decide on
+  release-key longevity (see the signing section); and go through the
+  packages whose builds need `"network"`, which is granted by hand, per
+  package, never by the farm.
 - Worker ssh keys are shared secrets; rotate with `archci authorize` for the
   new key and `archci authorize --revoke` for the old one.
 

@@ -68,7 +68,7 @@ ARCHCI_INDEX_CACHE=file
 # build fetches upstream; 0 lets a build fetch upstream meanwhile.
 ARCHCI_SOURCES_REQUIRED=0
 # The sourcer's state (mirror of the PKGBUILD repository, SRCDEST, jobs)
-# and the time one fetch may take.
+# and the time one fetch may take. Its clean chroot is ARCHCI_CHROOTS/src.
 ARCHCI_SOURCER_HOME=/var/lib/archci-sourcer
 ARCHCI_SOURCER_TIMEOUT_MINUTES=30
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
