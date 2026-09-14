@@ -14,13 +14,11 @@
 #   log ID     one job's log: {"id", "state", "lines": [...], "error_at": N}
 #              (null without an error), the archived log of a finished job,
 #              the last lines of the journal a running one streams
-#   follow ID  a running job's journal, live: its last lines and then each
-#              new one as it arrives (journalctl -f on the workers' streamed
-#              journals), plain text, until the job is no longer running or
-#              the reader goes away
 # These are the read side of the web key (archci authorize --web): a front end
 # on its own host runs them over ssh, where archci-shell web allows them, and
-# archci-job's retry, requeue and enqueue. Safe to run by hand.
+# archci-job's retry, requeue and enqueue. A running job's log is polled with
+# `log` (journalctl -f cannot follow a journald-remote journal). Safe to run
+# by hand.
 
 require_relative '../lib/archci'
 require 'json'
@@ -45,31 +43,6 @@ in ['log', id]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   lines, err = Archci.read_log(j)
   puts JSON.generate('id' => j['id'], 'state' => j['state'], 'lines' => lines, 'error_at' => err)
-in ['follow', id]
-  j = Archci.find_job(id) or abort "archci-web: no job #{id}"
-  abort "archci-web: #{id} is not running" unless j['state'] == 'running'
-  journal = Archci.config['ARCHCI_REMOTE_JOURNAL']
-  running = File.join(Archci.queue('running'), "#{id}.job")
-  $stdout.sync = true
-  # journalctl -f prints the last lines, then each new one; we forward them
-  # and stop when the job leaves running/ (reported, requeued), journalctl
-  # ends, or the reader goes away -- a write then fails (EPIPE), because the
-  # ssh channel to the front end is our stdout. journalctl is killed with us.
-  io = IO.popen(['journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '-f', '-n', '400', *Archci.journal_matches(j)], err: File::NULL)
-  begin
-    loop do
-      break unless File.exist?(running)
-      ready, = IO.select([io], nil, nil, 2)
-      next unless ready
-
-      $stdout.puts(io.readline.chomp)
-    end
-  rescue EOFError, Errno::EPIPE
-    nil
-  ensure
-    Process.kill('TERM', io.pid) rescue nil # rubocop:disable Style/RescueModifier
-    io.close rescue nil # rubocop:disable Style/RescueModifier
-  end
 else
-  abort 'usage: archci-web snapshot | job ID | log ID | follow ID'
+  abort 'usage: archci-web snapshot | job ID | log ID'
 end

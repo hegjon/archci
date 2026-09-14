@@ -94,7 +94,6 @@ log=$("$tmp/fakessh-web" master log "$id") || fail "the web key reads a job's lo
 one=$("$tmp/fakessh-web" master job "$id") || fail "the web key reads one job"
 [[ $(jq -r '.id' <<<"$one") == "$id" ]] || fail "job ID returns that job: $one"
 ! "$tmp/fakessh-web" master log "9-1-omarchy,nope,1-1,x86_64" >/dev/null 2>&1 || fail "log of an unknown job must fail"
-! "$tmp/fakessh-web" master follow "$id" >/dev/null 2>&1 || fail "follow of a done job must fail (through the shell: the command is allowed)"
 "$tmp/fakessh-web" master enqueue acl 0 x86_64 >/dev/null || fail "the web key enqueues"
 [[ -n $(ls "$ARCHCI_HOME"/queue/pending/*acl*x86_64.job 2>/dev/null) ]] || fail "the enqueued job must be pending"
 ! "$tmp/fakessh-web" master claim web-1 x86_64 >/dev/null 2>&1 || fail "a web key must not claim"

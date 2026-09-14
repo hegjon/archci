@@ -52,8 +52,7 @@ archci jobs failed aarch64 | cat    the tree into a pipe, the jobs filtered by w
 archci next                         what the next claim would build
 archci web snapshot | jq .          the farm and every job as JSON, what the web front end polls
 archci web job <jobid>              one job as JSON (no snapshot): its fields, story and the src job that built it
-archci web log <jobid>              a job's log as JSON: the lines and the index of the first error
-archci web follow <jobid>           a running job's journal, live, until it finishes (what the front end streams)
+archci web log <jobid>              a job's log as JSON: the lines and the index of the first error (a running job's tail)
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
 journalctl -u archci-stage          staging to R2
