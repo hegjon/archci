@@ -474,7 +474,8 @@ The package creates the `archci` user and the state directories under
 `/var/lib/archci`, on btrfs. Make `repo` and `incoming` there subvolumes.
 Then:
 
-1. Create an R2 bucket and an API token that may write the `staging/` prefix,
+1. Create an R2 bucket and an API token that may write the `staging/` prefix
+   (and the `logs/` prefix if you set `ARCHCI_R2_LOGS` to archive build logs),
    and write `/etc/archci/rclone.conf` (mode 600):
 
    ```
