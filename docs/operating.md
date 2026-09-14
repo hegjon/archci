@@ -81,7 +81,8 @@ test does not get built, and GitHub Actions
 and pull request:
 
 - `test/lint-test.sh` — `bash -n` and `ruby -c` on every script, plus
-  `shellcheck` when installed.
+  `shellcheck` when installed, and `systemd-analyze verify` on every unit
+  file, against a root laid out as the packages install them.
 - `test/scan-test.sh`, `queue-test.sh`, `multiarch-test.sh` — the master side
   on a throwaway state directory (`test/fixture.sh`): scan and the next-package
   pick, claim, heartbeat, report, retries, housekeeping, `archci top`, and more
