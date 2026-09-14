@@ -377,7 +377,7 @@ built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
                             <repo>-src the source package's file name
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
 repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume); os/src the source packages
-logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log
+logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log   also copied to ARCHCI_R2_LOGS if set (archci-stage; local kept)
 released/<repo>-<arch>      what the release holds, "name version" per line, and <repo>-src its
                             source packages (archci-signer-status, a timer); a claim reads them
 hosts/<worker>              the last idle poll of each worker, with its host stats (for archci top)

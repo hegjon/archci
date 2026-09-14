@@ -308,7 +308,10 @@ while true; do
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
 	archci_claim "$me" src "$claim" $(archci_worker_stats "$home") || { sleep "$ARCHCI_IDLE_SLEEP"; continue; }
 	reported=0
-	jobdir=$jobsdir/$(printf '%s' "$job_id" | tr -c 'A-Za-z0-9:_.,-' '_')
+	# no ':' in the allowed set: an epoch version (1:1.3.2-3) would leave a
+	# colon in the path, and systemd-nspawn --bind reads ':' as its
+	# source:dest separator (a src job for such a package failed to bind)
+	jobdir=$jobsdir/$(printf '%s' "$job_id" | tr -c 'A-Za-z0-9_.,-' '_')
 	rm -rf "$jobdir"
 	mkdir -p "$jobdir"
 	mv "$claim" "$jobdir/job"
