@@ -241,7 +241,7 @@ fetch_one() {
 		tar -tzvf "$f" 2>/dev/null | awk -v pb="$job_pkgbase" '
 			{ n=$NF; sub("^"pb"/","",n); top0=n; sub("/.*","",top0); if (n=="" || n=="PKGBUILD" || n==".SRCINFO" || top0=="keys") next
 			  i=index(n,"/"); top=(i? substr(n,1,i-1):n); sz[top]+=$3; if(i) dir[top]=1 }
-			END { for (t in sz) printf "      %8.1f MiB  %s%s\n", sz[t]/1048576, t, (dir[t]?" (git checkout)":"") }' \
+			END { for (t in sz) printf "      %8.1f MiB  %s/%s%s\n", sz[t]/1048576, pb, t, (dir[t]?" (git checkout)":"") }' \
 			| sort -k1 -rn | while IFS= read -r line; do say "$line"; done
 	fi
 	# the dependencies prepare() fetches (archci_vendor_kinds): captured
