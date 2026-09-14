@@ -4,9 +4,12 @@ A live prototype runs on Digital Ocean and publishes what it builds to R2:
 
 - **Repository URL:** `https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev`
   (the `[hegjon-test]` repo lives under `hegjon-test/os/<arch>/`, for
-  x86_64 and aarch64).
-- **Fleet:** one master, two build workers, and one signer, all small droplets
-  (1 vCPU, 1 GB), plus an emulated aarch64 worker. It builds the
+  x86_64, aarch64 and riscv64).
+- **Front end:** <https://repo.jonnyware.com/> (read-only; the queue
+  commands are off).
+- **Fleet:** a master, build workers, a sourcer, a signer, and the web
+  front-end host, all small droplets, plus the desktop building the emulated
+  aarch64 and riscv64 arches. It builds the
   `source: arch` packages of
   [hegjon/omarchy-pkgs](https://github.com/hegjon/omarchy-pkgs)
   (`ARCHCI_PKG_SOURCES=arch`), and archci's own release packages from the

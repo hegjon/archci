@@ -37,6 +37,10 @@ that structure works, and moving from one fork to another, say from
 > Before relying on it, see the checklist in "Notes and limits" (real release
 > key, bigger workers, a custom domain for the repo, and so on).
 
+A live test farm runs on Digital Ocean. Its front end is at
+<https://repo.jonnyware.com/> (read-only), and it publishes the packages it
+builds to R2 (see [docs/test-instance.md](docs/test-instance.md)).
+
 Everything is plain bash and a few small ruby scripts (the scanner, the
 next-package picker, and top, sharing one library), plus `ssh`, `git`, `rsync`,
 `btrfs`, `systemd` timers and `journald`. There is no daemon: the queue is a directory of
