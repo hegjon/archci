@@ -43,20 +43,16 @@ in ['follow', id]
   $stdout.sync = true
   # journalctl -f prints the last lines, then each new one; we forward them
   # and stop when the job leaves running/ (reported, requeued), journalctl
-  # ends, or the reader goes away -- our stdin closes (the ssh channel dies)
-  # or a write fails (EPIPE). journalctl is killed with us either way.
+  # ends, or the reader goes away -- a write then fails (EPIPE), because the
+  # ssh channel to the front end is our stdout. journalctl is killed with us.
   io = IO.popen(['journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '-f', '-n', '400', *Archci.journal_matches(j)], err: File::NULL)
   begin
     loop do
       break unless File.exist?(running)
-      ready, = IO.select([io, $stdin], nil, nil, 2)
+      ready, = IO.select([io], nil, nil, 2)
       next unless ready
-      break if ready.include?($stdin) && $stdin.eof?  # the front end closed the connection
 
-      if ready.include?(io)
-        line = io.readline
-        $stdout.puts(line.chomp)
-      end
+      $stdout.puts(io.readline.chomp)
     end
   rescue EOFError, Errno::EPIPE
     nil
