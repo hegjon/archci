@@ -66,8 +66,11 @@ while true; do
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
 	archci_claim "$worker" "$ARCHCI_ARCH" "$claim" $(archci_worker_stats) || { sleep "$ARCHCI_IDLE_SLEEP"; continue; }
 	reported=0
-	# Unit instance and job directory share a name made of safe unit-name characters.
-	name=$(printf '%s' "$job_repo-$job_pkgbase-$job_version-$job_arch-a$job_attempt" | tr -c 'A-Za-z0-9:_.-' '_')
+	# Unit instance and job directory share a name of filesystem- and unit-safe
+	# characters. No ':' (an epoch version like 1:1.3.2-3 would leave a colon in
+	# the job dir, and systemd-nspawn reads ':' in a --bind source as its
+	# source:dest separator, failing the build).
+	name=$(printf '%s' "$job_repo-$job_pkgbase-$job_version-$job_arch-a$job_attempt" | tr -c 'A-Za-z0-9_.-' '_')
 	jobdir=$jobsdir/$name
 	outdir=$jobdir/out
 	rm -rf "$jobdir"

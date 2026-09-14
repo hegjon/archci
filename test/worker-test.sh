@@ -25,7 +25,7 @@ mkdir -p "$ARCHCI_HOME"/{queue/{pending,running,done,failed},built,logs,lock,inc
 pkgs=$tmp/pkgs
 git -C "$tmp" init -q -b master "$pkgs"
 mkdir -p "$pkgs/pkgbuilds/acl/.omarchy"
-printf 'pkgname=acl\npkgver=2.4.0\npkgrel=1\narch=(x86_64)\n' >"$pkgs/pkgbuilds/acl/PKGBUILD"
+printf 'pkgname=acl\nepoch=1\npkgver=2.4.0\npkgrel=1\narch=(x86_64)\n' >"$pkgs/pkgbuilds/acl/PKGBUILD"
 printf '{"source": "arch"}\n' >"$pkgs/pkgbuilds/acl/.omarchy/package.json"
 git -C "$pkgs" add -A && git -C "$pkgs" -c user.name=t -c user.email=t@t commit -q -m init
 export ARCHCI_PKGBUILDS_URL=file://$pkgs
@@ -56,10 +56,10 @@ case $1 in
     name=${2#archci-build@}; name=${name%.service}
     out=$ARCHCI_WORKER_HOME/jobs/$name/out
     mkdir -p "$out/p"
-    printf 'pkgname = acl\npkgbase = acl\npkgver = 2.4.0-1\npkgdesc = fake\nurl = x\nbuilddate = 1\npackager = t\nsize = 0\narch = x86_64\n' >"$out/p/.PKGINFO"
-    bsdtar -C "$out/p" -cf - .PKGINFO | zstd -q >"$out/acl-2.4.0-1-x86_64.pkg.tar.zst"
+    printf 'pkgname = acl\npkgbase = acl\npkgver = 1:2.4.0-1\npkgdesc = fake\nurl = x\nbuilddate = 1\npackager = t\nsize = 0\narch = x86_64\n' >"$out/p/.PKGINFO"
+    bsdtar -C "$out/p" -cf - .PKGINFO | zstd -q >"$out/acl-1:2.4.0-1-x86_64.pkg.tar.zst"
     rm -rf "$out/p"
-    : >"$out/acl-2.4.0-1-x86_64.pkg.tar.zst.buildsig"
+    : >"$out/acl-1:2.4.0-1-x86_64.pkg.tar.zst.buildsig"
     echo success >"$out/result"
     [[ -e $TESTTMP/down-after-build ]] && touch "$TESTTMP/master-down"
     exit 0;;
@@ -81,10 +81,10 @@ wait_for() {   # wait_for SECONDS PATTERN FILE
 
 echo "--- claim, build, upload, report: the master pools the package"
 start_worker
-wait_for 20 'omarchy,acl,2.4.0-1,x86_64: success after' "$tmp/worker.log" || fail "the job did not finish: $(<"$tmp/worker.log")"
+wait_for 20 'omarchy,acl,1:2.4.0-1,x86_64: success after' "$tmp/worker.log" || fail "the job did not finish: $(<"$tmp/worker.log")"
 wait_for 10 . "$ARCHCI_HOME/built/omarchy-x86_64/acl" || fail "the master did not record acl as built: $(<"$tmp/worker.log")"
-[[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "2.4.0-1 "* ]] || fail "built record wrong: $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl")"
-[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-2.4.0-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
+[[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.4.0-1 "* ]] || fail "built record wrong: $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl")"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.4.0-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 # the master writes the built record, then moves the job to done/: give a slow host a moment
 for ((i = 0; i < 100; i++)); do (( $(find "$ARCHCI_HOME/queue/done" -type f | wc -l) == 1 )) && break; sleep 0.1; done
 (( $(find "$ARCHCI_HOME/queue/done" -type f | wc -l) == 1 )) || fail "job not in done/"
@@ -94,7 +94,7 @@ for ((i = 0; i < 100; i++)); do
 	[[ -z $leftover ]] && break; sleep 0.1
 done
 [[ -z $leftover ]] || fail "job directory not cleaned up: $leftover"
-grep -q 'building .* as archci-build@' "$tmp/worker.log" || fail "no build log line"
+grep -q 'building .* as archci-build@omarchy-acl-1_2.4.0-1-x86_64-a1' "$tmp/worker.log" || fail "the unit/job-dir name must sanitize the epoch colon to _: $(grep 'as archci-build@' "$tmp/worker.log")"
 kill "$worker_pid"; wait "$worker_pid" 2>/dev/null || true; worker_pid=''
 
 echo "--- master unreachable after the build: results kept, delivered when it is back"
@@ -103,7 +103,7 @@ touch "$tmp/down-after-build"
 start_worker
 wait_for 20 "master unreachable, keeping .* results until it is back" "$tmp/worker.log" || fail "the worker did not report the outage: $(<"$tmp/worker.log")"
 sleep 3   # a few retries against the dead master
-[[ -d $ARCHCI_WORKER_HOME/jobs/omarchy-acl-2.4.0-1-x86_64-a1/out ]] || fail "results dropped while the master was down"
+[[ -d $ARCHCI_WORKER_HOME/jobs/omarchy-acl-1_2.4.0-1-x86_64-a1/out ]] || fail "results dropped while the master was down"
 [[ ! -e $ARCHCI_HOME/built/omarchy-x86_64/acl ]] || fail "nothing can have been delivered while ssh failed"
 rm -f "$tmp/master-down" "$tmp/down-after-build"
 wait_for 20 'delivered after [0-9]* tries' "$tmp/worker.log" || fail "results not delivered after the master came back: $(<"$tmp/worker.log")"
