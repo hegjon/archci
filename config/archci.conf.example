@@ -187,7 +187,7 @@ ARCHCI_IGNOREARCH=1
 # Stamped into every package (shown as Packager in pacman -Si). Use your identity.
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
 ARCHCI_CHROOT_UPDATE_MINUTES=10
-ARCHCI_IDLE_SLEEP=60
+ARCHCI_IDLE_SLEEP=30
 # Between tries at delivering a finished build while the master is unreachable.
 ARCHCI_DELIVERY_RETRY_SECONDS=30
 ARCHCI_HEARTBEAT_SECONDS=60

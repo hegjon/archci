@@ -156,7 +156,7 @@ archci_load_conf
 # 0 leaves only the unit's TimeoutStartSec. A fat-LTO link (mise, fish)
 # is silent for well over half an hour, so not too low.
 : "${ARCHCI_BUILD_MAX_IDLE_MINUTES:=90}"
-: "${ARCHCI_IDLE_SLEEP:=60}"
+: "${ARCHCI_IDLE_SLEEP:=30}"
 # Between tries at delivering a finished build while the master is unreachable.
 : "${ARCHCI_DELIVERY_RETRY_SECONDS:=30}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=60}"

@@ -130,8 +130,9 @@ own PKGBUILDs, which list x86_64 only, a port arch builds anyway with
 `ARCHCI_IGNOREARCH=0` limits it to packages that list the arch. An AUR or
 local package is built only where its arch array says.
 
-**Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>` once a
-minute, with the host's load, memory, disk and vendor, which the master keeps
+**Workers.** `archci-worker@N` runs `ssh master claim <host>-N <arch>` every
+`ARCHCI_IDLE_SLEEP` (30 s) while idle, with the host's load, memory, disk and
+vendor, which the master keeps
 per worker for `archci top` while the worker is idle. The
 master's forced command (`archci-shell`) takes the first file in
 `queue/pending/` (manual enqueues and retries) the worker's arch can build,
@@ -214,7 +215,7 @@ the worker reports `abandoned`, which requeues without counting an attempt.
 
 **Sourcer.** Sources are jobs of the arch `src`. `archci-sourcer` is a
 worker for that arch: it claims (`claim <host> src`, with the host's stats,
-once a minute while idle), and `archci next src` picks the next package
+every `ARCHCI_IDLE_SLEEP` while idle), and `archci next src` picks the next package
 without a source package for its current commit, in the same order builds
 are claimed. For the job it exports the PKGBUILD directory at the commit
 from its own mirror of the repository and runs the fetch in a clean chroot
