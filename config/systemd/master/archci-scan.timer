@@ -1,11 +1,11 @@
 [Unit]
-Description=archci: sync the PKGBUILD repository every 10 minutes
+Description=archci: sync the PKGBUILD repository every 2 minutes
 PartOf=archci-master.target
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=10min
-RandomizedDelaySec=1min
+OnUnitActiveSec=2min
+RandomizedDelaySec=30s
 
 [Install]
 WantedBy=timers.target

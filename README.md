@@ -83,7 +83,7 @@ flowchart LR
 
 ## How it works
 
-**Scanning.** `archci-scan` (ruby, every 10 min) pulls the PKGBUILD
+**Scanning.** `archci-scan` (ruby, every 2 min) pulls the PKGBUILD
 repository (`ARCHCI_PKGBUILDS_URL`, branch `ARCHCI_PKGBUILDS_BRANCH`) into
 `pkgbuilds/` and refreshes the package index. `archci-pkgindex` builds that index
 from every `pkgbuilds/<name>/` holding a PKGBUILD and `.omarchy/package.json`:
