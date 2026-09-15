@@ -214,6 +214,18 @@ commit_pkgs bump
 "$housekeeping"
 ls "$ARCHCI_HOME/queue/pending" | grep 'linux,7.2.3.arch1-2' >/dev/null && fail "superseded pending job not dropped"
 [[ -z $(ls -A "$ARCHCI_HOME/queue/failed") ]] || fail "superseded final failure not dropped"
+# a package removed from the repository takes its queued and failed jobs with it
+mkpkgbuild gone 1-1; commit_pkgs gone; "$scan" >/dev/null 2>&1
+"$job" enqueue gone 0 >/dev/null 2>&1
+gid=$(claim_id worker-5 x86_64); [[ $gid == *omarchy,gone,* ]] || fail "the enqueued package is claimed: $gid"
+"$job" report "$gid" failure "$(owner "$gid")" >/dev/null
+"$job" enqueue gone 0 src >/dev/null 2>&1
+"$housekeeping"
+[[ $(ls "$ARCHCI_HOME"/queue/{pending,failed}/ | grep -c gone) == 2 ]] || fail "the jobs of a package still in the repository are kept (the failed one retried at once, ARCHCI_RETRY_MINUTES=0): $(ls "$ARCHCI_HOME"/queue/{pending,failed}/)"
+rm -rf "$pkgs/pkgbuilds/gone"; commit_pkgs "gone gone"; "$scan" >/dev/null 2>&1
+out=$("$housekeeping" 2>&1)
+[[ $out == *"gone is gone from the PKGBUILD repository, dropping"* ]] || fail "housekeeping must say it drops the jobs of a removed package: $out"
+! ls "$ARCHCI_HOME"/queue/{pending,failed}/ | grep -q gone || fail "the jobs of a package gone from the repository must be dropped: $(ls "$ARCHCI_HOME"/queue/{pending,failed}/)"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ 2.12.3-1 $(pkgcommit libsigc++) extra -" ]] || fail "new libsigc++ version should be next: $("$next")"
 "$job" enqueue acl 0
 ls "$ARCHCI_HOME/queue/pending" | grep '^0-.*omarchy,acl' >/dev/null || fail "manual enqueue"

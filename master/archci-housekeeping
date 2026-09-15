@@ -3,7 +3,8 @@
 # archci-housekeeping.timer as the archci user; not a command (`archci <name>`
 # knows only the commands in bin/archci-master). It requeues
 # running jobs whose worker stopped heartbeating (ARCHCI_STALE_MINUTES),
-# drops queued and failed jobs a newer commit of their package supersedes,
+# drops queued and failed jobs a newer commit of their package supersedes
+# (and those of a package the repository no longer has),
 # requeues failed jobs whose retry delay is over (ARCHCI_RETRY_MINUTES, up
 # to ARCHCI_MAX_ATTEMPTS; one still waiting for a dependency this
 # repository has yet to build is held, up to ARCHCI_RETRY_HOLD_MINUTES),
@@ -17,10 +18,13 @@ source "$here/../lib/archci-queue.sh"
 n=0
 now=$(date +%s)
 # Current commit of every package, to drop jobs a newer commit supersedes.
+# A package the index lacks is gone from the repository: its jobs go too,
+# but only when the index came through (an empty one would drop everything).
 declare -A current=()
 while read -r name _ c _; do
 	[[ -n $c ]] && current[$name]=$c
 done < <("$ARCHCI_MASTER_DIR/archci-pkgindex" 2>/dev/null || true)
+indexed=$(( ${#current[@]} > 0 ))
 lock_queue
 shopt -s nullglob
 for file in "$Q_RUNNING"/*.job; do
@@ -38,6 +42,9 @@ for file in "$Q_PENDING"/*.job "$Q_FAILED"/*.job; do
 	commit=${current[$job_pkgbase]:-}
 	if [[ -n $commit && $commit != "$job_commit" ]]; then
 		archci_log "$job_id: superseded by commit ${commit:0:12}, dropping"
+		rm -f "$file"
+	elif [[ -z $commit ]] && (( indexed )); then
+		archci_log "$job_id: $job_pkgbase is gone from the PKGBUILD repository, dropping"
 		rm -f "$file"
 	fi
 done
