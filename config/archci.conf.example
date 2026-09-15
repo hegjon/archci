@@ -73,7 +73,8 @@ ARCHCI_SOURCES_REQUIRED=0
 # and the time one fetch may take. Its clean chroot is ARCHCI_CHROOTS/src.
 ARCHCI_SOURCER_HOME=/var/lib/archci-sourcer
 ARCHCI_SOURCER_TIMEOUT_MINUTES=30
-# Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
+# Where systemd-journal-remote keeps the workers' journals: every job's log is
+# read from here (archci jobs, archci failed, archci web log, archci top).
 ARCHCI_REMOTE_JOURNAL=/var/lib/archci/journal
 # Finished job records are pruned from queue/done after this many days.
 ARCHCI_DONE_KEEP_DAYS=30
@@ -82,11 +83,12 @@ ARCHCI_DONE_KEEP_DAYS=30
 # what clients use. rclone remotes, e.g. "r2:archci/staging" and "r2:archci".
 ARCHCI_R2_STAGING=""
 ARCHCI_R2_RELEASE=""
-# Off-volume archive of the per-attempt build logs (logs/<repo>/<pkgbase>/...
-# /attempt-N.log). archci-stage copies new logs here and keeps the local
-# copies (the journal and the files stay on the master; this is a durable
-# copy). The master's rclone token must be allowed to write this prefix.
-# Empty: logs stay only on the master. e.g. "r2:archci/logs".
+# Off-volume archive of makepkg's own logs, sent with a build's results
+# (logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N-<pkg>-build.log ...).
+# The build logs themselves are the workers' journal on the master
+# (ARCHCI_REMOTE_JOURNAL), not files. archci-stage copies new files here and
+# keeps the local copies. The master's rclone token must be allowed to write
+# this prefix. Empty: they stay only on the master. e.g. "r2:archci/logs".
 ARCHCI_R2_LOGS=""
 ARCHCI_RCLONE_CONFIG=/etc/archci/rclone.conf
 # The released repo's public URL, as clients use it, e.g.

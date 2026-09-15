@@ -69,8 +69,8 @@ unless $stdout.tty? && $stdin.tty?
     if kind == :pkg
       puts pkg_row(a, b)
     else
-      lines, err = Archci.read_log(a)
-      puts "#{job_row(a, versions, b)}: #{err ? lines[err].strip[0, 160] : (lines.empty? ? '-' : lines.last.strip[0, 160])}"
+      err, last = Archci.log_summary(a)
+      puts "#{job_row(a, versions, b)}: #{(err || last || '-').strip[0, 160]}"
     end
   end
   exit
@@ -96,9 +96,11 @@ message = nil
 
 current = -> { job_rows.empty? ? nil : rows[job_rows[selected]][1] }
 
+# the picked job's log, read again when the pick changes or the job moves
+# (a running job's file is touched by each heartbeat: its journal has grown)
 load_log = lambda do
   j = current.call or return
-  mtime = File.exist?(j['log']) ? File.mtime(j['log']) : j['mtime']
+  mtime = j['mtime']
   return if log_of == j['id'] && log_mtime == mtime
 
   log_lines, err = Archci.read_log(j)

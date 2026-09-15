@@ -53,19 +53,20 @@ grep -q '^arch=aarch64$' <<<"$out" || fail "job arch"
 
 echo "--- a package uploaded for another arch fails the job"
 inc=$ARCHCI_HOME/incoming/$id
-echo log >"$inc/build.log"; mkpkg "$inc" acl 1:2.3.2-1 x86_64
+mkpkg "$inc" acl 1:2.3.2-1 x86_64
 "$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "an aarch64 job uploading an x86_64 package must fail"
 "$job" retry "$id"
 id=$(claim_id arm-1 aarch64)
 [[ $id == *,acl,*,aarch64 ]] || fail "retry should be claimed first: $id"
+journal_add arm "$(build_unit acl 1:2.3.2-1 aarch64 1)" "built on arm"
 upload_ok "$id" acl 1:2.3.2-1 aarch64
 "$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "aarch64 job not done"
 [[ $(<"$ARCHCI_HOME/built/omarchy-aarch64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "aarch64 built record"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/aarch64/acl-1:2.3.2-1-aarch64.pkg.tar.zst.buildsig ]] || fail "aarch64 package not pooled with its buildsig"
 [[ ! -e $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-aarch64.pkg.tar.zst ]] || fail "aarch64 package must not land in x86_64"
-[[ -f $ARCHCI_HOME/logs/omarchy/acl/1:2.3.2-1/aarch64/attempt-1.log ]] || fail "aarch64 log path"
+[[ $(jq -r '.lines[0]' <<<"$("$master/archci-web" log "$id")") == "built on arm" ]] || fail "the aarch64 job's log is its unit's entries on its host: $("$master/archci-web" log "$id")"
 
 echo "--- an any package: offered to ARCHCI_ANY_ARCH workers only, pooled into every arch"
 ! "$job" enqueue archlinux-keyring 0 2>/dev/null || fail "an any package must be enqueued with ARCH=any"

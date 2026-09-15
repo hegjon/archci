@@ -86,7 +86,9 @@ if [[ ! -e $ARCHCI_CHROOTS ]]; then
 	else mkdir -p "$ARCHCI_CHROOTS"
 	fi
 fi
-say() { printf '%s\n' "$*" | tee -a "$log"; }   # the fetch's log, and the journal for archci top
+# the fetch's output goes to the journal (streamed to the master, where it is
+# the job's log) and to a scratch file of the job's, read back for one check
+say() { printf '%s\n' "$*" | tee -a "$log"; }
 
 # the root from the mirrors; complete only with devtools' marker in it
 create_root() {
@@ -184,12 +186,12 @@ source_files() {   # source_files DIR
 }
 
 # --- one job: fetch_one JOBDIR (the job's fields are read); its results in
-# JOBDIR/out: the source package, its .buildsig and build.log. The
-# container runs under MACHINE (a scope of its own, for the heartbeat's
+# JOBDIR/out: the source package and its .buildsig (the log is the journal's).
+# The container runs under MACHINE (a scope of its own, for the heartbeat's
 # stats and for a stop).
 fetch_one() {
 	local jobdir=$1 w=$1/work out=$1/out rc f names name
-	log=$out/build.log
+	log=$jobdir/fetch.log
 	rm -rf "$w"
 	mkdir -p "$w"/{pkg,out} "$out"
 	: >"$log"
@@ -358,11 +360,12 @@ while true; do
 	status=failure
 	fetch_one "$jobdir" && status=success
 	# bracket the log so a query can read a stable build start and stop (build_span)
-	printf '==> archci-sourcer finished with %d at %s\n' "$([[ $status == success ]] && echo 0 || echo 1)" "$(archci_now)" >>"$jobdir/out/build.log"
+	last=$(tail -n 1 "$jobdir/fetch.log" 2>/dev/null | cut -c1-160)
+	echo "==> archci-sourcer finished with $([[ $status == success ]] && echo 0 || echo 1) at $(archci_now)"
 	machine=''
 	kill "$heartbeat" 2>/dev/null || true
 	wait "$heartbeat" 2>/dev/null || true
-	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min: $(tail -n 1 "$jobdir/out/build.log" 2>/dev/null | cut -c1-160)"
+	archci_log "$job_id: $status after $(( ($(date +%s) - start) / 60 )) min: $last"
 
 	# the results to the master (kept and retried while it is away)
 	archci_deliver "$job_id" "$jobdir/out" "$status" "$me" && reported=1

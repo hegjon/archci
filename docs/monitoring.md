@@ -17,12 +17,24 @@ session is opened, so the forced command never runs. Same direction as the
 job protocol, and the last lines of a worker that died are already on the
 master. journal-remote keeps the received journals under
 `/var/lib/archci/journal/` (on the archci volume, not the root disk).
-`journal-remote.conf` sets no size or file-count cap, so the journal keeps
-every build's log and grows to fill the volume, vacuuming the oldest only
-to keep `KeepFree` (5 GB) free; it shares the volume with the queue, the
-pool and the text logs under `logs/`, so those and the journal compete for
-the space. Since every worker arrives from 127.0.0.1 they share one
-`archci-workers.journal` file, so select a worker with `_HOSTNAME=`.
+
+That journal is where every job's log lives: nothing of a build's output
+is copied to a file. `archci jobs`, `archci failed`, `archci web log` and
+the web front end read a job's log as its entries there, a build's unit
+(`archci-build@<repo>-<pkgbase>-<version>-<arch>-a<attempt>`) on its
+worker's host, or the sourcer service on its host for a src job, between
+the job's claim and its report (two minutes of slack each way; a finished
+job keeps `claimed=` for it). A running job's log is what has streamed so
+far, polled by cursor. The report reads the log once and keeps its first
+error line and its last in the job file (`error=`, `last=`), which is what
+the listings print, so `archci failed | cat` does not read the journal per
+job. `journal-remote.conf` sets no size or file-count cap, so the journal
+keeps every log and grows to fill the volume, vacuuming the oldest only to
+keep `KeepFree` (5 GB) free; a log is gone once its entries are vacuumed,
+so the volume is the retention, and it shares the volume with the queue,
+the pool and makepkg's logs under `logs/`. Since every worker arrives from
+127.0.0.1 they share one `archci-workers.journal` file, so select a worker
+with `_HOSTNAME=`.
 
 ```
 journalctl -D /var/lib/archci/journal -f                     all workers, live

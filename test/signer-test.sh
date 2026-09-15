@@ -79,21 +79,22 @@ mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" evil 1-1
 ep=$ARCHCI_HOME/repo/omarchy/os/x86_64/evil-1-1-x86_64.pkg.tar.zst
 gpg --homedir "$gpgx" --batch --detach-sign -u evil -o "$ep.buildsig" "$ep"
 
-# a build log in the archive tree; stage copies it to R2 and keeps the local file
+# a makepkg log a build sent (the build log itself is the journal's), in the
+# archive tree; stage copies it to R2 and keeps the local file
 logdir=$ARCHCI_HOME/logs/omarchy/hello/1-1/x86_64
-mkdir -p "$logdir"; printf 'building hello\n==> done\n' >"$logdir/attempt-1.log"
+mkdir -p "$logdir"; printf 'building hello\n==> done\n' >"$logdir/attempt-1-hello-1-1-x86_64-build.log"
 ARCHCI_R2_LOGS=$R2/logs "$master/archci-stage" --force
 [[ ! -e $hp && ! -e $ep ]] || fail "stage must move packages out of the pool"
 [[ -f $staging/omarchy/os/x86_64/hello-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not staged"
-[[ -f $R2/logs/omarchy/hello/1-1/x86_64/attempt-1.log ]] || fail "the build log must be archived to R2"
-[[ -f $logdir/attempt-1.log ]] || fail "stage must keep the local log (archive is a copy)"
+[[ -f $R2/logs/omarchy/hello/1-1/x86_64/attempt-1-hello-1-1-x86_64-build.log ]] || fail "the makepkg log must be archived to R2"
+[[ -f $logdir/attempt-1-hello-1-1-x86_64-build.log ]] || fail "stage must keep the local log (archive is a copy)"
 # a log already in R2 is not re-uploaded (ignore-existing): change it locally,
 # add a new one, restage; R2 keeps the old content and gains only the new file
-printf 'CHANGED\n' >"$logdir/attempt-1.log"
+printf 'CHANGED\n' >"$logdir/attempt-1-hello-1-1-x86_64-build.log"
 printf 'second attempt\n' >"$logdir/attempt-2.log"
 ARCHCI_R2_LOGS=$R2/logs "$master/archci-stage" --force
 [[ -f $R2/logs/omarchy/hello/1-1/x86_64/attempt-2.log ]] || fail "a new log must be archived on the next stage"
-[[ $(<"$R2/logs/omarchy/hello/1-1/x86_64/attempt-1.log") != CHANGED ]] || fail "an already-archived log must not be re-uploaded (--ignore-existing)"
+[[ $(<"$R2/logs/omarchy/hello/1-1/x86_64/attempt-1-hello-1-1-x86_64-build.log") != CHANGED ]] || fail "an already-archived log must not be re-uploaded (--ignore-existing)"
 
 "$sign"
 # the trusted package is released and signed; the attacker package is rejected

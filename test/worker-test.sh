@@ -1,6 +1,6 @@
 #!/bin/bash
 # worker-test.sh -- archci-worker end to end against a real master queue in a
-# temp dir, with ssh, systemctl, journalctl and the build itself faked:
+# temp dir, with ssh, systemctl and the build itself faked:
 #   * claim -> "build" -> upload through the real forced command and rrsync ->
 #     report -> the master pools the package and records it built
 #   * a master outage after the build: the results are kept and delivered when
@@ -67,7 +67,6 @@ case $1 in
   *) exit 0;;
 esac
 SH
-printf '#!/bin/bash\necho "fake build log"\n' >"$tmp/bin/journalctl"
 chmod +x "$tmp/bin"/*
 export TESTTMP=$tmp PATH=$tmp/bin:$PATH
 

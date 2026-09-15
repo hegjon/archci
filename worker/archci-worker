@@ -117,8 +117,8 @@ while true; do
 	systemctl start "$unit.service" || true   # blocks until the oneshot has finished
 	kill "$heartbeat" 2>/dev/null || true
 	wait "$heartbeat" 2>/dev/null || true
-	# The journal is the build log; keep a copy with the packages for the master.
-	journalctl --namespace=archci -u "$unit" --since="@$start" -o cat --no-pager >"$outdir/build.log" 2>/dev/null || true
+	# The journal is the build log, on the master too (streamed there by
+	# journal-upload): nothing of it travels with the packages.
 	systemctl reset-failed "$unit.service" 2>/dev/null || true
 	status=failure
 	[[ -f $outdir/result && $(<"$outdir/result") == success ]] && status=success

@@ -469,8 +469,9 @@ module Archci
       job[j].merge('claimed' => j['claimed'], 'heartbeat_age_s' => (now - j['mtime']).to_i, **j.slice(*HOST_STATS, *JOB_STATS))
     end
     failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
-      job[j].merge('id' => j['id'], 'final' => j['final'] == '1', 'finished' => j['finished'],
-                   'log' => File.join(home, 'logs', j['repo'], j['pkgbase'], j['version'], j['arch'], "attempt-#{j['attempt']}.log"))
+      j = j.merge('state' => 'failed')
+      job[j].merge('id' => j['id'], 'final' => j['final'] == '1', 'finished' => j['finished'], 'log' => log_where(j),
+                   **j.slice('state', 'claimed', 'created', 'error', 'last'))
     end
     # What archci-signer-status last saw of the signer through R2, if it runs.
     status = File.join(home, 'signer.status')
@@ -505,9 +506,13 @@ module Archci
   NOT_ERROR_RE = /gpg:|Verifying|Build failed, check|makechrootpkg exited|the build exited|archci-build finished|-Werror|ERRORFUNC|_error|error_/
   def self.error_line?(line) = line.match?(ERROR_RE) && !line.match?(NOT_ERROR_RE)
 
-  # the attempt's archived log (written when the job finishes)
-  def self.log_path(j)
-    File.join(home, 'logs', j['repo'] || config['ARCHCI_REPO'], j['pkgbase'], j['version'], j['arch'], "attempt-#{j['attempt']}.log")
+  # where a job's log is, for a human: the journalctl command that reads it
+  # (read_log's); nil for a pending job, which has none yet
+  def self.log_where(j)
+    return nil unless %w[running done failed].include?(j['state'])
+
+    since, till = journal_window(j)
+    ['journalctl', '-D', config['ARCHCI_REMOTE_JOURNAL'], '-o', 'cat', "--since=@#{since}", *("--until=@#{till}" if till), *journal_matches(j)].join(' ')
   end
 
   # one job by id, read from whichever queue holds it (no scan of the rest);
@@ -519,7 +524,7 @@ module Archci
 
       j = read_job(path) or next
       pkg = packages.find { |p| p['pkgbase'] == j['pkgbase'] }
-      return j.merge('state' => q, 'origin' => origin(pkg) || '-', 'log' => log_path(j))
+      return j.merge('state' => q, 'origin' => origin(pkg) || '-').then { |x| x.merge('log' => log_where(x)) }
     end
     nil
   end
@@ -543,94 +548,120 @@ module Archci
   def self.all_jobs
     by_name = packages.to_h { |p| [p['pkgbase'], p] }
     QUEUES.flat_map do |q|
-      jobs(q).map { |j| j.merge('state' => q, 'origin' => origin(by_name[j['pkgbase']]) || '-', 'log' => log_path(j)) }
+      jobs(q).map { |j| j.merge('state' => q, 'origin' => origin(by_name[j['pkgbase']]) || '-').then { |x| x.merge('log' => log_where(x)) } }
     end
   end
 
-  # the journal's matches for a running job: a build's unit, or the sourcer's
-  # service on its host for a src job (what archci-top keys on)
+  # ---- a job's log: the workers' journals on the master, nothing else ----
+  # The workers stream their archci journal namespace to the master
+  # (systemd-journal-remote, ARCHCI_REMOTE_JOURNAL; see docs/monitoring.md);
+  # a build's output is its unit's entries there, a fetch's the sourcer
+  # service's on its host. That journal is the log store: nothing is copied
+  # to files, and a log lives as long as the journal keeps it.
+
+  # the journal's matches for a job: a build's unit on its worker's host (a
+  # retry is another unit, -aN; a requeued attempt reuses the unit, so the
+  # window below tells the runs apart), or the sourcer's service on its host
+  # for a src job (what archci-top keys on as well)
   def self.journal_matches(j)
     if j['arch'] == 'src'
       ['_SYSTEMD_UNIT=archci-sourcer.service', "_HOSTNAME=#{j['worker']}", 'SYSLOG_IDENTIFIER=archci-sourcer']
     else
       name = "#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9:_.-]/, '_')
-      ["_SYSTEMD_UNIT=archci-build@#{name}.service"]
+      ["_SYSTEMD_UNIT=archci-build@#{name}.service", *("_HOSTNAME=#{worker_host(j['worker']).first}" if j['worker'])]
     end
   end
 
-  # the job's log for the page, as [lines, error_at, cursor]: the archived file
-  # for a finished job, or the journal for a running one -- the whole journal so
-  # far, or only what follows a cursor (after:) so a poll fetches just what it
-  # has not seen. error_at is the first error's index within these lines (nil
-  # for a done job, whose point of interest is its last line); cursor resumes
-  # the next poll (journald prints it as a trailing "-- cursor: " line; nil for
-  # a finished job's file).
+  # the time window a job's entries fall in, [since, until] as epoch seconds
+  # (until nil while it runs): from its claim (a finished job keeps
+  # 'claimed'; 'created' for one from before it did) to its report, each
+  # widened by JOURNAL_SLACK for the worker's clock against the master's and
+  # a report that lands after the last line. journalctl also skips the
+  # journal files outside the window, which is what makes a read quick.
+  JOURNAL_SLACK = 120
+  def self.journal_window(j)
+    from = j['claimed'] || j['created']
+    since = from ? Time.iso8601(from).to_i - JOURNAL_SLACK : 0
+    till = j['finished'] && (Time.iso8601(j['finished']).to_i + JOURNAL_SLACK)
+    [since, till]
+  rescue ArgumentError
+    [0, nil]
+  end
+
+  # the job's log, as [lines, error_at, cursor]: its entries in the
+  # workers' journal (none for a pending job, or without the journal) --
+  # the whole log, or, for a running job, only what follows a cursor
+  # (after:) so a poll fetches just what it has not seen. error_at is the
+  # first error's index within these lines (nil for a done job, whose point
+  # of interest is its last line); cursor resumes the next poll of a running
+  # job (journald prints it as a trailing "-- cursor: " line), nil once it
+  # has finished.
   def self.read_log(j, after: nil)
     journal = config['ARCHCI_REMOTE_JOURNAL']
-    if j['state'] == 'running' && journal && File.directory?(journal)
-      cmd = ['journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '--show-cursor']
-      cmd += ['--after-cursor', after] if after && !after.empty?
-      out, = Open3.capture2(*cmd, *journal_matches(j), err: File::NULL)
-      lines = out.scrub.lines(chomp: true)
-      cursor = lines.pop&.delete_prefix('-- cursor: ') if lines.last&.start_with?('-- cursor: ')
-      [lines, lines.index { |l| error_line?(l) }, cursor]
-    else
-      lines = File.exist?(j['log']) ? File.read(j['log']).scrub.lines(chomp: true) : []
-      [lines, j['state'] == 'done' ? nil : lines.index { |l| error_line?(l) }, nil]
-    end
+    return [[], nil, nil] unless %w[running done failed].include?(j['state']) && journal && File.directory?(journal)
+
+    since, till = journal_window(j)
+    cmd = ['journalctl', '-D', journal, '--no-pager', '-a', '-q', '-o', 'cat']
+    resume = after && !after.empty? && j['state'] == 'running'
+    # journalctl takes a cursor or a window, not both: the cursor is the later
+    cmd += resume ? ['--after-cursor', after] : ["--since=@#{since}"]
+    cmd << "--until=@#{till}" if till
+    cmd << '--show-cursor' if j['state'] == 'running'
+    out, = Open3.capture2(*cmd, *journal_matches(j), err: File::NULL)
+    lines = out.scrub.lines(chomp: true)
+    cursor = lines.pop&.delete_prefix('-- cursor: ') if lines.last&.start_with?('-- cursor: ')
+    cursor ||= after if j['state'] == 'running'   # nothing new: journalctl prints no cursor, the poll keeps its own
+    [lines, j['state'] == 'done' ? nil : lines.index { |l| error_line?(l) }, cursor]
+  end
+
+  # what a listing says of a job in one line: its first error line, else its
+  # last line (nil without a log). From the job file when the report kept
+  # them ('error', 'last': archci-job report reads the journal once, so a
+  # listing of hundreds of jobs does not), else from the journal now.
+  def self.log_summary(j)
+    return [j['error'], j['last']] if j.key?('error') || j.key?('last')
+    return [nil, nil] if j['state'] == 'pending'
+
+    lines, err, = read_log(j)
+    [err && lines[err], lines.last]
   end
 
   # a build's stable start and stop, [started, stopped] as ISO timestamps or
   # nil, for a query. archci-build (a package) and archci-sourcer (a source
-  # package) bracket the per-attempt log with "... at <ts>" (first line) and
-  # "... finished with N at <ts>" (last). The archived per-attempt log is the
-  # source, not the journal, whose unit name a retry reuses (its entries then
-  # span several attempts). A running job has no archived log yet, so it reports
-  # its claim time as the start and no stop; a pending job neither.
+  # package) bracket the log with "... at <ts>" (first line) and "... finished
+  # with N at <ts>" (last). A running job reports its claim time as the start
+  # and no stop; a pending job neither. lines: the job's log (read_log), so
+  # a caller that has it does not read it again.
   BUILD_TS = /(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/
   BUILD_END = ['==> archci-build finished with', '==> archci-sourcer finished with'].freeze
-  def self.build_span(j)
+  def self.build_span(j, lines = nil)
     return [j['claimed'], nil] if j['state'] == 'running'
-    return [nil, nil] unless %w[done failed].include?(j['state']) && File.exist?(j['log'])
+    return [nil, nil] unless %w[done failed].include?(j['state'])
 
-    started = log_head(j['log']).filter_map { |l| l[BUILD_TS, 1] }.first  # the header's "started" line
-    stopped = log_tail(j['log']).reverse_each.find { |l| l.start_with?(*BUILD_END) }&.slice(BUILD_TS, 1)
+    lines ||= read_log(j).first
+    started = lines.first(20).filter_map { |l| l[BUILD_TS, 1] }.first  # the header's "started" line
+    stopped = lines.last(50).reverse_each.find { |l| l.start_with?(*BUILD_END) }&.slice(BUILD_TS, 1)
     [started, stopped]
-  end
-
-  # the first of a file as whole lines, for scanning a multi-line log header
-  def self.log_head(path, lines: 20)
-    File.foreach(path).first(lines)
-  rescue Errno::ENOENT
-    []
   end
 
   # a package build's online (dependency install, with the network) and offline
   # (the build itself) phase boundaries, for splitting its time: archci-build
   # stamps "==> Installing the dependencies ... at <ts>" (online start) and
   # "==> Building in the <slice> slice at <ts>" (build start, = online end).
-  # {} for a src job, a running job (no archived log yet), or an older log
-  # without the stamps. Reads only the head of the log.
-  def self.build_phases(j)
-    return {} unless j['arch'] != 'src' && %w[done failed].include?(j['state']) && File.exist?(j['log'])
+  # {} for a src job, a running job, or an older log without the stamps.
+  # lines as for build_span.
+  def self.build_phases(j, lines = nil)
+    return {} unless j['arch'] != 'src' && %w[done failed].include?(j['state'])
 
+    lines ||= read_log(j).first
     online = build = nil
-    File.foreach(j['log']).each_with_index do |l, i|
-      break if (online && build) || i >= 500
+    lines.first(500).each do |l|
+      break if online && build
 
       online ||= l[BUILD_TS, 1] if l.start_with?('==> Installing the pacman dependencies')
       build  ||= l[BUILD_TS, 1] if l.start_with?('==> Building in the archci-')
     end
     { 'online_at' => online, 'build_at' => build }.compact
-  end
-
-  # the last of a file as whole lines, without reading all of it (the first
-  # line back may be partial; callers match a marker, not a position)
-  def self.log_tail(path, bytes: 8192)
-    File.open(path) do |f|
-      f.seek([f.size - bytes, 0].max)
-      f.read.scrub.lines(chomp: true)
-    end
   end
 
   # the job's story in one line: state, where, when, what it had

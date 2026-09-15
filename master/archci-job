@@ -25,7 +25,10 @@
 #                             source package and its .buildsig, pooled under
 #                             <repo>/os/src for archci-stage like a package,
 #                             and the built record names it to the package's
-#                             build claims)
+#                             build claims. The log is not among them: it is
+#                             the job's entries in the workers' journal on
+#                             the master; the report keeps its first error
+#                             line and its last in the job file)
 #   requeue ID                move a running/failed job back to pending
 #   retry ID | -a|--all       reset the attempt counter and requeue: one job,
 #                             or every failed job (final ones included)
@@ -218,15 +221,24 @@ cmd_report() {
 		return 0
 	fi
 
-	logdir=$ARCHCI_HOME/logs/$job_repo/$job_pkgbase/$job_version/$job_arch
-	mkdir -p "$logdir"
-	[[ -f $inc/build.log ]] && mv "$inc/build.log" "$logdir/attempt-$job_attempt.log"
+	# The build's log is its unit's entries in the workers' journal on the
+	# master (Archci.read_log), not a file: nothing of it is archived. What
+	# a listing says of the job, its first error line and its last, is read
+	# from the journal once, now, into the job file (error=, last=), so
+	# archci failed and archci jobs into a pipe need not read it per job.
+	# (An older worker still uploads build.log, the journal's copy: dropped.)
+	rm -f "$inc/build.log"
+	local summary=()
+	mapfile -t summary < <("$ARCHCI_MASTER_DIR/archci-web" summary "$id" 2>/dev/null || true)
 	# makepkg's own logs (<pkg>-<ver>-<arch>-{prepare,build,check,package}.log)
 	# travel with the results; they hold the compiler and test output that the
 	# unit journal does not, and they are all a failed build leaves behind.
+	logdir=$ARCHCI_HOME/logs/$job_repo/$job_pkgbase/$job_version/$job_arch
 	local mlog
 	for mlog in "$inc"/*.log; do
-		[[ -f $mlog ]] && mv "$mlog" "$logdir/attempt-$job_attempt-${mlog##*/}"
+		[[ -f $mlog ]] || continue
+		mkdir -p "$logdir"
+		mv "$mlog" "$logdir/attempt-$job_attempt-${mlog##*/}"
 	done
 
 	if [[ $status == success ]]; then
@@ -235,13 +247,13 @@ cmd_report() {
 		fi
 	fi
 	if [[ $status == success ]]; then
-		rewrite_job "$file" "$Q_DONE/$id.job" "worker=$job_worker" "status=success" "finished=$(archci_now)"
+		rewrite_job "$file" "$Q_DONE/$id.job" "worker=$job_worker" "status=success" "finished=$(archci_now)" "${summary[@]}"
 		archci_log "$id succeeded on $job_worker"
 	elif (( job_attempt >= ARCHCI_MAX_ATTEMPTS )); then
-		rewrite_job "$file" "$Q_FAILED/$id.job" "worker=$job_worker" "status=failure" "finished=$(archci_now)" "final=1"
+		rewrite_job "$file" "$Q_FAILED/$id.job" "worker=$job_worker" "status=failure" "finished=$(archci_now)" "final=1" "${summary[@]}"
 		archci_log "$id failed on $job_worker, attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS, giving up"
 	else
-		rewrite_job "$file" "$Q_FAILED/$id.job" "worker=$job_worker" "status=failure" "finished=$(archci_now)"
+		rewrite_job "$file" "$Q_FAILED/$id.job" "worker=$job_worker" "status=failure" "finished=$(archci_now)" "${summary[@]}"
 		archci_log "$id failed on $job_worker, attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS, will retry"
 	fi
 	rm -rf "$inc"

@@ -34,13 +34,37 @@ mkpkgbuild() {
 }
 commit_pkgs() { git -C "$pkgs" add -A && git -C "$pkgs" -c user.name=t -c user.email=t@t commit -q -m "$1"; }
 pkgcommit() { git -C "$pkgs" log -1 --format=%H -- "pkgbuilds/$1"; }
+# The workers' journal on the master (ARCHCI_REMOTE_JOURNAL), where every
+# job's log is read from: a journal directory of the test's own, written with
+# systemd-journal-remote from journal export format (no root needed).
+#   journal_add HOST UNIT LINE...   one entry per line, now, as UNIT on HOST
+#                                   (SYSLOG_IDENTIFIER is the unit's name)
+#   build_unit PKGBASE VERSION ARCH ATTEMPT -> a build's unit name (archci-worker's rule)
+export ARCHCI_REMOTE_JOURNAL=$tmp/journal
+journal_add() {
+	local host=$1 unit=$2 ts f=$tmp/journal.export
+	shift 2
+	ts=$(date +%s%6N)   # microseconds: each call's entries come after the last call's
+	: >"$f"
+	for line; do
+		printf '__REALTIME_TIMESTAMP=%s\n__MONOTONIC_TIMESTAMP=%s\n_BOOT_ID=%s\n_HOSTNAME=%s\n_SYSTEMD_UNIT=%s\nSYSLOG_IDENTIFIER=%s\nMESSAGE=%s\n\n' \
+			"$ts" "$ts" 0123456789abcdef0123456789abcdef "$host" "$unit" "${unit%%[@.]*}" "$line" >>"$f"
+		(( ts += 1 ))
+	done
+	mkdir -p "$ARCHCI_REMOTE_JOURNAL"
+	/usr/lib/systemd/systemd-journal-remote --split-mode=none -o "$ARCHCI_REMOTE_JOURNAL/test.journal" "$f" >/dev/null 2>&1 \
+		|| fail "systemd-journal-remote could not write the test journal (systemd)"
+}
+build_unit() {
+	local u="$ARCHCI_REPO-$1-$2-$3-a$4"
+	printf 'archci-build@%s.service\n' "${u//[^A-Za-z0-9:_.-]/_}"
+}
 # claim_id WORKER ARCH [STAT...] -> the id of the job claimed, empty for none
 claim_id() { sed -n 's/^id=//p' < <("$job" claim "$@"); }
 owner() { sed -n 's/^worker=//p' "$ARCHCI_HOME/queue/running/$1.job"; }   # the worker a running job is claimed by
 # upload_ok ID NAME VERSION [ARCH] -- a successful build's upload: log, package, buildsig
 upload_ok() {
 	local inc=$ARCHCI_HOME/incoming/$1
-	echo log >"$inc/build.log"
 	mkpkg "$inc" "$2" "$3" "${4:-x86_64}"
 	: >"$inc/$2-$3-${4:-x86_64}.pkg.tar.zst.buildsig"
 }

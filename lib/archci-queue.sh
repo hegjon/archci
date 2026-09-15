@@ -18,10 +18,12 @@ lock_queue() {
 # one requeued loses its sources= too, which the next claim decides afresh.
 rewrite_job() {
 	local file=$1 dest=$2 tmp beat=() drop
-	drop="worker|claimed|sources|status|finished|final|heartbeat|$(archci_stats_re)"
+	drop="worker|claimed|sources|status|finished|final|heartbeat|error|last|$(archci_stats_re)"
 	shift 2
 	if [[ $dest == "$Q_DONE"/* || $dest == "$Q_FAILED"/* ]]; then
-		drop='worker|claimed|status|finished|final|heartbeat'
+		# a finished job keeps its claim time: with 'finished' it bounds the
+		# job's entries in the workers' journal (Archci.journal_window)
+		drop='worker|status|finished|final|heartbeat|error|last'
 		grep -q '^load=' "$file" && beat=("heartbeat=$(date -u -r "$file" +%FT%TZ)")
 	fi
 	tmp=$dest.tmp

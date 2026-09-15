@@ -49,9 +49,23 @@ COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  check    arch     acl 1:2.3
 "$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
 COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  -        arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" | grep worker-1)"
 
+echo "--- a job's log is its entries in the workers' journal: a running job's so far, with a cursor to poll from"
+# what the build's unit logged on the worker's host (worker-1: host "worker"), streamed to the master
+journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> archci-build 0.5.0 $id on worker at 2026-09-15T10:00:00Z" "    repo=omarchy arch=x86_64" "==> Installing the pacman dependencies in the archci-online slice (with network) at 2026-09-15T10:00:05Z" "==> Building in the archci-offline slice (no network) at 2026-09-15T10:00:20Z" "building"
+log=$("$master/archci-web" log "$id")
+[[ $(jq -r '.lines | length' <<<"$log") == 5 && $(jq -r '.lines[0]' <<<"$log") == "==> archci-build 0.5.0 $id on worker at"* && $(jq -r '.state' <<<"$log") == running ]] || fail "archci web log of a running job is its journal so far: $log"
+cursor=$(jq -r '.cursor' <<<"$log")
+[[ $cursor == s=* ]] || fail "a running job's log comes with a cursor: $log"
+[[ $(jq -r '.lines | length' <<<"$("$master/archci-web" log "$id" "$cursor")") == 0 && $(jq -r .cursor <<<"$("$master/archci-web" log "$id" "$cursor")") == "$cursor" ]] || fail "after the cursor, nothing new yet, and the poll keeps its cursor: $("$master/archci-web" log "$id" "$cursor")"
+journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst"
+[[ $(jq -r '.lines[0]' <<<"$("$master/archci-web" log "$id" "$cursor")") == "==> archci-build finished with 0 at"* ]] || fail "after the cursor, only the new lines: $("$master/archci-web" log "$id" "$cursor")"
+journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 2)" "another attempt's line"   # not this attempt's
+journal_add worker9 "$(build_unit acl 1:2.3.2-1 x86_64 1)" "the same unit on another host"   # not this worker's
+[[ $(jq -r '.lines | length' <<<"$("$master/archci-web" log "$id")") == 6 ]] || fail "a job's log is its own unit's on its own host: $("$master/archci-web" log "$id")"
+
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
-echo "log" >"$inc/build.log"
+echo "log" >"$inc/build.log"   # an older worker's copy of the journal: dropped
 mkpkg "$inc" acl 1:2.3.2-1
 mkpkg "$inc" acl-debug 1:2.3.2-1
 : >"$inc/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig"   # carried through to the signer
@@ -68,7 +82,15 @@ sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"
 [[ -e $ARCHCI_HOME/stage.needed ]] || fail "stage flag missing"
-[[ -f $ARCHCI_HOME/logs/omarchy/acl/1:2.3.2-1/x86_64/attempt-1.log ]] || fail "log not archived"
+[[ -z $(ls -A "$ARCHCI_HOME/logs") ]] || fail "the build log is the journal's, nothing is archived: $(find "$ARCHCI_HOME/logs")"
+grep -q '^claimed=20' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job keeps its claim time (it bounds its journal entries)"
+grep -q '^last===> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst$' "$ARCHCI_HOME/queue/done/$id.job" || fail "the report keeps the log's last line in the job file: $(cat "$ARCHCI_HOME/queue/done/$id.job")"
+grep -q '^error=' "$ARCHCI_HOME/queue/done/$id.job" && fail "no error line in a clean log"
+log=$("$master/archci-web" log "$id")
+[[ $(jq -r '.lines | length' <<<"$log") == 6 && $(jq -r '.cursor' <<<"$log") == null && $(jq -r '.error_at' <<<"$log") == null ]] || fail "a done job's log is read whole from the journal, no cursor: $log"
+onejob=$("$master/archci-web" job "$id")
+[[ $(jq -r '.started' <<<"$onejob") == 2026-09-15T10:00:00Z && $(jq -r '.stopped' <<<"$onejob") == 2026-09-15T10:01:43Z && $(jq -r '.online_at' <<<"$onejob") == 2026-09-15T10:00:05Z && $(jq -r '.build_at' <<<"$onejob") == 2026-09-15T10:00:20Z ]] || fail "the build's span and phases come from its journal entries: $onejob"
+[[ $(jq -r '.log' <<<"$onejob") == "journalctl -D $ARCHCI_REMOTE_JOURNAL -o cat --since=@"*" --until=@"*" _SYSTEMD_UNIT=$(build_unit acl 1:2.3.2-1 x86_64 1) _HOSTNAME=worker" ]] || fail "a job names its log as the journalctl that reads it: $(jq -r '.log' <<<"$onejob")"
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"
 
@@ -78,24 +100,27 @@ sid=$(claim_id sourcer src load=0.10 mem=5 disk=30 cpus=1 vendor=DigitalOcean ar
 [[ $sid == *omarchy,acl,1:2.3.2-1,src ]] || fail "the sourcer's claim must be a src job: $sid"
 "$top" | grep "^sourcer  *DigitalOcean  *src  *0.10  *30  *5  *1  *1  *1  0.4.13-1$" >/dev/null || fail "archci-top must list the sourcer host as one worker, one job active: $("$top" | grep ^sourcer)"
 inc=$ARCHCI_HOME/incoming/$sid
-echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"
+: >"$inc/acl-1:2.3.2-1.src.tar.gz"
 "$job" report "$sid" success "$(owner "$sid")"
 [[ -f $ARCHCI_HOME/queue/failed/$sid.job ]] || fail "a source package without its builder signature is refused"
 "$job" retry "$sid" >/dev/null; sid=$(claim_id sourcer src); inc=$ARCHCI_HOME/incoming/$sid
-echo fetched >"$inc/build.log"; : >"$inc/acl-1:2.3.2-1.src.tar.gz"; : >"$inc/acl-1:2.3.2-1.src.tar.gz.buildsig"
+journal_add sourcer archci-sourcer.service "==> archci-sourcer 0.5.0 $sid on sourcer at 2026-09-15T10:02:00Z" "fetched" "==> archci-sourcer finished with 0 at 2026-09-15T10:02:30Z"
+: >"$inc/acl-1:2.3.2-1.src.tar.gz"; : >"$inc/acl-1:2.3.2-1.src.tar.gz.buildsig"
 "$job" report "$sid" success "$(owner "$sid")"
 [[ $(<"$ARCHCI_HOME/built/omarchy-src/acl") == "1:2.3.2-1 $(pkgcommit acl) acl-1:2.3.2-1.src.tar.gz" ]] || fail "the src built record must name the file: $(<"$ARCHCI_HOME/built/omarchy-src/acl")"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz && -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz.buildsig && -e $ARCHCI_HOME/stage.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage"
-[[ -f $ARCHCI_HOME/logs/omarchy/acl/1:2.3.2-1/src/attempt-1.log ]] || fail "the fetch's log must be archived under the src arch"
+[[ $(jq -r '.lines[1]' <<<"$("$master/archci-web" log "$sid")") == fetched ]] || fail "a fetch's log is the sourcer service's entries on its host: $("$master/archci-web" log "$sid")"
+[[ $(jq -r '.started + " " + .stopped' <<<"$("$master/archci-web" job "$sid")") == "2026-09-15T10:02:00Z 2026-09-15T10:02:30Z" ]] || fail "a fetch's span comes from its journal entries: $("$master/archci-web" job "$sid")"
 [[ $("$next" src) == "5 omarchy src libsigc++ "* ]] || fail "acl's sources are in; libsigc++ is next: $("$next" src)"
 sid=$(claim_id sourcer src)
 inc=$ARCHCI_HOME/incoming/$sid
-echo fetched >"$inc/build.log"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz.buildsig"
+: >"$inc/libsigc++-2.12.2-1.src.tar.gz"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz.buildsig"
 "$job" report "$sid" success "$(owner "$sid")"
 sid=$(claim_id sourcer src)
 [[ $sid == *omarchy,linux,* ]] || fail "linux's sources are next: $sid"
-echo "==> ERROR: Failure while downloading https://example/linux.tar.xz" >"$ARCHCI_HOME/incoming/$sid/build.log"
+journal_add sourcer archci-sourcer.service "==> archci-sourcer 0.5.0 $sid on sourcer at 2026-09-15T10:03:00Z" "==> ERROR: Failure while downloading https://example/linux.tar.xz" "==> archci-sourcer finished with 1 at 2026-09-15T10:03:10Z"
 "$job" report "$sid" failure "$(owner "$sid")"
+grep -q '^error===> ERROR: Failure while downloading https://example/linux.tar.xz$' "$ARCHCI_HOME/queue/failed/$sid.job" || fail "the report keeps the log's first error line in the job file: $(cat "$ARCHCI_HOME/queue/failed/$sid.job")"
 [[ -f $ARCHCI_HOME/queue/failed/$sid.job ]] || fail "a failed fetch is a failed job"
 [[ -z $("$next" src) ]] || fail "a failed src job is not offered again before its retry: $("$next" src)"
 "$top" | grep "^sources: 2 packaged  1 to fetch  1 failed   (last fetch " >/dev/null || fail "top must show the sources' state: $("$top" | grep ^sources)"
@@ -154,11 +179,13 @@ echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
 grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim must name the source package: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
+journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "==> ERROR: A failure occurred in build()."
 "$job" report "$id" failure "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
-mkdir -p "$ARCHCI_HOME/logs/omarchy/libsigc++/2.12.2-1/x86_64"
-printf 'building\n==> ERROR: A failure occurred in build().\n' >"$ARCHCI_HOME/logs/omarchy/libsigc++/2.12.2-1/x86_64/attempt-1.log"
 "$failed" | grep "^libsigc++ 2.12.2-1 .* x86_64  *arch  *worker-2  *1/2 retry  *20.*: ==> ERROR: A failure occurred in build()" >/dev/null || fail "archci failed must list the failure with the first error line of its log: $("$failed")"
+# a job file without the report's summary (from before it kept one): the listing reads the journal
+sed -i '/^error=/d; /^last=/d' "$ARCHCI_HOME/queue/failed/$id.job"
+"$failed" | grep "^libsigc++ 2.12.2-1 .*: ==> ERROR: A failure occurred in build()" >/dev/null || fail "without a summary in the job file, archci failed reads the journal: $("$failed")"
 out=$("$master/archci-jobs")
 grep -q "^libsigc++ 2.12.2-1 " <<<"$out" || fail "archci jobs must list the package as a tree root: $out"
 grep -q "^  ._ x86_64  *failed  *worker-2  *1/2 .*: ==> ERROR: A failure occurred in build()" <<<"$out" || fail "archci jobs must list the failed job under it with its first error line: $out"

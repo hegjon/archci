@@ -263,7 +263,9 @@ built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
                             <repo>-src the source package's file name
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
 repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume); os/src the source packages (each carries <pkgbase>/sbom.cdx.json for a Rust package)
-logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N.log   also copied to ARCHCI_R2_LOGS if set (archci-stage; local kept)
+journal/                    the workers' journals (systemd-journal-remote): every job's log is read from here
+logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N-<pkg>-{prepare,build,check,package}.log
+                            makepkg's own logs, sent with a build's results; copied to ARCHCI_R2_LOGS if set
 released/<repo>-<arch>      what the release holds, "name version" per line, and <repo>-src its
                             source packages (archci-signer-status, a timer); a claim reads them
 hosts/<worker>              the last idle poll of each worker, with its host stats (for archci top)
@@ -492,7 +494,7 @@ signer is a host of its own on the other side of R2:
 ```
 archci authorize --web web_key.pub        # on the master
 ssh archci@master snapshot | jq .         # from the web host: the farm and every job, as JSON
-ssh archci@master log <jobid>             # one job's log: its archived log, or a running build's journal tail
+ssh archci@master log <jobid>             # one job's log from the workers' journal (a running build's so far)
 ssh archci@master retry <jobid>           # and requeue, enqueue: the operator's queue commands, logged as the web key's
 ```
 
