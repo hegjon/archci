@@ -91,7 +91,7 @@ copy=archci-$instance
 srcdir=$ARCHCI_WORKER_HOME/build/$ARCHCI_ARCH-$instance/$job_pkgbase
 printf '%s\n' "$chroot/$copy" >"${jobfile%/*}/copydir"   # for the worker's per-job heartbeat stats (with JOBDIR/machine, below)
 
-echo "==> archci-build $job_id on $HOSTNAME at $(archci_now)"
+echo "==> archci-build $(archci_version) $job_id on $HOSTNAME at $(archci_now)"
 echo "    repo=$job_repo arch=$job_arch profile=$profile chroot=$chroot copy=$copy commit=$job_commit"
 echo "    pacman.conf=$pacconf makepkg.conf=$mkconf cache=$cachedir"
 
