@@ -506,13 +506,12 @@ module Archci
   NOT_ERROR_RE = /gpg:|Verifying|Build failed, check|makechrootpkg exited|the build exited|archci-build finished|-Werror|ERRORFUNC|_error|error_/
   def self.error_line?(line) = line.match?(ERROR_RE) && !line.match?(NOT_ERROR_RE)
 
-  # where a job's log is, for a human: the journalctl command that reads it
-  # (read_log's); nil for a pending job, which has none yet
+  # where a job's log is, for a human: the journalctl the master runs to
+  # read it as entries (journal_cmd, what the web's log window is built
+  # from; -o cat in place of -o json gives the lines); nil for a pending
+  # job, which has none yet
   def self.log_where(j)
-    return nil unless %w[running done failed].include?(j['state'])
-
-    since, till = journal_window(j)
-    ['journalctl', '-D', config['ARCHCI_REMOTE_JOURNAL'], '-o', 'cat', "--since=@#{since}", *("--until=@#{till}" if till), *journal_matches(j)].join(' ')
+    journal_cmd(j, output: 'json')&.join(' ')
   end
 
   # one job by id, read from whichever queue holds it (no scan of the rest);
