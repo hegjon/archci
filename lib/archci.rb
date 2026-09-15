@@ -597,21 +597,100 @@ module Archci
   # job (journald prints it as a trailing "-- cursor: " line), nil once it
   # has finished.
   def self.read_log(j, after: nil)
-    journal = config['ARCHCI_REMOTE_JOURNAL']
-    return [[], nil, nil] unless %w[running done failed].include?(j['state']) && journal && File.directory?(journal)
-
-    since, till = journal_window(j)
-    cmd = ['journalctl', '-D', journal, '--no-pager', '-a', '-q', '-o', 'cat']
-    resume = after && !after.empty? && j['state'] == 'running'
-    # journalctl takes a cursor or a window, not both: the cursor is the later
-    cmd += resume ? ['--after-cursor', after] : ["--since=@#{since}"]
-    cmd << "--until=@#{till}" if till
-    cmd << '--show-cursor' if j['state'] == 'running'
-    out, = Open3.capture2(*cmd, *journal_matches(j), err: File::NULL)
+    cmd = journal_cmd(j, after: after, output: 'cat') or return [[], nil, nil]
+    out, = Open3.capture2(*cmd, err: File::NULL)
     lines = out.scrub.lines(chomp: true)
     cursor = lines.pop&.delete_prefix('-- cursor: ') if lines.last&.start_with?('-- cursor: ')
     cursor ||= after if j['state'] == 'running'   # nothing new: journalctl prints no cursor, the poll keeps its own
+    lines = own_lines(lines, j['id']) unless after && !after.empty?
     [lines, j['state'] == 'done' ? nil : lines.index { |l| error_line?(l) }, cursor]
+  end
+
+  # the job's own lines among what its matches and window hold: the window's
+  # slack lets in the sourcer's previous or next fetch on the same host, or
+  # an earlier run of a requeued attempt's unit. archci-build and
+  # archci-sourcer open a log with a header naming the job ("==> archci-build
+  # <version>" then "    job <id>", or the id on the line), so the log starts
+  # at the last such header that names this job and ends before the next
+  # header, another job's. Without a header naming the job (a log from
+  # before they did) nothing is cut. text: the line of an element, for
+  # entries.
+  LOG_HEADER = ['==> archci-build ', '==> archci-sourcer '].freeze
+  def self.own_lines(lines, id, text: ->(l) { l })
+    headers = lines.each_index.select { |i| text[lines[i]].start_with?(*LOG_HEADER) && !text[lines[i]].start_with?(*BUILD_END) }
+    start = headers.reverse.find { |i| lines[i, 4].any? { |l| text[l].include?(id) } } or return lines
+    stop = headers.find { |i| i > start } || lines.size
+    lines[start...stop]
+  end
+
+  # the journalctl that reads a job's log (read_log, read_entries): the
+  # job's matches within its window or, resuming a running job, after the
+  # cursor (journalctl takes one or the other), as OUTPUT: 'cat' for the
+  # lines (with the cursor to resume from while the job runs), 'json' for
+  # the entries. nil for a pending job, or without the journal.
+  def self.journal_cmd(j, after: nil, output: 'cat')
+    journal = config['ARCHCI_REMOTE_JOURNAL']
+    return nil unless %w[running done failed].include?(j['state']) && journal && File.directory?(journal)
+
+    since, till = journal_window(j)
+    cmd = ['journalctl', '-D', journal, '--no-pager', '-a', '-q', '-o', output]
+    resume = after && !after.empty? && j['state'] == 'running'
+    cmd += resume ? ['--after-cursor', after] : ["--since=@#{since}"]
+    cmd << "--until=@#{till}" if till
+    cmd << '--show-cursor' if output == 'cat' && j['state'] == 'running'
+    cmd << '--output-fields=MESSAGE,PRIORITY,_SOURCE_REALTIME_TIMESTAMP' if output == 'json'   # plus the cursor and the __ timestamps, always printed
+    cmd + journal_matches(j)
+  end
+
+  # the job's log as journal entries, [entries, error_at, cursor], for a
+  # browser to build the log window from without reading the log itself:
+  # each entry as journalctl -o json names its fields, '__CURSOR' (the
+  # entry's own, to resume or link from), its timestamps
+  # ('__REALTIME_TIMESTAMP', when journald took the line, microseconds
+  # since the epoch as a string; '__MONOTONIC_TIMESTAMP'; and
+  # '_SOURCE_REALTIME_TIMESTAMP' when the sender stamped it), 'MESSAGE'
+  # (the line) and 'PRIORITY' (syslog's, as a string: a unit's
+  # stdout logs at 6, its stderr at 3), plus 'phase' => 'online' |
+  # 'offline' | 'loopback' on a slice marker line (log_phase), absent
+  # otherwise. error_at and cursor as read_log; the cursor is the last
+  # entry's.
+  def self.read_entries(j, after: nil)
+    cmd = journal_cmd(j, after: after, output: 'json') or return [[], nil, nil]
+    out, = Open3.capture2(*cmd, err: File::NULL)
+    entries = []
+    cursor = nil
+    out.each_line do |line|
+      e = begin
+        JSON.parse(line.scrub)
+      rescue JSON::ParserError
+        next
+      end
+      m = e['MESSAGE']
+      m = m.pack('C*').scrub if m.is_a?(Array)   # not UTF-8: journalctl gives the bytes
+      next unless m.is_a?(String)
+
+      entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY').merge('MESSAGE' => m)
+      phase = log_phase(m)
+      entry['phase'] = phase if phase
+      entries << entry
+      cursor = e['__CURSOR']
+    end
+    cursor = j['state'] == 'running' ? (cursor || after) : nil
+    entries = own_lines(entries, j['id'], text: ->(e) { e['MESSAGE'] }) unless after && !after.empty?
+    [entries, j['state'] == 'done' ? nil : entries.index { |e| error_line?(e['MESSAGE']) }, cursor]
+  end
+
+  # a build's slice-transition marker line and the mode it announces:
+  # archci-build installs the dependencies online, then builds in the
+  # offline slice (no network), or online/loopback for an exempt package.
+  # 'online', 'offline', 'loopback', or nil for an ordinary line.
+  LOG_PHASE_LINES = ['==> Installing the pacman dependencies', '==> Building in the archci-', '==> Building with '].freeze
+  def self.log_phase(line)
+    return nil unless line.start_with?(*LOG_PHASE_LINES)
+    return 'offline' if line.include?('offline')
+    return 'loopback' if line.include?('loopback')
+
+    'online'
   end
 
   # what a listing says of a job in one line: its first error line, else its

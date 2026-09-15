@@ -38,7 +38,9 @@ pkgcommit() { git -C "$pkgs" log -1 --format=%H -- "pkgbuilds/$1"; }
 # job's log is read from: a journal directory of the test's own, written with
 # systemd-journal-remote from journal export format (no root needed).
 #   journal_add HOST UNIT LINE...   one entry per line, now, as UNIT on HOST
-#                                   (SYSLOG_IDENTIFIER is the unit's name)
+#                                   (SYSLOG_IDENTIFIER is the unit's name; a
+#                                   line starting with "stderr:" is logged at
+#                                   priority 3, as a unit's stderr is, else 6)
 #   build_unit PKGBASE VERSION ARCH ATTEMPT -> a build's unit name (archci-worker's rule)
 export ARCHCI_REMOTE_JOURNAL=$tmp/journal
 journal_add() {
@@ -46,9 +48,11 @@ journal_add() {
 	shift 2
 	ts=$(date +%s%6N)   # microseconds: each call's entries come after the last call's
 	: >"$f"
+	local pri
 	for line; do
-		printf '__REALTIME_TIMESTAMP=%s\n__MONOTONIC_TIMESTAMP=%s\n_BOOT_ID=%s\n_HOSTNAME=%s\n_SYSTEMD_UNIT=%s\nSYSLOG_IDENTIFIER=%s\nMESSAGE=%s\n\n' \
-			"$ts" "$ts" 0123456789abcdef0123456789abcdef "$host" "$unit" "${unit%%[@.]*}" "$line" >>"$f"
+		pri=6; [[ $line == stderr:* ]] && { pri=3; line=${line#stderr:}; }
+		printf '__REALTIME_TIMESTAMP=%s\n__MONOTONIC_TIMESTAMP=%s\n_BOOT_ID=%s\n_HOSTNAME=%s\n_SYSTEMD_UNIT=%s\nSYSLOG_IDENTIFIER=%s\nPRIORITY=%s\nMESSAGE=%s\n\n' \
+			"$ts" "$ts" 0123456789abcdef0123456789abcdef "$host" "$unit" "${unit%%[@.]*}" "$pri" "$line" >>"$f"
 		(( ts += 1 ))
 	done
 	mkdir -p "$ARCHCI_REMOTE_JOURNAL"

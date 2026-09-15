@@ -21,6 +21,18 @@
 #              log, or, for a running job, only what follows CURSOR (the
 #              "cursor" a previous call returned), so a poll fetches just the
 #              new lines.
+#   entries ID [CURSOR]
+#              one job's log as journal entries, for a browser to build the
+#              log window from: {"id", "state", "entries": [{"__CURSOR":
+#              the entry's own, "__REALTIME_TIMESTAMP": when the line was
+#              written (microseconds since the epoch), "__MONOTONIC_TIMESTAMP",
+#              "_SOURCE_REALTIME_TIMESTAMP" (when the sender stamped it),
+#              "MESSAGE": the line,
+#              "PRIORITY": syslog's (stdout 6, stderr 3), "phase": "online" |
+#              "offline" | "loopback" on a slice marker
+#              line}, ...], "error_at": N (null without an error), "cursor"}
+#              (Archci.read_entries). Whole, or after CURSOR for a running
+#              job, as `log`; the cursor is the last entry's.
 #   summary ID one job's log in two lines for its job file, "error=<first
 #              error line>" and "last=<last line>", each only if there is
 #              one (archci-job report keeps them so listings need not read
@@ -57,11 +69,15 @@ in ['log', id, *rest]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   lines, err, cursor = Archci.read_log(j, after: rest.first)
   puts JSON.generate('id' => j['id'], 'state' => j['state'], 'lines' => lines, 'error_at' => err, 'cursor' => cursor)
+in ['entries', id, *rest]
+  j = Archci.find_job(id) or abort "archci-web: no job #{id}"
+  entries, err, cursor = Archci.read_entries(j, after: rest.first)
+  puts JSON.generate('id' => j['id'], 'state' => j['state'], 'entries' => entries, 'error_at' => err, 'cursor' => cursor)
 in ['summary', id]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   lines, err, = Archci.read_log(j)
   # one line each, the job file's format (a key=value line): no newlines, cut short
   { 'error' => err && lines[err], 'last' => lines.last }.each { |k, v| puts "#{k}=#{v.strip[0, 200]}" if v && !v.strip.empty? }
 else
-  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | summary ID'
+  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | entries ID [CURSOR] | summary ID'
 end
