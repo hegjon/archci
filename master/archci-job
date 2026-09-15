@@ -149,6 +149,10 @@ cmd_heartbeat() {
 	[[ -n $sender ]] || archci_die "a heartbeat names its worker (worker=ID)"
 	archci_read_job "$file"
 	[[ $sender == "$job_worker" ]] || archci_die "job $id is $job_worker's now, not $sender's"
+	# each beat's stats as a stream of its own, apart from the operational log:
+	# `journalctl -t archci-heartbeat` (a history the running job file, which
+	# keeps only the latest beat, does not retain)
+	(( $# )) && command -v logger >/dev/null && logger -t archci-heartbeat -- "$id worker=$sender $*" 2>/dev/null || true
 	if (( $# )); then
 		{ grep -Ev "^($(archci_stats_re))=" "$file"; printf '%s\n' "$@"; } >"$file.tmp"
 		mv "$file.tmp" "$file"   # the new mtime is the heartbeat

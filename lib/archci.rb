@@ -556,24 +556,61 @@ module Archci
   end
 
   # a build's stable start and stop, [started, stopped] as ISO timestamps or
-  # nil, for a query. archci-build (a package) and archci-sourcer (a source
-  # package) each bracket the log with "... at <ts>" (first line) and
-  # "... finished with N at <ts>" (last): a finished job's come from its
-  # archived log; a running job has a start (its claim time) and no stop; a
-  # pending job neither. Reads only the head and tail of the log, not all of it.
+  # nil, for a query. A package build has a journal unit of its own, so the
+  # journal's own timestamp on its first and last entry is the source: always
+  # there (every entry has one) and authoritative. A src job shares the one
+  # long-running sourcer service journal, so it cannot be told apart there;
+  # its span comes from the start/finish lines archci-sourcer brackets its
+  # per-job log with. Either way the archived log's own markers are the
+  # fallback for a job the journal no longer holds. A running job has a start
+  # and no stop; a pending job neither.
   BUILD_TS = /\bat (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/
   BUILD_END = ['==> archci-build finished with', '==> archci-sourcer finished with'].freeze
   def self.build_span(j)
-    case j['state']
-    when 'running' then [j['claimed'], nil]
-    when 'done', 'failed'
-      return [nil, nil] unless File.exist?(j['log'])
+    return [nil, nil] unless %w[running done failed].include?(j['state'])
 
-      started = File.open(j['log'], &:gets)&.slice(BUILD_TS, 1)
-      stopped = log_tail(j['log']).reverse_each.find { |l| l.start_with?(*BUILD_END) }&.slice(BUILD_TS, 1)
-      [started, stopped]
-    else [nil, nil]
+    journal = config['ARCHCI_REMOTE_JOURNAL']
+    if j['arch'] != 'src' && journal && File.directory?(journal)
+      matches = journal_matches(j)
+      started = journal_edge(journal, matches, :first)
+      return [started, j['state'] == 'running' ? nil : journal_edge(journal, matches, :last)] if started
     end
+    build_span_from_log(j)
+  end
+
+  # the fallback: the archived log's own bracket lines -- "... at <ts>" (first)
+  # and "... finished with N at <ts>" (last), from archci-build or archci-sourcer;
+  # a running job with no such log falls back to its claim time
+  def self.build_span_from_log(j)
+    return [j['claimed'], nil] if j['state'] == 'running'
+    return [nil, nil] unless File.exist?(j['log'])
+
+    started = File.open(j['log'], &:gets)&.slice(BUILD_TS, 1)
+    stopped = log_tail(j['log']).reverse_each.find { |l| l.start_with?(*BUILD_END) }&.slice(BUILD_TS, 1)
+    [started, stopped]
+  end
+
+  # the ISO timestamp of the job's first (:first, the oldest, read from the head
+  # of the forward stream) or last (:last, the newest, with -n 1) journal entry
+  def self.journal_edge(journal, matches, which)
+    base = ['journalctl', '-D', journal, '--no-pager', '-o', 'json', '--output-fields=__REALTIME_TIMESTAMP', *matches]
+    line =
+      if which == :last
+        out, = Open3.capture2(*base, '-n', '1', err: File::NULL)
+        out.lines.last
+      else
+        Open3.popen2(*base) do |sin, sout, wait|
+          sin.close
+          first = sout.gets   # the oldest matching entry
+          sout.close          # journalctl stops on its next write
+          wait.kill
+          first
+        end
+      end
+    usec = line && JSON.parse(line)['__REALTIME_TIMESTAMP']
+    usec && Time.at(Rational(usec.to_i, 1_000_000)).utc.iso8601
+  rescue StandardError
+    nil
   end
 
   # the last of a file as whole lines, without reading all of it (the first
