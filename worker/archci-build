@@ -92,18 +92,18 @@ srcdir=$ARCHCI_WORKER_HOME/build/$ARCHCI_ARCH-$instance/$job_pkgbase
 printf '%s\n' "$chroot/$copy" >"${jobfile%/*}/copydir"   # for the worker's per-job heartbeat stats (with JOBDIR/machine, below)
 
 echo "==> archci-build $(archci_version)"
-echo "    job          $job_id"
-echo "    host         $HOSTNAME"
-echo "    started      $(archci_now)"
-echo "    repo         $job_repo"
-echo "    arch         $job_arch"
-echo "    profile      $profile"
-echo "    commit       $job_commit"
-echo "    chroot       $chroot"
-echo "    copy         $copy"
-echo "    cache        $cachedir"
-echo "    pacman.conf  $pacconf"
-echo "    makepkg.conf $mkconf"
+echo "job          $job_id"
+echo "host         $HOSTNAME"
+echo "started      $(archci_now)"
+echo "repo         $job_repo"
+echo "arch         $job_arch"
+echo "profile      $profile"
+echo "commit       $job_commit"
+echo "chroot       $chroot"
+echo "copy         $copy"
+echo "cache        $cachedir"
+echo "pacman.conf  $pacconf"
+echo "makepkg.conf $mkconf"
 
 # --- clean chroot: create once, refresh periodically, recreate on devtools
 # bumps and when the root's policy changed (ROOT_POLICY, marked in the root)
