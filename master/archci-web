@@ -10,7 +10,8 @@
 #   job ID     one job's fields, story, origin and log path (JSON), with the
 #              pacman repo and the time -- what the job page needs, without
 #              the whole snapshot. "started"/"stopped" are the build's stable
-#              start and stop (Archci.build_span, from the log), for a query.
+#              start and stop (Archci.build_span), with "online_at"/"build_at"
+#              splitting a package build into its online and offline phases.
 #              For a build that used a source package, "sources_job" is the id
 #              of the src job that produced it.
 #   log ID [CURSOR]
@@ -42,7 +43,7 @@ in ['job', id]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   started, stopped = Archci.build_span(j)
   extra = { 'mtime' => j['mtime'].utc.iso8601, 'story' => Archci.story(j), 'repo' => j['repo'], 'generated' => Time.now.utc.iso8601,
-            'started' => started, 'stopped' => stopped }
+            'started' => started, 'stopped' => stopped }.merge(Archci.build_phases(j))
   # the src job that built this build's source package, so the front end can link it
   extra['sources_job'] = Archci.find_src_job(j['repo'], j['pkgbase'], j['version']) if j['sources'] && j['arch'] != 'src'
   puts JSON.generate(j.merge(extra))

@@ -404,9 +404,9 @@ build_args=(--syncdeps --noconfirm --log --skipinteg "${extra_makepkg_args[@]}")
 build_once() {
 	local rcf idle; rcf=$(mktemp); idle=$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))
 	{
-		echo "==> Installing the dependencies (with the network)"
+		echo "==> Installing the dependencies (with the network) at $(archci_now)"
 		if archci_watchdog "$idle" -- "${container[@]}" --slice=archci-online /chrootbuild "${deps_args[@]}"; then
-			echo "==> Building in the $build_slice slice"
+			echo "==> Building in the $build_slice slice at $(archci_now)"
 			if archci_watchdog "$idle" -- "${container[@]}" --slice="$build_slice" /chrootbuild "${build_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
 		else
 			echo $? >"$rcf"
