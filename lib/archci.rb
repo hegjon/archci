@@ -562,15 +562,22 @@ module Archci
   # source, not the journal, whose unit name a retry reuses (its entries then
   # span several attempts). A running job has no archived log yet, so it reports
   # its claim time as the start and no stop; a pending job neither.
-  BUILD_TS = /\bat (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/
+  BUILD_TS = /(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/
   BUILD_END = ['==> archci-build finished with', '==> archci-sourcer finished with'].freeze
   def self.build_span(j)
     return [j['claimed'], nil] if j['state'] == 'running'
     return [nil, nil] unless %w[done failed].include?(j['state']) && File.exist?(j['log'])
 
-    started = File.open(j['log'], &:gets)&.slice(BUILD_TS, 1)
+    started = log_head(j['log']).filter_map { |l| l[BUILD_TS, 1] }.first  # the header's "started" line
     stopped = log_tail(j['log']).reverse_each.find { |l| l.start_with?(*BUILD_END) }&.slice(BUILD_TS, 1)
     [started, stopped]
+  end
+
+  # the first of a file as whole lines, for scanning a multi-line log header
+  def self.log_head(path, lines: 20)
+    File.foreach(path).first(lines)
+  rescue Errno::ENOENT
+    []
   end
 
   # a package build's online (dependency install, with the network) and offline
