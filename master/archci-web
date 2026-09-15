@@ -11,9 +11,12 @@
 #              pacman repo and the time -- what the job page needs, without
 #              the whole snapshot. For a build that used a source package,
 #              "sources_job" is the id of the src job that produced it.
-#   log ID     one job's log: {"id", "state", "lines": [...], "error_at": N}
-#              (null without an error), the archived log of a finished job,
-#              the last lines of the journal a running one streams
+#   log ID [CURSOR]
+#              one job's log: {"id", "state", "lines": [...], "error_at": N
+#              (null without an error), "cursor"}. The archived log of a
+#              finished job; the journal a running one streams -- the whole
+#              journal so far, or only what follows CURSOR (the "cursor" a
+#              previous call returned), so a poll fetches just the new lines.
 # These are the read side of the web key (archci authorize --web): a front end
 # on its own host runs them over ssh, where archci-shell web allows them, and
 # archci-job's retry, requeue and enqueue. A running job's log is polled with
@@ -39,10 +42,10 @@ in ['job', id]
   # the src job that built this build's source package, so the front end can link it
   extra['sources_job'] = Archci.find_src_job(j['repo'], j['pkgbase'], j['version']) if j['sources'] && j['arch'] != 'src'
   puts JSON.generate(j.merge(extra))
-in ['log', id]
+in ['log', id, *rest]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
-  lines, err = Archci.read_log(j)
-  puts JSON.generate('id' => j['id'], 'state' => j['state'], 'lines' => lines, 'error_at' => err)
+  lines, err, cursor = Archci.read_log(j, after: rest.first)
+  puts JSON.generate('id' => j['id'], 'state' => j['state'], 'lines' => lines, 'error_at' => err, 'cursor' => cursor)
 else
-  abort 'usage: archci-web snapshot | job ID | log ID'
+  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR]'
 end

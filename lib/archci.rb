@@ -533,18 +533,26 @@ module Archci
     end
   end
 
-  # the job's log lines and the index of its first error: the archived log for
-  # a finished job, the whole journal so far for a running one (not a tail: a
-  # long build streams well past any fixed window, and the page wants it all)
-  def self.read_log(j)
+  # the job's log for the page, as [lines, error_at, cursor]: the archived file
+  # for a finished job, or the journal for a running one -- the whole journal so
+  # far, or only what follows a cursor (after:) so a poll fetches just what it
+  # has not seen. error_at is the first error's index within these lines (nil
+  # for a done job, whose point of interest is its last line); cursor resumes
+  # the next poll (journald prints it as a trailing "-- cursor: " line; nil for
+  # a finished job's file).
+  def self.read_log(j, after: nil)
     journal = config['ARCHCI_REMOTE_JOURNAL']
-    text = if j['state'] == 'running' && journal && File.directory?(journal)
-             out, = Open3.capture2('journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '--lines=all', *journal_matches(j), err: File::NULL)
-             out.scrub.lines(chomp: true)
-           else
-             File.exist?(j['log']) ? File.read(j['log']).scrub.lines(chomp: true) : []
-           end
-    [text, j['state'] == 'done' ? nil : text.index { |l| error_line?(l) }]   # a done job's line of interest is its last
+    if j['state'] == 'running' && journal && File.directory?(journal)
+      cmd = ['journalctl', '-D', journal, '--no-pager', '-a', '-o', 'cat', '--show-cursor']
+      cmd += ['--after-cursor', after] if after && !after.empty?
+      out, = Open3.capture2(*cmd, *journal_matches(j), err: File::NULL)
+      lines = out.scrub.lines(chomp: true)
+      cursor = lines.pop&.delete_prefix('-- cursor: ') if lines.last&.start_with?('-- cursor: ')
+      [lines, lines.index { |l| error_line?(l) }, cursor]
+    else
+      lines = File.exist?(j['log']) ? File.read(j['log']).scrub.lines(chomp: true) : []
+      [lines, j['state'] == 'done' ? nil : lines.index { |l| error_line?(l) }, nil]
+    end
   end
 
   # the job's story in one line: state, where, when, what it had
