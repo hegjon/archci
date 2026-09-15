@@ -382,6 +382,13 @@ elif ! archci_firewall; then
 	build_slice=archci-online
 	echo "==> WARNING: the firewall could not be set up (see above); building with the network"
 fi
+# how the build slice is described in the log: offline has no network, an
+# exempt package builds online or loopback-only
+case $build_slice in
+	archci-offline)  build_net='no network' ;;
+	archci-loopback) build_net='loopback only' ;;
+	*)               build_net='with network' ;;
+esac
 # unique on the host: the arch and instance this worker is, then the package.
 # The hostname the build sees is the host's, as it would be for makepkg on the
 # host (a build that records where it was made then names the worker, as the
@@ -404,9 +411,9 @@ build_args=(--syncdeps --noconfirm --log --skipinteg "${extra_makepkg_args[@]}")
 build_once() {
 	local rcf idle; rcf=$(mktemp); idle=$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))
 	{
-		echo "==> Installing the dependencies (with the network) at $(archci_now)"
+		echo "==> Installing the pacman dependencies in the archci-online slice (with network) at $(archci_now)"
 		if archci_watchdog "$idle" -- "${container[@]}" --slice=archci-online /chrootbuild "${deps_args[@]}"; then
-			echo "==> Building in the $build_slice slice at $(archci_now)"
+			echo "==> Building in the $build_slice slice ($build_net) at $(archci_now)"
 			if archci_watchdog "$idle" -- "${container[@]}" --slice="$build_slice" /chrootbuild "${build_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
 		else
 			echo $? >"$rcf"

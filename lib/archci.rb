@@ -586,7 +586,7 @@ module Archci
     File.foreach(j['log']).each_with_index do |l, i|
       break if (online && build) || i >= 500
 
-      online ||= l[BUILD_TS, 1] if l.start_with?('==> Installing the dependencies')
+      online ||= l[BUILD_TS, 1] if l.start_with?('==> Installing the pacman dependencies')
       build  ||= l[BUILD_TS, 1] if l.start_with?('==> Building in the archci-')
     end
     { 'online_at' => online, 'build_at' => build }.compact
