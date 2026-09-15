@@ -367,14 +367,32 @@ module Archci
   # repository (ARCHCI_PKG_ALSO excepted). archci_pkg_wanted in
   # archci-common.sh is the same rule for the claim.
   def self.candidates
+    packages.reject { |p| p['skip'] || !wanted?(p) }
+  end
+
+  # The filter alone (ARCHCI_PKG_SOURCES, ARCHCI_PKG_REPOS, ARCHCI_PKG_ALSO),
+  # as archci_pkg_wanted applies it to a queued job: skip_build does not
+  # count, a job for a skipped package is the operator's doing. nil (a
+  # package the index no longer has) is not wanted.
+  def self.wanted?(pkg)
+    return false unless pkg
+
     sources = config['ARCHCI_PKG_SOURCES'].to_s.split
     repos = config['ARCHCI_PKG_REPOS'].to_s.split
-    also = config['ARCHCI_PKG_ALSO'].to_s.split
-    packages.reject do |p|
-      next false if also.include?(p['pkgbase'])
+    return true if config['ARCHCI_PKG_ALSO'].to_s.split.include?(pkg['pkgbase'])
 
-      p['skip'] || (!sources.empty? && !sources.include?(p['source'])) || (!repos.empty? && !repos.include?(origin(p)))
-    end
+    (sources.empty? || sources.include?(pkg['source'])) && (repos.empty? || repos.include?(origin(pkg)))
+  end
+
+  # Why the claim passes a pending job over, for every worker: the package
+  # is outside the filter (a retry of one excluded since, or enqueued by
+  # hand regardless), or, with ARCHCI_SOURCES_REQUIRED, its source package
+  # is not released yet. nil for a job the next claim of its arch may take.
+  def self.held_reason(j, pkg)
+    return 'outside the farm\'s filter' unless wanted?(pkg)
+    return nil if j['arch'] == 'src' || config['ARCHCI_SOURCES_REQUIRED'] == '0'
+
+    source_file(j['repo'], 'pkgbase' => j['pkgbase'], 'commit' => j['commit']) ? nil : 'waiting for its source package'
   end
 
   # Packages without a source package for their current commit, in claim order,
@@ -417,12 +435,20 @@ module Archci
   def self.snapshot(now = Time.now)
     repo = config['ARCHCI_REPO']
     counts = QUEUES.to_h { |q| [q, Dir.glob(File.join(queue(q), '*.job')).size] }
+    by_name = packages.to_h { |p| [p['pkgbase'], p] }
+    # pending jobs no claim takes as things stand (held_reason): they wait
+    # in pending/ but are not work for the workers
+    counts['held'] = jobs('pending').count { |j| held_reason(j, by_name[j['pkgbase']]) }
     # built and tracked are keyed like the built/ directories: "<repo>-<arch>"
-    # per enabled arch, plus "<repo>-any" for the arch-independent packages.
-    pkgs = packages.reject { |p| p['skip'] }
+    # per enabled arch, plus "<repo>-any" for the arch-independent packages
+    # and "<repo>-src" for the source packages; both count the packages the
+    # farm builds now (candidates), so a filter narrows them together and
+    # what was built before the filter does not count past the total
+    pkgs = candidates
     any_count = pkgs.count { |p| p['arches'] == ['any'] }
     sets = arches.map { |a| ["#{repo}-#{a}", pkgs.size - any_count] } << ["#{repo}-any", any_count]
-    sets << ["#{repo}-src", candidates.size]
+    sets << ["#{repo}-src", pkgs.size]
+    names = pkgs.map { |p| p['pkgbase'] }.to_set
     outstanding = self.outstanding
     # the sourcer: packages with a source package for their current commit
     # (the src built records), those still to fetch (src jobs to come, queued
@@ -435,7 +461,6 @@ module Archci
       'last' => Dir.glob(File.join(src_dir, '*')).map { |f| File.mtime(f) }.max&.utc&.iso8601
     }
     updates = outstanding.count { |e| e['prio'] == 1 }
-    by_name = packages.to_h { |p| [p['pkgbase'], p] }
     job = lambda do |j|
       { 'pkgbase' => j['pkgbase'], 'version' => j['version'], 'repo' => j['repo'], 'arch' => j['arch'],
         'worker' => j['worker'], 'attempt' => j['attempt'], 'origin' => origin(by_name[j['pkgbase']]) }
@@ -467,7 +492,7 @@ module Archci
       'outstanding' => { 'updates' => updates, 'backlog' => outstanding.size - updates },
       'sources' => sources,
       'tracked' => sets.to_h,
-      'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).size] },
+      'built' => sets.to_h { |key, _| [key, Dir.glob(File.join(home, 'built', key, '*')).count { |f| names.include?(File.basename(f)) }] },
       'hosts' => hosts(running, recent, Dir.glob(File.join(home, 'hosts', '*')).filter_map { |p| read_job(p) }, now),
       'signer' => signer,
       'running' => running,
@@ -612,7 +637,9 @@ module Archci
   def self.story(j)
     max = config['ARCHCI_MAX_ATTEMPTS'].to_i
     s = case j['state']
-        when 'pending' then "pending since #{j['created']}, attempt #{j['attempt'] + 1} of #{max} next"
+        when 'pending'
+          held = held_reason(j, packages.find { |p| p['pkgbase'] == j['pkgbase'] })
+          "pending since #{j['created']}, attempt #{j['attempt'] + 1} of #{max} next#{held ? ", held: #{held}" : ''}"
         when 'running' then "running on #{j['worker']} since #{j['claimed']}, attempt #{j['attempt']} of #{max}#{j['phase'] ? ", in #{j['phase']}" : ''}"
         when 'done' then "done #{j['finished']} on #{j['worker']}, attempt #{j['attempt']}"
         when 'failed' then "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{max}#{j['final'] ? ': gave up' : ''}"

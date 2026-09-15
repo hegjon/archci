@@ -100,8 +100,12 @@ time. The order puts the farm's own packages first, then updates to packages
 already published, then the never-built rest, and within each of those a
 library before what links it (by the dependency graph) and Arch's core
 before extra. `ARCHCI_PKG_SOURCES` and `ARCHCI_PKG_REPOS` narrow what is
-built. A commit that changes a package without changing its version does not
-rebuild it.
+built, queued jobs included: a job for a package outside them, a retry from
+before the filter or one enqueued by hand, waits in `pending/` until
+`ARCHCI_PKG_ALSO` names the package or the filter is lifted, and `archci
+top` and the web front end count it as held (as they do a build waiting
+for its source package under `ARCHCI_SOURCES_REQUIRED`). A commit that
+changes a package without changing its version does not rebuild it.
 
 **Architectures.** `ARCHCI_ARCHES` lists the arches the farm builds. Each
 worker builds one arch and only claims jobs for it. An `arch=(any)` package

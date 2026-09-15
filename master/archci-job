@@ -33,7 +33,10 @@
 #                             queue the package's current version (from the
 #                             PKGBUILD repository clone), priority P (default
 #                             0), for ARCH (default ARCHCI_ARCH; "any" for an
-#                             arch-independent package; "src" for its sources)
+#                             arch-independent package; "src" for its sources).
+#                             A package outside the filter (ARCHCI_PKG_SOURCES,
+#                             ARCHCI_PKG_REPOS) is queued but waits: the claim
+#                             applies the filter to queued jobs too
 #
 # The queue itself (files under queue/, moved between pending, running, done
 # and failed) is lib/archci-queue.sh; its periodic pass, requeueing stale
@@ -295,6 +298,13 @@ cmd_enqueue() {
 	done
 	name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile" "$build")
 	archci_log "enqueued ${name%.job}"
+	# the claim applies the filter to queued jobs too (see cmd_claim): say so
+	# now rather than let the job sit unexplained
+	if ! archci_pkg_wanted "$pkgbase"; then
+		archci_log "note: $pkgbase is outside the farm's filter (ARCHCI_PKG_SOURCES=\"$ARCHCI_PKG_SOURCES\" ARCHCI_PKG_REPOS=\"$ARCHCI_PKG_REPOS\"): the job waits in pending/ until ARCHCI_PKG_ALSO names the package or the filter is lifted"
+	elif [[ $ARCHCI_SOURCES_REQUIRED == 1 && $arch != src ]] && [[ -z $(source_package_for "$repo" "$pkgbase" "$commit") ]]; then
+		archci_log "note: the job waits in pending/ for the package's source package (ARCHCI_SOURCES_REQUIRED): the sourcer fetches it next"
+	fi
 }
 
 # ---------------------------------------------------------------------------

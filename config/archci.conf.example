@@ -25,6 +25,8 @@ ARCHCI_REPO=omarchy
 ARCHCI_PKG_SOURCES=""
 # Only build packages of these Arch repositories (package.json arch_repo:
 # core, extra, multilib), e.g. "core" to hold the rest. Empty: every one.
+# Both filters hold queued jobs too (retries, hand-enqueued ones): archci top
+# shows them as "held" beside pending.
 ARCHCI_PKG_REPOS=""
 # Packages built whatever their source or repository, e.g. archci itself on
 # a farm that otherwise builds only the Arch-origin packages.

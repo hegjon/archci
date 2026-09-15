@@ -231,8 +231,27 @@ commit_pkgs acl-metadata
 echo "--- top into a pipe prints one frame"
 frame=$("$top")
 [[ $frame == *"pkgbuilds -> [omarchy]   arches: x86_64"* ]] || fail "top title: $frame"
-[[ $frame == *"queue: pending 1 "*"outstanding: 0 update(s), 2 unbuilt"* ]] || fail "top queue line: $frame"
+[[ $frame == *"queue: pending 1  running 0 "*"outstanding: 0 update(s), 2 unbuilt"* ]] || fail "top queue line: $frame"
 [[ $frame == *"built: x86_64 1/3"* ]] || fail "top built line: $frame"
+
+echo "--- a queued job the claim passes over is held: enqueue says so, top counts it, its story says why"
+# the pending acl job was enqueued by hand; with a filter that excludes it, it waits (scan-test has the claim side)
+ARCHCI_PKG_SOURCES=nothing "$job" enqueue acl 0 2>&1 | grep -q "note: acl is outside the farm's filter (ARCHCI_PKG_SOURCES=\"nothing\" ARCHCI_PKG_REPOS=\"\")" || fail "enqueue must say a job outside the filter waits: $(ARCHCI_PKG_SOURCES=nothing "$job" enqueue acl 0 2>&1)"
+"$job" enqueue acl 0 2>&1 | grep -q "note:" && fail "enqueue of a package the farm builds must not warn: $("$job" enqueue acl 0 2>&1)"
+frame=$(ARCHCI_PKG_SOURCES=nothing "$top")
+[[ $frame == *"queue: pending 1 (1 held)  running 0 "* ]] || fail "top must count the held jobs beside pending: $frame"
+# built and tracked count the packages the farm builds now: what was built before the filter is not counted past the total
+[[ $frame == *"built: x86_64 0/0  any 0/0  src 0/0"* ]] || fail "top's built counts must follow the filter: $frame"
+story=$(ARCHCI_PKG_SOURCES=nothing "$master/archci-web" snapshot | jq -r '.jobs[] | select(.state == "pending") | .story')
+[[ $story == "pending since "*", attempt 1 of 2 next, held: outside the farm's filter" ]] || fail "a held job's story must say why: $story"
+[[ $(ARCHCI_PKG_SOURCES=nothing "$master/archci-web" snapshot | jq -r '.queue.held') == 1 ]] || fail "the snapshot counts the held jobs"
+[[ $("$master/archci-web" snapshot | jq -r '.queue.held') == 0 ]] || fail "without the filter nothing is held: $("$master/archci-web" snapshot | jq -c .queue)"
+# with sources required, a queued build whose source package is not released yet is held too (linux: a new commit, its sources not fetched)
+ARCHCI_SOURCES_REQUIRED=1 "$job" enqueue linux 0 x86_64 2>&1 | grep -q "note: the job waits in pending/ for the package's source package" || fail "enqueue must say a build waits for its source package"
+story=$(ARCHCI_SOURCES_REQUIRED=1 "$master/archci-web" snapshot | jq -r '.jobs[] | select(.state == "pending" and .pkgbase == "linux") | .story')
+[[ $story == *", held: waiting for its source package" ]] || fail "a build held for its source package says so: $story"
+[[ $(ARCHCI_SOURCES_REQUIRED=1 "$master/archci-web" snapshot | jq -r '.queue.held') == 2 ]] || fail "the held count includes builds waiting for sources (linux, and acl whose sources were never fetched): $(ARCHCI_SOURCES_REQUIRED=1 "$master/archci-web" snapshot | jq -c '[.queue, [.jobs[] | select(.state == "pending") | .story]]')"
+rm -f "$ARCHCI_HOME"/queue/pending/*linux*
 
 echo "--- retry --all gives every failed job a fresh first attempt"
 # two jobs that gave up (final after max attempts), as report leaves them

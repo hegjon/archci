@@ -233,8 +233,12 @@ def frame(journal)
   out = []
   out << format('archci-top  %s   pkgbuilds -> [%s]   arches: %s%s', now.strftime('%H:%M:%S'), repo,
                 snap['arches'].join(' '), STYLE ? '   (q or Esc quits)' : '')
-  out << format('queue: pending %s  running %s  failed %s  done %s (%s in the last hour)    outstanding: %s update(s), %s unbuilt',
-                *[counts['pending'], counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
+  # held: pending jobs no claim takes now (outside the filter, or waiting
+  # for a source package); the rest of pending is the workers' next work
+  held = counts['held'].to_i.positive? ? " (#{bold(counts['held'])} held)" : ''
+  out << format('queue: pending %s%s  running %s  failed %s  done %s (%s in the last hour)    outstanding: %s update(s), %s unbuilt',
+                bold(counts['pending']), held,
+                *[counts['running'], counts['failed'], counts['done'], snap['done_last_hour'],
                   snap['outstanding']['updates'], snap['outstanding']['backlog']].map { |n| bold(n) })
   out << format('built: %s', snap['built'].map { |k, n| "#{k.delete_prefix("#{repo}-")} #{bold(n)}/#{snap['tracked'][k]}" }.join('  '))
   # the sourcer: source packages in for the outstanding packages, what it
