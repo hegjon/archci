@@ -193,6 +193,7 @@ fetch_one() {
 	rm -rf "$w"
 	mkdir -p "$w"/{pkg,out} "$out"
 	: >"$log"
+	say "==> archci-sourcer $job_id on $HOSTNAME at $(archci_now)"
 	# SRCDEST is kept between jobs (a pkgrel bump downloads nothing); files
 	# not used for ARCHCI_SRCDEST_KEEP_DAYS go
 	find "$srcdest" -mindepth 1 -atime +"$ARCHCI_SRCDEST_KEEP_DAYS" -delete 2>/dev/null || true
@@ -356,6 +357,8 @@ while true; do
 	start=$(date +%s)
 	status=failure
 	fetch_one "$jobdir" && status=success
+	# bracket the log so a query can read a stable build start and stop (build_span)
+	printf '==> archci-sourcer finished with %d at %s\n' "$([[ $status == success ]] && echo 0 || echo 1)" "$(archci_now)" >>"$jobdir/out/build.log"
 	machine=''
 	kill "$heartbeat" 2>/dev/null || true
 	wait "$heartbeat" 2>/dev/null || true

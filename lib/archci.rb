@@ -555,6 +555,36 @@ module Archci
     end
   end
 
+  # a build's stable start and stop, [started, stopped] as ISO timestamps or
+  # nil, for a query. archci-build (a package) and archci-sourcer (a source
+  # package) each bracket the log with "... at <ts>" (first line) and
+  # "... finished with N at <ts>" (last): a finished job's come from its
+  # archived log; a running job has a start (its claim time) and no stop; a
+  # pending job neither. Reads only the head and tail of the log, not all of it.
+  BUILD_TS = /\bat (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/
+  BUILD_END = ['==> archci-build finished with', '==> archci-sourcer finished with'].freeze
+  def self.build_span(j)
+    case j['state']
+    when 'running' then [j['claimed'], nil]
+    when 'done', 'failed'
+      return [nil, nil] unless File.exist?(j['log'])
+
+      started = File.open(j['log'], &:gets)&.slice(BUILD_TS, 1)
+      stopped = log_tail(j['log']).reverse_each.find { |l| l.start_with?(*BUILD_END) }&.slice(BUILD_TS, 1)
+      [started, stopped]
+    else [nil, nil]
+    end
+  end
+
+  # the last of a file as whole lines, without reading all of it (the first
+  # line back may be partial; callers match a marker, not a position)
+  def self.log_tail(path, bytes: 8192)
+    File.open(path) do |f|
+      f.seek([f.size - bytes, 0].max)
+      f.read.scrub.lines(chomp: true)
+    end
+  end
+
   # the job's story in one line: state, where, when, what it had
   def self.story(j)
     max = config['ARCHCI_MAX_ATTEMPTS'].to_i
