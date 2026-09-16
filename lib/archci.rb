@@ -652,7 +652,9 @@ module Archci
 
     since, till = journal_window(j)
     cmd = ['journalctl', '-D', journal, '--no-pager', '-a', '-q', '-o', output]
-    resume = after && !after.empty? && j['state'] == 'running'
+    # a cursor resumes whatever the state: a poll that watched the job run
+    # asks once more after it finished, and gets the rest, not the log again
+    resume = after && !after.empty?
     cmd += resume ? ['--after-cursor', after] : ["--since=@#{since}"]
     cmd << "--until=@#{till}" if till
     cmd << '--show-cursor' if output == 'cat' && j['state'] == 'running'

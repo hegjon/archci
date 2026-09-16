@@ -110,6 +110,10 @@ sse=$("$master/archci-web" sse "$id")
 { grep -q '"phase":"build"' <<<"$sse" && grep -q '"event":"finish"' <<<"$sse"; } || fail "the entries carry the phase and archci's event: $sse"
 [[ $sse == *$'\n'"event: end"$'\n'"data: {\"state\":\"done\","*'"rc":0'* ]] || fail "a finished job's stream ends with the end event, its rc from the finish record: ${sse: -200}"
 grep -q '"invocation":"feedfacefeedfacefeedfacefeedface"' <<<"$sse" || fail "the job event names the unit's invocation: ${sse:0:400}"
+# a poll that watched the job run asks once more, after its cursor, once it has finished: the rest and the end, not the log again
+mid=$(grep '^id: s=' <<<"$sse" | sed -n 4p | cut -d' ' -f2)
+rest=$("$master/archci-web" sse "$id" "$mid")
+[[ $(grep -c '^id: s=' <<<"$rest") == 4 && $rest != "event: job"* && $rest == *$'\n'"event: end"$'\n'* ]] || fail "from a cursor, a finished job's stream is the entries after it and the end: $rest"
 mkdir -p "$tmp/logs"
 [[ $("$master/archci-web" export "$tmp/logs") == 1 ]] || fail "the finished job's log is exported once"
 xf=$(find "$tmp/logs" -name '*.sse.zst'); [[ $xf == "$tmp/logs/omarchy/acl/1:2.3.2-1/x86_64/acl-1:2.3.2-1-x86_64-"[0-9]*"-feedfacefeedfacefeedfacefeedface.sse.zst" ]] || fail "the export is named by pkgbase, version, arch, the start and the invocation: $xf"
