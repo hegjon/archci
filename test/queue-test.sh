@@ -125,6 +125,7 @@ journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "extra line 1" "extra 
 capped=$(ARCHCI_LOG_MAX_LINES=8 "$master/archci-web" sse "$id")
 [[ $(grep -c '^id: s=' <<<"$capped") == 8 && $(grep -c '^data: {"time":"2026-' <<<"$capped") == 9 ]] || fail "8 entries kept (6 + 2) and one marker without a cursor: $capped"
 grep -q '"priority":"4","message":"... 4 line(s) not shown: the log has more than 8 lines (ARCHCI_LOG_MAX_LINES); the first 6 and the last 2 are"' <<<"$capped" || fail "the marker says what was cut: $(grep 'not shown' <<<"$capped")"
+! grep -q '^id: *$' <<<"$capped" || fail "the marker has no id line at all (an empty one resets Last-Event-ID)"
 [[ $(grep -o '"message":"extra line [0-9]"' <<<"$capped" | tr '\n' ' ') == '"message":"extra line 3" "message":"extra line 4" ' ]] || fail "the tail is the last quarter: $(grep -o '"message":"extra line [0-9]"' <<<"$capped")"
 onejob=$("$master/archci-web" job "$id")
 [[ $(jq -r '.started' <<<"$onejob") == 2026-09-15T10:00:00Z && $(jq -r '.stopped' <<<"$onejob") == 2026-09-15T10:01:43Z && $(jq -r '.online_at' <<<"$onejob") == 2026-09-15T10:00:05Z && $(jq -r '.build_at' <<<"$onejob") == 2026-09-15T10:00:20Z ]] || fail "the build's span and phases come from its journal entries: $onejob"
