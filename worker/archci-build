@@ -91,7 +91,10 @@ copy=archci-$instance
 srcdir=$ARCHCI_WORKER_HOME/build/$ARCHCI_ARCH-$instance/$job_pkgbase
 printf '%s\n' "$chroot/$copy" >"${jobfile%/*}/copydir"   # for the worker's per-job heartbeat stats (with JOBDIR/machine, below)
 
-echo "==> archci-build $(archci_version)"
+archci_journal_open || true
+fields=("ARCHCI_JOB=$job_id" "ARCHCI_ATTEMPT=$job_attempt")
+archci_record "==> archci-build $(archci_version) $job_id on $HOSTNAME at $(archci_now)" "${fields[@]}" ARCHCI_EVENT=start \
+	"ARCHCI_VERSION=$(archci_version)" "ARCHCI_REPO=$job_repo" "ARCHCI_ARCH=$job_arch" "ARCHCI_PROFILE=$profile" "ARCHCI_COMMIT=$job_commit" "ARCHCI_HOST=$HOSTNAME"
 echo "job          $job_id"
 echo "host         $HOSTNAME"
 echo "started      $(archci_now)"
@@ -411,7 +414,8 @@ container=(arch-nspawn -c "$cachedir" "$copydir" --machine="$machine" --hostname
 	"$ARCHCI_CONTAINER_TMP")
 [[ -n $vendor_conf ]] && container+=(--bind-ro="$vendor_conf:/build/.config")
 deps_args=(--syncdeps --noconfirm --skipinteg --nobuild --noextract --noprepare "${extra_makepkg_args[@]}")
-build_args=(--syncdeps --noconfirm --log --skipinteg "${extra_makepkg_args[@]}")
+# (no --log: the build's output is its unit's journal, which the master keeps; makepkg's per-function log files would only repeat it)
+build_args=(--syncdeps --noconfirm --skipinteg "${extra_makepkg_args[@]}")
 # Through archci_watchdog's pipe on purpose: systemd-nspawn (arch-nspawn's
 # --console=autopipe) passes the container's stdout through when it is a
 # pipe or a file, but drops it when it is the unit's journal stream socket.
@@ -422,9 +426,9 @@ build_args=(--syncdeps --noconfirm --log --skipinteg "${extra_makepkg_args[@]}")
 build_once() {
 	local rcf idle; rcf=$(mktemp); idle=$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))
 	{
-		echo "==> Installing the pacman dependencies in the archci-online slice (with network) at $(archci_now)"
+		archci_record "==> Installing the pacman dependencies in the archci-online slice (with network) at $(archci_now)" "${fields[@]}" ARCHCI_EVENT=slice ARCHCI_SLICE=online
 		if archci_watchdog "$idle" -- "${container[@]}" --slice=archci-online /chrootbuild "${deps_args[@]}"; then
-			echo "==> Building in the $build_slice slice ($build_net) at $(archci_now)"
+			archci_record "==> Building in the $build_slice slice ($build_net) at $(archci_now)" "${fields[@]}" ARCHCI_EVENT=slice "ARCHCI_SLICE=${build_slice#archci-}" "ARCHCI_NETWORK=${job_network:-}"
 			if archci_watchdog "$idle" -- "${container[@]}" --slice="$build_slice" /chrootbuild "${build_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
 		else
 			echo $? >"$rcf"
@@ -493,7 +497,7 @@ if (( rc == 0 && ${#pkgs[@]} )); then
 		for pkg in "${pkgs[@]}"; do
 			if gpg --homedir "$ARCHCI_BUILDER_GNUPGHOME" --batch --yes \
 					--detach-sign -u "$ARCHCI_BUILDER_KEY" -o "$pkg.buildsig" "$pkg"; then
-				echo "==> builder-signed ${pkg##*/}"
+				archci_record "==> builder-signed ${pkg##*/}" "${fields[@]}" ARCHCI_EVENT=signed "ARCHCI_PACKAGE=${pkg##*/}"
 			else
 				echo "==> failed to builder-sign ${pkg##*/}"
 				rc=1; break
@@ -502,7 +506,8 @@ if (( rc == 0 && ${#pkgs[@]} )); then
 	fi
 fi
 if (( rc == 0 )); then echo success; else echo failure; fi >"$outdir/result"
-echo "==> archci-build finished with $rc at $(archci_now): ${pkgs[*]##*/}"
+archci_record "==> archci-build finished with $rc at $(archci_now): ${pkgs[*]##*/}" "${fields[@]}" ARCHCI_EVENT=finish "ARCHCI_RC=$rc" "ARCHCI_PACKAGES=${pkgs[*]##*/}"
+archci_journal_close
 rm -rf "$srcdir"
 exit "$rc"
 }

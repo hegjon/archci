@@ -34,15 +34,21 @@
 #      leave the pool with their .buildsig: the pool is what is not
 #      published yet. Without ARCHCI_R2_RELEASE the pass ends after the
 #      index (a farm without a release, the tests) and signed files stay.
-# Every object's name but the databases' and release.pub's carries a hash,
-# so those get a year of immutable caching; the rest no-cache (rclone
-# --header-upload).
+#   4. logs: the logs of the jobs finished since the last pass, whole in the
+#      journal by now, are exported as SSE (archci-web export: one
+#      <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst per attempt
+#      under logs/<repo>/<pkgbase>/<version>/<arch>/) and moved to the release
+#      as <repo>/log/..., served with Content-Encoding zstd so a browser
+#      decodes them itself. Without ARCHCI_R2_RELEASE they stay under logs/.
+# Every object's name but the databases' and release.pub's carries a hash or
+# a timestamp, so those get a year of immutable caching; the rest no-cache
+# (rclone --header-upload).
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
 force=0
 [[ ${1:-} == --force ]] && force=1
-pool=$ARCHCI_HOME/repo sigs=$ARCHCI_HOME/sigs dbs=$ARCHCI_HOME/db listings=$ARCHCI_HOME/released
+pool=$ARCHCI_HOME/repo sigs=$ARCHCI_HOME/sigs dbs=$ARCHCI_HOME/db listings=$ARCHCI_HOME/released logs=$ARCHCI_HOME/logs
 keyring=$ARCHCI_HOME/release-keyring
 flag=$ARCHCI_HOME/publish.needed
 stamp=$ARCHCI_HOME/publish.reconciled
@@ -142,9 +148,13 @@ for srcdir in "$pool"/*/os/src/; do
 	mv "$listings/$repo-src.tmp" "$listings/$repo-src"
 done
 
+# --- the logs of the jobs finished since the last pass, as SSE files ---------
+exported=$("$ARCHCI_MASTER_DIR/archci-web" export "$logs" 2>/dev/null || echo 0)
+(( exported )) && archci_log "exported $exported build log(s)"
+
 # --- 3. publish -----------------------------------------------------------------
 if [[ -z $ARCHCI_R2_RELEASE ]]; then
-	(( indexed || accepted )) && archci_log "ARCHCI_R2_RELEASE is empty: indexed, not published"
+	(( indexed || accepted || exported )) && archci_log "ARCHCI_R2_RELEASE is empty: indexed, not published"
 	exit 0
 fi
 command -v rclone >/dev/null || archci_die "rclone is not installed"
@@ -244,6 +254,19 @@ if (( due || force )); then
 	done
 	touch "$stamp"
 fi
+# the logs, beside the packages as <repo>/log/<pkgbase>/<version>/<arch>/...:
+# a finished attempt's log never changes, so --ignore-existing skips what
+# the release has (a file left by an interrupted move) without a check
+for repodir in "$logs"/*/; do
+	repodir=${repodir%/}; repo=${repodir##*/}
+	n=$(find "$repodir" -type f -name '*.sse.zst' | wc -l)
+	(( n )) || continue
+	rclone move "$repodir" "$ARCHCI_R2_RELEASE/$repo/log" --include '*.sse.zst' --ignore-existing --transfers 8 --checkers 16 --no-traverse \
+		"${immutable[@]}" --header-upload "Content-Type: text/event-stream" --header-upload "Content-Encoding: zstd"
+	find "$repodir" -type f -name '*.sse.zst' -delete 2>/dev/null || true   # a file the release already had
+	archci_log "published $n build log(s) to $ARCHCI_R2_RELEASE/$repo/log"
+done
+find "$logs" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 # the release public key, for clients, when it changed
 if [[ -f $ARCHCI_RELEASE_PUBKEY ]] && [[ ! -f $ARCHCI_HOME/release.pub.published || $ARCHCI_RELEASE_PUBKEY -nt $ARCHCI_HOME/release.pub.published ]]; then
 	rclone copyto "${nocache[@]}" "$ARCHCI_RELEASE_PUBKEY" "$ARCHCI_R2_RELEASE/release.pub" && touch "$ARCHCI_HOME/release.pub.published"

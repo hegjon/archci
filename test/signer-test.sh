@@ -50,7 +50,7 @@ sub=""; pos=(); list=/dev/null
 while [[ $# -gt 0 ]]; do
   case $1 in
     --files-from) list=$2; shift 2;;
-    --header-upload|--transfers|--checkers|--config|--format|--separator) shift 2;;
+    --header-upload|--transfers|--checkers|--config|--format|--separator|--include|--exclude) shift 2;;
     --*) shift;;
     *) [[ -z $sub ]] && sub=$1 || pos+=("$1"); shift;;
   esac
@@ -61,6 +61,7 @@ case $sub in
   deletefile) rm -f "${pos[0]}";;
   copy) while IFS= read -r f; do [[ -f ${pos[0]}/$f ]] || continue; mkdir -p "$(dirname "${pos[1]}/$f")"; cp "${pos[0]}/$f" "${pos[1]}/$f"; done <"$list";;
   delete) while IFS= read -r f; do rm -f "${pos[0]}/$f"; done <"$list";;
+  move) [[ -d ${pos[0]} ]] && (cd "${pos[0]}" && find . -type f -printf '%P\n') | while IFS= read -r f; do [[ -f ${pos[1]}/$f ]] && continue; mkdir -p "$(dirname "${pos[1]}/$f")"; mv "${pos[0]}/$f" "${pos[1]}/$f"; done;;
 esac
 exit 0
 SH
@@ -168,6 +169,13 @@ out=$(ARCHCI_UNSIGNED_WARN=2 "$health" 2>&1); [[ $out == *"cannot reach the mast
 ! "$sign" >/dev/null 2>&1 || fail "archci-sign fails when the master is unreachable"
 rm -f "$tmp/master-down"
 "$sign" >/dev/null 2>&1; "$publish" >/dev/null 2>&1
+
+echo "--- the exported logs go to the release as <repo>/log/..., and leave logs/"
+lg=$ARCHCI_HOME/logs/omarchy/hello/1-2/x86_64; mkdir -p "$lg"
+printf 'event: job\ndata: {}\n\n' | zstd -q >"$lg/hello-1-2-x86_64-1789000000-feedfacefeedfacefeedfacefeedface.sse.zst"
+out=$("$publish" --force 2>&1)
+[[ $out == *"published 1 build log(s)"* ]] || fail "the log is published: $out"
+[[ -f $release/omarchy/log/hello/1-2/x86_64/hello-1-2-x86_64-1789000000-feedfacefeedfacefeedfacefeedface.sse.zst && ! -e $lg ]] || fail "the log sits beside the packages under log/, and is gone from logs/: $(find "$release/omarchy/log" "$ARCHCI_HOME/logs" 2>/dev/null)"
 
 echo "--- the reconcile: a stray file in the release goes, never against an empty database"
 : >"$rel/stray-1-1-x86_64-$(printf 'a%.0s' {1..64}).pkg.tar.zst"

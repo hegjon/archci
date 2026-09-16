@@ -3,6 +3,7 @@
 # archci.rb -- shared helpers for the ruby parts of archci (scan, top).
 # Mirrors archci-common.sh: same config file, same job file format.
 require 'etc'
+require 'fileutils'
 require 'set'
 require 'socket'
 require 'json'
@@ -654,7 +655,10 @@ module Archci
     cmd += resume ? ['--after-cursor', after] : ["--since=@#{since}"]
     cmd << "--until=@#{till}" if till
     cmd << '--show-cursor' if output == 'cat' && j['state'] == 'running'
-    cmd << '--output-fields=MESSAGE,PRIORITY,_SOURCE_REALTIME_TIMESTAMP' if output == 'json'   # plus the cursor and the __ timestamps, always printed
+    # plus the cursor and the __ timestamps, always printed; the ARCHCI_ fields
+    # are on archci's own records (archci_record), the invocation id on every
+    # line of a unit's run
+    cmd << "--output-fields=MESSAGE,PRIORITY,_PID,_SOURCE_REALTIME_TIMESTAMP,_SYSTEMD_INVOCATION_ID,#{RECORD_FIELDS.join(',')}" if output == 'json'
     cmd + journal_matches(j)
   end
 
@@ -670,6 +674,7 @@ module Archci
   # 'offline' | 'loopback' on a slice marker line (log_phase), absent
   # otherwise. error_at and cursor as read_log; the cursor is the last
   # entry's.
+  RECORD_FIELDS = %w[ARCHCI_JOB ARCHCI_ATTEMPT ARCHCI_EVENT ARCHCI_RC ARCHCI_SLICE ARCHCI_NETWORK ARCHCI_PACKAGE ARCHCI_PACKAGES ARCHCI_VERSION ARCHCI_COMMIT ARCHCI_PROFILE ARCHCI_HOST].freeze
   def self.read_entries(j, after: nil)
     cmd = journal_cmd(j, after: after, output: 'json') or return [[], nil, nil]
     out, = Open3.capture2(*cmd, err: File::NULL)
@@ -685,7 +690,7 @@ module Archci
       m = m.pack('C*').scrub if m.is_a?(Array)   # not UTF-8: journalctl gives the bytes
       next unless m.is_a?(String)
 
-      entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY').merge('MESSAGE' => m)
+      entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY', '_PID', '_SYSTEMD_INVOCATION_ID', *RECORD_FIELDS).merge('MESSAGE' => m)
       phase = log_phase(m)
       entry['phase'] = phase if phase
       entries << entry
@@ -696,17 +701,117 @@ module Archci
     [entries, j['state'] == 'done' ? nil : entries.index { |e| error_line?(e['MESSAGE']) }, cursor]
   end
 
-  # a build's slice-transition marker line and the mode it announces:
-  # archci-build installs the dependencies online, then builds in the
-  # offline slice (no network), or online/loopback for an exempt package.
-  # 'online', 'offline', 'loopback', or nil for an ordinary line.
+  # a build's marker lines and the phase each opens: archci-build's slice
+  # transitions ('online': the dependencies install with the network;
+  # 'offline' or 'loopback' or 'online' again: the build itself, by the
+  # package's network flag), and makepkg's own "==> Starting X()..." lines
+  # ('prepare', 'pkgver', 'build', 'check', 'package'; a split package's
+  # package_foo() is 'package'). nil for an ordinary line.
   LOG_PHASE_LINES = ['==> Installing the pacman dependencies', '==> Building in the archci-', '==> Building with '].freeze
+  MAKEPKG_STEP = /\A==> Starting (prepare|pkgver|build|check|package)(?:_\S+)?\(\)\.\.\./
   def self.log_phase(line)
+    return Regexp.last_match(1) if line.match(MAKEPKG_STEP)
     return nil unless line.start_with?(*LOG_PHASE_LINES)
     return 'offline' if line.include?('offline')
     return 'loopback' if line.include?('loopback')
 
     'online'
+  end
+
+  # ---- the log as a stream of events (SSE), live and archived alike ----
+  # The framing a browser's EventSource reads: first an "event: job" with
+  # the job's fields and story, then one event per journal entry (data: the
+  # line's time, priority, pid, message and phase; id: the entry's journal
+  # cursor, so a reconnecting reader resumes from Last-Event-ID), and, once
+  # the job has finished, "event: end" with its state, the first error's
+  # index and its rc and packages. sse_events gives the lines for a slice of
+  # entries; a live reader gets the header once, then the entries after its
+  # cursor, then the end.
+  def self.sse_job_event(j, entries)
+    start = entries.find { |e| e['ARCHCI_EVENT'] == 'start' } || {}
+    pkg = packages.find { |p| p['pkgbase'] == j['pkgbase'] }
+    # ('log', the journalctl find_job adds, and the report's summary lines are not the log's business)
+    job = j.except('path', 'mtime', 'error', 'last', 'log', 'origin').merge(
+      'mtime' => j['mtime']&.utc&.iso8601, 'story' => story(j), 'origin' => origin(pkg) || '-',
+      'host' => start['ARCHCI_HOST'], 'archci' => start['ARCHCI_VERSION'], 'invocation' => entries.first&.dig('_SYSTEMD_INVOCATION_ID')
+    ).compact
+    "event: job\ndata: #{JSON.generate(job)}\n\n"
+  end
+
+  def self.sse_entry(e)
+    data = { 'time' => Time.at(e['__REALTIME_TIMESTAMP'].to_i / 1_000_000, e['__REALTIME_TIMESTAMP'].to_i % 1_000_000).utc.iso8601(6),
+             'priority' => e['PRIORITY'], 'pid' => e['_PID'], 'message' => e['MESSAGE'], 'phase' => e['phase'],
+             'event' => e['ARCHCI_EVENT'], 'package' => e['ARCHCI_PACKAGE'], 'slice' => e['ARCHCI_SLICE'] }.compact
+    "data: #{JSON.generate(data)}\nid: #{e['__CURSOR']}\n\n"
+  end
+
+  def self.sse_end_event(j, entries, error_at)
+    fin = entries.reverse_each.find { |e| e['ARCHCI_EVENT'] == 'finish' } || {}
+    rc = fin['ARCHCI_RC'] || entries.last&.dig('MESSAGE')&.[](/finished with (\d+)/, 1)
+    signed = entries.filter_map { |e| e['ARCHCI_PACKAGE'] if e['ARCHCI_EVENT'] == 'signed' }
+    data = { 'state' => j['state'], 'error_at' => error_at, 'finished' => j['finished'], 'rc' => rc&.to_i,
+             'packages' => (signed.empty? ? nil : signed) }.compact
+    "event: end\ndata: #{JSON.generate(data)}\n\n"
+  end
+
+  # a finished job's log: is it whole in the journal? By the finish record
+  # (ARCHCI_EVENT=finish), or an older worker's last line
+  def self.log_complete?(entries)
+    last = entries.last or return false
+    last['ARCHCI_EVENT'] == 'finish' || last['MESSAGE'].start_with?(*BUILD_END)
+  end
+
+  # Export the logs of finished jobs as SSE files under DIR/<repo>/<pkgbase>/
+  # <version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst
+  # (start: the attempt's first entry, seconds since the epoch; invocation:
+  # the build unit's _SYSTEMD_INVOCATION_ID, fresh per unit start), zstd at
+  # level 19; archci-publish moves that tree to R2 as <repo>/log/. Each job
+  # once (exported=<file> in its file, under the queue lock), as soon as its
+  # log is whole in the journal (log_complete?); a log that never completes
+  # (a build killed hard) is exported as it stands settle_after seconds
+  # after the report, and a job whose journal holds nothing by then is
+  # marked exported=none and not asked again. Returns the count exported.
+  def self.export_logs(dir, settle_after: 600, now: Time.now)
+    n = 0
+    %w[done failed].each do |q|
+      jobs(q).each do |j|
+        next if j.key?('exported') || !j['finished']
+
+        age = now - Time.iso8601(j['finished'])
+        j = j.merge('state' => q)
+        entries, err, = read_entries(j)
+        if entries.empty?
+          mark_exported(j, 'none') if age >= settle_after
+          next
+        end
+        next unless log_complete?(entries) || age >= settle_after
+
+        first = entries.first
+        name = "#{j['pkgbase']}-#{j['version']}-#{j['arch']}-#{first['__REALTIME_TIMESTAMP'].to_i / 1_000_000}-#{first['_SYSTEMD_INVOCATION_ID'] || 'none'}.sse"
+        path = File.join(dir, j['repo'], j['pkgbase'], j['version'], j['arch'], name)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.open("#{path}.tmp", 'w') do |f|
+          f.write(sse_job_event(j, entries))
+          entries.each { |e| f.write(sse_entry(e)) }
+          f.write(sse_end_event(j, entries, err))
+        end
+        system('zstd', '-q', '-19', '--rm', '-o', "#{path}.zst", "#{path}.tmp", exception: true)
+        mark_exported(j, "#{name}.zst")
+        n += 1
+      rescue ArgumentError
+        next   # a finished= that is not a time
+      end
+    end
+    n
+  end
+
+  # append exported=VALUE to a job file, under the queue lock (a move by a
+  # retry or the pruning of done/ in between leaves nothing to mark)
+  def self.mark_exported(j, value)
+    File.open(File.join(home, 'lock', 'queue.lock'), File::RDWR | File::CREAT, 0o644) do |lock|
+      lock.flock(File::LOCK_EX)
+      File.open(j['path'], 'a') { |f| f.puts "exported=#{value}" } if File.exist?(j['path'])
+    end
   end
 
   # what a listing says of a job in one line: its first error line, else its

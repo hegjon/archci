@@ -233,20 +233,12 @@ cmd_report() {
 	# a listing says of the job, its first error line and its last, is read
 	# from the journal once, now, into the job file (error=, last=), so
 	# archci failed and archci jobs into a pipe need not read it per job.
-	# (An older worker still uploads build.log, the journal's copy: dropped.)
+	# archci-publish exports the whole log to R2 once the journal has it.
 	rm -f "$inc/build.log"
 	local summary=()
 	mapfile -t summary < <("$ARCHCI_MASTER_DIR/archci-web" summary "$id" 2>/dev/null || true)
-	# makepkg's own logs (<pkg>-<ver>-<arch>-{prepare,build,check,package}.log)
-	# travel with the results; they hold the compiler and test output that the
-	# unit journal does not, and they are all a failed build leaves behind.
-	logdir=$ARCHCI_HOME/logs/$job_repo/$job_pkgbase/$job_version/$job_arch
-	local mlog
-	for mlog in "$inc"/*.log; do
-		[[ -f $mlog ]] || continue
-		mkdir -p "$logdir"
-		mv "$mlog" "$logdir/attempt-$job_attempt-${mlog##*/}"
-	done
+	# (an older worker's makepkg log files, repeats of the journal: dropped)
+	rm -f "$inc"/*.log
 
 	if [[ $status == success ]]; then
 		if [[ $job_arch == src ]]; then ingest_src "$id" "$inc" || status=failure

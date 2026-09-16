@@ -33,6 +33,22 @@
 #              line}, ...], "error_at": N (null without an error), "cursor"}
 #              (Archci.read_entries). Whole, or after CURSOR for a running
 #              job, as `log`; the cursor is the last entry's.
+#   sse ID [CURSOR]
+#              the same log as a stream of server-sent events (Archci.sse_*):
+#              "event: job" with the job's fields and story (only without a
+#              CURSOR), one event per entry with its journal cursor as the
+#              event id, and "event: end" once the job has finished. What a
+#              front end pipes to a browser's EventSource for a running job,
+#              and byte for byte what archci-publish exports to R2 for a
+#              finished one (a client reads either with one parser).
+#   export DIR [SETTLE]
+#              the logs of the jobs finished since the last export, as
+#              <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst under
+#              DIR/<repo>/<pkgbase>/<version>/<arch>/ (Archci.export_logs;
+#              archci-publish runs it on logs/ and moves that to R2 as
+#              <repo>/log/); prints how many. A log the journal has not
+#              finished is exported as it stands SETTLE seconds (600) after
+#              the report
 #   summary ID one job's log in two lines for its job file, "error=<first
 #              error line>" and "last=<last line>", each only if there is
 #              one (archci-job report keeps them so listings need not read
@@ -73,11 +89,19 @@ in ['entries', id, *rest]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   entries, err, cursor = Archci.read_entries(j, after: rest.first)
   puts JSON.generate('id' => j['id'], 'state' => j['state'], 'entries' => entries, 'error_at' => err, 'cursor' => cursor)
+in ['sse', id, *rest]
+  j = Archci.find_job(id) or abort "archci-web: no job #{id}"
+  entries, err, = Archci.read_entries(j, after: rest.first)
+  $stdout.write(Archci.sse_job_event(j, entries)) if rest.first.nil? || rest.first.empty?
+  entries.each { |e| $stdout.write(Archci.sse_entry(e)) }
+  $stdout.write(Archci.sse_end_event(j, entries, err)) if %w[done failed].include?(j['state'])
+in ['export', dir, *settle]
+  puts Archci.export_logs(dir, settle_after: (settle.first || 600).to_i)
 in ['summary', id]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   lines, err, = Archci.read_log(j)
   # one line each, the job file's format (a key=value line): no newlines, cut short
   { 'error' => err && lines[err], 'last' => lines.last }.each { |k, v| puts "#{k}=#{v.strip[0, 200]}" if v && !v.strip.empty? }
 else
-  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | entries ID [CURSOR] | summary ID'
+  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | entries ID [CURSOR] | sse ID [CURSOR] | export DIR | summary ID'
 end

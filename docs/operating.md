@@ -53,7 +53,9 @@ archci next                         what the next claim would build
 archci web snapshot | jq .          the farm and every job as JSON, what the web front end polls
 archci web job <jobid>              one job as JSON (no snapshot): its fields, story and the src job that built it
 archci web log <jobid>              a job's log as JSON: the lines and the index of the first error (a running job's tail)
-archci web entries <jobid>          the same as journal entries, each line with its time and phase: what the web's log window is built from
+archci web entries <jobid>          the same as journal entries, each line with its time and phase
+archci web sse <jobid>              the log as server-sent events: the job, one event per line with its cursor, the end; what the web streams and what is exported to R2
+archci web export DIR               export the logs of the jobs finished since the last export (archci-publish does this every pass)
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
 journalctl -u archci-publish         the signatures accepted, the index, the publish to R2

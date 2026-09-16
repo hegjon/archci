@@ -202,7 +202,7 @@ fetch_one() {
 	rm -rf "$w"
 	mkdir -p "$w"/{pkg,out} "$out"
 	: >"$log"
-	say "==> archci-sourcer $(archci_version) $job_id on $HOSTNAME at $(archci_now)"
+	archci_record "==> archci-sourcer $(archci_version) $job_id on $HOSTNAME at $(archci_now)" "ARCHCI_JOB=$job_id" "ARCHCI_ATTEMPT=$job_attempt" ARCHCI_EVENT=start "ARCHCI_VERSION=$(archci_version)" "ARCHCI_REPO=$job_repo" ARCHCI_ARCH=src "ARCHCI_COMMIT=$job_commit" "ARCHCI_HOST=$HOSTNAME"
 	# SRCDEST is kept between jobs (a pkgrel bump downloads nothing); files
 	# not used for ARCHCI_SRCDEST_KEEP_DAYS go
 	find "$srcdest" -mindepth 1 -atime +"$ARCHCI_SRCDEST_KEEP_DAYS" -delete 2>/dev/null || true
@@ -328,11 +328,13 @@ on_term() {
 		archci_log "shutting down, handing $job_id back to the master"
 		archci_master report "$job_id" abandoned "$me" || true
 	fi
+	archci_journal_close
 	exit 0
 }
 trap on_term TERM INT
 
 archci_log "sourcer $me started, master $ARCHCI_MASTER, chroot $chroot"
+archci_journal_open || true   # the fetch's own records with their fields (archci_record)
 while true; do
 	if [[ $(stat -c '%i %Y %s' "${code_files[@]}" 2>/dev/null | tr '\n' ' ') != "$code_sig" ]]; then
 		archci_log "archci-sourcer or its library changed on disk; restarting on the new code"
@@ -373,7 +375,7 @@ while true; do
 	fetch_one "$jobdir" && status=success
 	# bracket the log so a query can read a stable build start and stop (build_span)
 	last=$(tail -n 1 "$jobdir/fetch.log" 2>/dev/null | cut -c1-160)
-	echo "==> archci-sourcer finished with $([[ $status == success ]] && echo 0 || echo 1) at $(archci_now)"
+	archci_record "==> archci-sourcer finished with $([[ $status == success ]] && echo 0 || echo 1) at $(archci_now)" "ARCHCI_JOB=$job_id" "ARCHCI_ATTEMPT=$job_attempt" ARCHCI_EVENT=finish "ARCHCI_RC=$([[ $status == success ]] && echo 0 || echo 1)"
 	machine=''
 	kill "$heartbeat" 2>/dev/null || true
 	wait "$heartbeat" 2>/dev/null || true

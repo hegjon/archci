@@ -57,11 +57,20 @@ journal_add() {
 	shift 2
 	ts=$(date +%s%6N)   # microseconds: each call's entries come after the last call's
 	: >"$f"
-	local pri
+	local pri extra kv spec
 	for line; do
 		pri=6; [[ $line == stderr:* ]] && { pri=3; line=${line#stderr:}; }
-		printf '__REALTIME_TIMESTAMP=%s\n__MONOTONIC_TIMESTAMP=%s\n_BOOT_ID=%s\n_HOSTNAME=%s\n_SYSTEMD_UNIT=%s\nSYSLOG_IDENTIFIER=%s\nPRIORITY=%s\nMESSAGE=%s\n\n' \
-			"$ts" "$ts" 0123456789abcdef0123456789abcdef "$host" "$unit" "${unit%%[@.]*}" "$pri" "$line" >>"$f"
+		# "fields:K=V|K=V||line": archci's own records carry fields (archci_record);
+		# a job id holds commas and colons, so the separators are bars
+		extra=''
+		if [[ $line == fields:* ]]; then
+			line=${line#fields:}
+			spec=${line%%||*}
+			for kv in ${spec//|/ }; do extra+="$kv"$'\n'; done
+			line=${line#*||}
+		fi
+		printf '__REALTIME_TIMESTAMP=%s\n__MONOTONIC_TIMESTAMP=%s\n_BOOT_ID=%s\n_HOSTNAME=%s\n_SYSTEMD_UNIT=%s\n_SYSTEMD_INVOCATION_ID=%s\n_PID=4242\nSYSLOG_IDENTIFIER=%s\nPRIORITY=%s\n%sMESSAGE=%s\n\n' \
+			"$ts" "$ts" 0123456789abcdef0123456789abcdef "$host" "$unit" "${JOURNAL_INVOCATION:-feedfacefeedfacefeedfacefeedface}" "${unit%%[@.]*}" "$pri" "$extra" "$line" >>"$f"
 		(( ts += 1 ))
 	done
 	mkdir -p "$ARCHCI_REMOTE_JOURNAL"

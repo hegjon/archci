@@ -218,6 +218,56 @@ archci_arch_conf() {
 	printf '%s\n' "$3"
 }
 
+# --- structured records in the journal ----------------------------------
+# archci's own lines in a build's log (the header, the slice markers, each
+# package signed, the end) carry journal fields, so nothing downstream reads
+# them out of the text: ARCHCI_JOB, ARCHCI_ATTEMPT, ARCHCI_EVENT=start|slice|
+# signed|finish and the event's facts (ARCHCI_RC, ARCHCI_SLICE, ARCHCI_PACKAGE,
+# ...). The MESSAGE is the same human line as ever. They go through the
+# journal's native socket from a coprocess that lives as long as the script
+# (archci_journal_open), so journald attributes them to the unit (a
+# short-lived `logger` exits before journald reads its cgroup, and its entry
+# has no unit); they are sent where no build output is in flight (before the
+# container starts, between its two runs, after it exits), so they keep
+# their place among the unit's stdout lines. Off a unit (no JOURNAL_STREAM,
+# the tests) or without the socket, archci_record prints the line instead.
+archci_journal_open() {
+	[[ -n ${JOURNAL_STREAM:-} && -S /run/systemd/journal/socket ]] || return 1
+	command -v perl >/dev/null || return 1
+	# records on stdin, one field per line, a blank line ends a record
+	coproc ARCHCI_JOURNAL { perl -e '
+		use strict; use IO::Socket::UNIX;
+		my $s = IO::Socket::UNIX->new(Type => SOCK_DGRAM, Peer => "/run/systemd/journal/socket") or exit 1;
+		my $rec = "";
+		while (my $l = <STDIN>) { if ($l eq "\n") { $s->send($rec) if length $rec; $rec = ""; } else { $rec .= $l; } }
+		$s->send($rec) if length $rec;' 2>/dev/null; }
+	# one fd of our own to the coprocess's stdin; the coproc's array fd is
+	# closed so that closing ours is the EOF it waits for
+	exec {ARCHCI_JOURNAL_FD}>&"${ARCHCI_JOURNAL[1]}"
+	eval "exec ${ARCHCI_JOURNAL[1]}>&-"
+	return 0
+}
+# archci_journal_close -- EOF to the coprocess and wait for it to have sent
+# everything: a script must do this before it exits, or the unit's stop may
+# kill the sender with the last record unsent
+archci_journal_close() {
+	[[ -n ${ARCHCI_JOURNAL_FD:-} ]] || return 0
+	exec {ARCHCI_JOURNAL_FD}>&-
+	unset ARCHCI_JOURNAL_FD
+	wait "${ARCHCI_JOURNAL_PID:-}" 2>/dev/null || true
+}
+# archci_record MESSAGE [FIELD=VALUE...] -- one record (a single line, no
+# newlines in a value) with its fields, through the coprocess when open,
+# else as a line on stdout
+archci_record() {
+	local msg=$1; shift
+	if [[ -n ${ARCHCI_JOURNAL_FD:-} ]]; then
+		{ printf 'MESSAGE=%s\nPRIORITY=6\nSYSLOG_IDENTIFIER=%s\n' "$msg" "${0##*/}"; (( $# )) && printf '%s\n' "$@"; printf '\n'; } >&"$ARCHCI_JOURNAL_FD"
+	else
+		printf '%s\n' "$msg"
+	fi
+}
+
 # --- content-addressed names ---------------------------------------------
 # Every built artifact carries the sha256 of its own bytes in its name:
 # <name>-<ver>-<rel>-<arch>-<sha256>.pkg.tar.zst and

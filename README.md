@@ -69,7 +69,7 @@ flowchart LR
     SRCR["archci-sourcer: makepkg --allsource"]
   end
   subgraph R2["Cloudflare R2"]
-    REL[("the release: signed pkgs + db, os/src: signed src.tar.zst")]
+    REL[("the release: signed pkgs + db, os/src: signed src.tar.zst, log/: the build logs as SSE, zstd")]
   end
   PK -->|git pull| SCAN
   WL -->|ssh claim / report| JOB
@@ -128,8 +128,12 @@ hands back the result. For each job it:
    one that has none: the sources come from the package and the vendored
    caches replay offline. A package that must reach itself or the network
    carries a `"network"` flag in its `package.json`, approved per package;
-4. signs each package with its own builder key, uploads the packages,
-   signatures and log to the master, and reports success or failure.
+4. signs each package with its own builder key, uploads the packages and
+   signatures to the master, and reports success or failure. The build's
+   log is its unit's journal, streamed to the master; archci's own lines
+   in it (the header, the slice changes, each package signed, the end)
+   carry journal fields (`ARCHCI_JOB`, `ARCHCI_EVENT`, ...), so nothing
+   reads them out of the text.
 
 Results are held and retried while the master is unreachable, so a worker
 can be destroyed at any time. While building, a worker heartbeats its own and
@@ -284,8 +288,11 @@ repo/<repo>/os/<arch>/      the pool: what is built and not published yet (btrfs
                             a published file never changes under its name; the db's SHA256SUM is the same hash. (pacman and repo-add
                             take any file name; paccache, which parses names, mis-groups these.)
 journal/                    the workers' journals (systemd-journal-remote): every job's log is read from here
-logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N-<pkg>-{prepare,build,check,package}.log
-                            makepkg's own logs, sent with a build's results (kept on the master)
+logs/<repo>/<pkgbase>/<version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst
+                            a finished attempt's log, exported from the journal as server-sent events once the
+                            journal has its finish record (archci-publish), on its way to the release as
+                            <repo>/log/...; the job file names it (exported=). start: the attempt's first entry,
+                            seconds since the epoch; invocation: the build unit's _SYSTEMD_INVOCATION_ID
 sigs/<repo>/os/<arch>/      where the signer returns <file>.sig (rrsync, write-only); archci-publish verifies and moves each beside its file
 db/<repo>/os/<arch>/        the master's databases (repo-add -R by archci-publish), persistent; what is published
 released/<repo>-<arch>      "name version" per database entry, and <repo>-src the signed source packages

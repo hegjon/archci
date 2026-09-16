@@ -68,12 +68,13 @@ ent=$("$master/archci-web" entries "$id")
 [[ $(jq -r '.entries[2].phase' <<<"$ent") == online && $(jq -r '.entries[3].phase' <<<"$ent") == offline && $(jq -r '.entries[4] | has("phase")' <<<"$ent") == false ]] || fail "entries carry the slice marker's phase: $ent"
 [[ $(jq -r '.cursor' <<<"$ent") == "$cursor" && $(jq -r '.entries[-1].__CURSOR' <<<"$ent") == "$cursor" ]] || fail "the entries' cursor is the last entry's, the same as log's: $(jq -r .cursor <<<"$ent") vs $cursor"
 [[ $(jq -c '[.entries, .cursor]' <<<"$("$master/archci-web" entries "$id" "$cursor")") == "[[],\"$cursor\"]" ]] || fail "entries after the cursor: nothing new yet, the cursor kept: $("$master/archci-web" entries "$id" "$cursor")"
-journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst"
-[[ $(jq -r '.entries[0].MESSAGE' <<<"$("$master/archci-web" entries "$id" "$cursor")") == "==> archci-build finished with 0 at"* ]] || fail "entries after the cursor: only the new ones: $("$master/archci-web" entries "$id" "$cursor")"
-[[ $(jq -r '.lines[0]' <<<"$("$master/archci-web" log "$id" "$cursor")") == "==> archci-build finished with 0 at"* ]] || fail "after the cursor, only the new lines: $("$master/archci-web" log "$id" "$cursor")"
+journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> Starting build()..." "fields:ARCHCI_EVENT=finish|ARCHCI_RC=0|ARCHCI_JOB=$id||==> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst"
+[[ $(jq -r '.entries[0].MESSAGE' <<<"$("$master/archci-web" entries "$id" "$cursor")") == "==> Starting build()..." && $(jq -r '.entries[0].phase' <<<"$("$master/archci-web" entries "$id" "$cursor")") == build ]] || fail "entries after the cursor: only the new ones, makepkg's step as the phase: $("$master/archci-web" entries "$id" "$cursor")"
+[[ $(jq -r '.entries[1].ARCHCI_EVENT + " " + .entries[1].ARCHCI_RC' <<<"$("$master/archci-web" entries "$id" "$cursor")") == "finish 0" ]] || fail "an archci record's fields come with the entry: $("$master/archci-web" entries "$id" "$cursor")"
+[[ $(jq -r '.lines[0]' <<<"$("$master/archci-web" log "$id" "$cursor")") == "==> Starting build()..." ]] || fail "after the cursor, only the new lines: $("$master/archci-web" log "$id" "$cursor")"
 journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 2)" "another attempt's line"   # not this attempt's
 journal_add worker9 "$(build_unit acl 1:2.3.2-1 x86_64 1)" "the same unit on another host"   # not this worker's
-[[ $(jq -r '.lines | length' <<<"$("$master/archci-web" log "$id")") == 6 ]] || fail "a job's log is its own unit's on its own host: $("$master/archci-web" log "$id")"
+[[ $(jq -r '.lines | length' <<<"$("$master/archci-web" log "$id")") == 7 ]] || fail "a job's log is its own unit's on its own host: $("$master/archci-web" log "$id")"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
@@ -100,11 +101,24 @@ grep -q '^claimed=20' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job 
 grep -q '^last===> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst$' "$ARCHCI_HOME/queue/done/$id.job" || fail "the report keeps the log's last line in the job file: $(cat "$ARCHCI_HOME/queue/done/$id.job")"
 grep -q '^error=' "$ARCHCI_HOME/queue/done/$id.job" && fail "no error line in a clean log"
 log=$("$master/archci-web" log "$id")
-[[ $(jq -r '.lines | length' <<<"$log") == 6 && $(jq -r '.cursor' <<<"$log") == null && $(jq -r '.error_at' <<<"$log") == null ]] || fail "a done job's log is read whole from the journal, no cursor: $log"
-[[ $(jq -c '[(.entries | length), .cursor, .error_at, .state]' <<<"$("$master/archci-web" entries "$id")") == '[6,null,null,"done"]' ]] || fail "a done job's entries, whole, no cursor: $("$master/archci-web" entries "$id")"
+[[ $(jq -r '.lines | length' <<<"$log") == 7 && $(jq -r '.cursor' <<<"$log") == null && $(jq -r '.error_at' <<<"$log") == null ]] || fail "a done job's log is read whole from the journal, no cursor: $log"
+[[ $(jq -c '[(.entries | length), .cursor, .error_at, .state]' <<<"$("$master/archci-web" entries "$id")") == '[7,null,null,"done"]' ]] || fail "a done job's entries, whole, no cursor: $("$master/archci-web" entries "$id")"
+echo "--- the log as server-sent events, live (archci web sse) and exported for R2 (archci web export), one framing"
+sse=$("$master/archci-web" sse "$id")
+[[ $sse == "event: job"$'\n'"data: {"* ]] || fail "the stream opens with the job event: ${sse:0:200}"
+[[ $(grep -c '^id: s=' <<<"$sse") == 7 && $(grep -c '^data: {"time":"2026-' <<<"$sse") == 7 ]] || fail "one event per entry, its cursor as the id, its time in the data: $sse"
+{ grep -q '"phase":"build"' <<<"$sse" && grep -q '"event":"finish"' <<<"$sse"; } || fail "the entries carry the phase and archci's event: $sse"
+[[ $sse == *$'\n'"event: end"$'\n'"data: {\"state\":\"done\","*'"rc":0'* ]] || fail "a finished job's stream ends with the end event, its rc from the finish record: ${sse: -200}"
+grep -q '"invocation":"feedfacefeedfacefeedfacefeedface"' <<<"$sse" || fail "the job event names the unit's invocation: ${sse:0:400}"
+mkdir -p "$tmp/logs"
+[[ $("$master/archci-web" export "$tmp/logs") == 1 ]] || fail "the finished job's log is exported once"
+xf=$(find "$tmp/logs" -name '*.sse.zst'); [[ $xf == "$tmp/logs/omarchy/acl/1:2.3.2-1/x86_64/acl-1:2.3.2-1-x86_64-"[0-9]*"-feedfacefeedfacefeedfacefeedface.sse.zst" ]] || fail "the export is named by pkgbase, version, arch, the start and the invocation: $xf"
+[[ $(zstd -dc "$xf") == "$sse" ]] || fail "the export is the same bytes as the live stream: $(diff <(echo "$sse") <(zstd -dc "$xf") | head -6)"
+grep -q "^exported=${xf##*/}$" "$ARCHCI_HOME/queue/done/$id.job" || fail "the job file names its export: $(grep exported "$ARCHCI_HOME/queue/done/$id.job")"
+[[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "not exported again"
 onejob=$("$master/archci-web" job "$id")
 [[ $(jq -r '.started' <<<"$onejob") == 2026-09-15T10:00:00Z && $(jq -r '.stopped' <<<"$onejob") == 2026-09-15T10:01:43Z && $(jq -r '.online_at' <<<"$onejob") == 2026-09-15T10:00:05Z && $(jq -r '.build_at' <<<"$onejob") == 2026-09-15T10:00:20Z ]] || fail "the build's span and phases come from its journal entries: $onejob"
-[[ $(jq -r '.log' <<<"$onejob") == "journalctl -D $ARCHCI_REMOTE_JOURNAL --no-pager -a -q -o json --since=@"*" --until=@"*" --output-fields=MESSAGE,PRIORITY,_SOURCE_REALTIME_TIMESTAMP _SYSTEMD_UNIT=$(build_unit acl 1:2.3.2-1 x86_64 1) _HOSTNAME=worker" ]] || fail "a job names its log as the journalctl the master runs for its entries: $(jq -r '.log' <<<"$onejob")"
+[[ $(jq -r '.log' <<<"$onejob") == "journalctl -D $ARCHCI_REMOTE_JOURNAL --no-pager -a -q -o json --since=@"*" --until=@"*" --output-fields=MESSAGE,PRIORITY,_PID,_SOURCE_REALTIME_TIMESTAMP,_SYSTEMD_INVOCATION_ID,ARCHCI_"*" _SYSTEMD_UNIT=$(build_unit acl 1:2.3.2-1 x86_64 1) _HOSTNAME=worker" ]] || fail "a job names its log as the journalctl the master runs for its entries: $(jq -r '.log' <<<"$onejob")"
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"
 
@@ -198,12 +212,22 @@ grep -q '^network=loopback$' "$ARCHCI_HOME/queue/running/$lid.job" || fail "the 
 "$job" report "$lid" abandoned "$(owner "$lid")" >/dev/null; rm -rf "$ARCHCI_HOME"/queue/pending/*loopy* "$pkgs/pkgbuilds/loopy"
 rm -rf "$ARCHCI_HOME"/queue/failed/*netpkg* "$pkgs/pkgbuilds/netpkg"; commit_pkgs "netpkg gone"; "$scan" >/dev/null 2>&1
 echo "--- report failure, retry, give up"
+"$master/archci-web" export "$tmp/logs" >/dev/null   # what earlier sections left exportable (the sourcer's failed fetch has its finish record)
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
 grep -qxF "sources=$lsf" "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim must name the source package: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
 journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "stderr:==> ERROR: A failure occurred in build()."
 "$job" report "$id" failure "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
+# its log has no finish record (killed hard): not exported until the settle time, then as it stands, the end event with the error
+[[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "a log without its finish record waits"
+[[ $("$master/archci-web" export "$tmp/logs" 0) == 1 ]] || fail "settled, it is exported as it stands"
+xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.zst'); [[ $(zstd -dc "$xf" | tail -2 | head -1) == 'data: {"state":"failed","error_at":1,"finished":"20'* ]] || fail "the end event of a failed job: $(zstd -dc "$xf" 2>/dev/null | tail -2) / exported: $(find "$tmp/logs" -name "*.sse.zst")"
+# a retry drops the export mark: the next attempt is a new log, exported afresh (the sourcer's failed linux fetch, exported above)
+lsid=$(find "$ARCHCI_HOME/queue/failed" -name '*,linux,*,src.job' -printf '%f\n' | head -1); lsid=${lsid%.job}
+grep -q '^exported=' "$ARCHCI_HOME/queue/failed/$lsid.job" || fail "the exported src job carries the mark: $(cat "$ARCHCI_HOME/queue/failed/$lsid.job")"
+"$job" retry "$lsid" >/dev/null 2>&1
+! grep -q '^exported=' "$ARCHCI_HOME/queue/pending/$lsid.job" || fail "a retry drops the export mark: $(cat "$ARCHCI_HOME/queue/pending/$lsid.job")"
 "$failed" | grep "^libsigc++ 2.12.2-1 .* x86_64  *arch  *worker-2  *1/2 retry  *20.*: ==> ERROR: A failure occurred in build()" >/dev/null || fail "archci failed must list the failure with the first error line of its log: $("$failed")"
 # a job file without the report's summary (from before it kept one): the listing reads the journal
 sed -i '/^error=/d; /^last=/d' "$ARCHCI_HOME/queue/failed/$id.job"
@@ -233,7 +257,7 @@ phases=$(ruby -e "require %q{$here/../lib/archci}; puts [
   '==> Installing the pacman dependencies in the archci-online slice (with network)', '==> Building in the archci-offline slice', '==> Building in the archci-online slice',
   '==> Building in the archci-loopback slice', '==> Building with the network: the package is exempt (package.json)', '==> Building with loopback: the package talks to itself (package.json)',
   '==> Installing missing dependencies...', '==> Starting build()...', '  Compiling starship v1.26.0'].map { |l| Archci.log_phase(l) || '-' }.join(' ')")
-[[ $phases == "online offline online loopback online loopback - - -" ]] || fail "log_phase must mark archci-build's slice transitions and nothing else: $phases"
+[[ $phases == "online offline online loopback online loopback - build -" ]] || fail "log_phase must mark archci-build's slice transitions and makepkg's steps, nothing else: $phases"
 grep -q '^final=' "$ARCHCI_HOME/queue/failed/$id.job" && fail "should not be final yet"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/$id.job ]] || fail "housekeeping should have requeued"
