@@ -243,6 +243,8 @@ journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "stder
 [[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "a log without its finish record waits"
 [[ $("$master/archci-web" export "$tmp/logs" 0) == 1 ]] || fail "settled, it is exported as it stands"
 xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.zst'); [[ $(zstd -dc "$xf" | tail -2 | head -1) == 'data: {"state":"failed","error_at":1,"finished":"20'* ]] || fail "the end event of a failed job: $(zstd -dc "$xf" 2>/dev/null | tail -2) / exported: $(find "$tmp/logs" -name "*.sse.zst")"
+# what counts as the first error: not a test suite's summary counts, not a warning flag; a build killed for silence does
+[[ $(ARCHCI_CONF=/dev/null ruby -e 'require "'"$master"'/../lib/archci"; puts ["# ERROR: 0", "# FAIL:  3", "-Werror=format", "ERROR: real", "==> build killed after 90 min without output", "Container archci-build-x86-64-2-guile terminated by signal KILL."].map { |l| Archci.error_line?(l) ? 1 : 0 }.join') == 000111 ]] || fail "error_line?: summary counts and -Werror are not errors, a real one and a killed build are"
 # a retry drops the export mark: the next attempt is a new log, exported afresh (the sourcer's failed linux fetch, exported above)
 lsid=$(find "$ARCHCI_HOME/queue/failed" -name '*,linux,*,src.job' -printf '%f\n' | head -1); lsid=${lsid%.job}
 grep -q '^exported=' "$ARCHCI_HOME/queue/failed/$lsid.job" || fail "the exported src job carries the mark: $(cat "$ARCHCI_HOME/queue/failed/$lsid.job")"

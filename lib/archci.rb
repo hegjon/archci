@@ -521,8 +521,9 @@ module Archci
   end
 
   # ---- every job, its log and its story: what archci jobs and archci web show ----
-  ERROR_RE = /error:|ERROR|FAILED|Unmet dependencies|target not found|Failure while downloading|did not pass the validity|returned error: 4\d\d/
-  NOT_ERROR_RE = /gpg:|Verifying|Build failed, check|makechrootpkg exited|the build exited|archci-build finished|-Werror|ERRORFUNC|_error|error_/
+  ERROR_RE = /error:|ERROR|FAILED|Unmet dependencies|target not found|Failure while downloading|did not pass the validity|returned error: 4\d\d|==> build killed|terminated by signal/
+  # (a test suite's summary counts, "# ERROR: 0" and "# FAIL: 0", are not errors either)
+  NOT_ERROR_RE = /gpg:|Verifying|Build failed, check|makechrootpkg exited|the build exited|archci-build finished|-Werror|ERRORFUNC|_error|error_|\A# (ERROR|FAIL|XFAIL|XPASS|PASS|SKIP|TOTAL):\s*\d+\s*\z/
   def self.error_line?(line) = line.match?(ERROR_RE) && !line.match?(NOT_ERROR_RE)
 
   # where a job's log is, for a human: the journalctl the master runs to
