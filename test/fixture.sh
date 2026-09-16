@@ -79,7 +79,7 @@ journal_add() {
 }
 build_unit() {
 	local u="$ARCHCI_REPO-$1-$2-$3-a$4"
-	printf 'archci-build@%s.service\n' "${u//[^A-Za-z0-9:_.-]/_}"
+	printf 'archci-build@%s.service\n' "${u//[^A-Za-z0-9_.-]/_}"   # as archci-worker names it: the ':' of an epoch too
 }
 # claim_id WORKER ARCH [STAT...] -> the id of the job claimed, empty for none
 claim_id() { sed -n 's/^id=//p' < <("$job" claim "$@"); }

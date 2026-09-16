@@ -30,6 +30,10 @@
 #                             the master; the report keeps its first error
 #                             line and its last in the job file)
 #   requeue ID                move a running/failed job back to pending
+#   reexport ID | --none | --all
+#                             drop a finished job's exported= mark (the id's,
+#                             every job marked none, or every finished job),
+#                             so archci-export exports its log again
 #   retry ID | -a|--all       a new job for the failed job's package and arch,
 #                             at the package's current version, commit and
 #                             network flag, with a fresh id and attempt 0; the
@@ -281,6 +285,29 @@ refresh_flags() {
 	archci_log "${file##*/}: network is now ${flag:-off}, as the package's package.json says"
 }
 
+# a finished job's exported= line goes, under the lock: the next export pass
+# exports its log afresh (a log the journal lacked at the time, a new layout)
+cmd_reexport() {
+	local what=$1 file n=0 tmp
+	lock_queue
+	for file in "$Q_DONE"/*.job "$Q_FAILED"/*.job; do
+		[[ -f $file ]] || continue
+		case $what in
+			--all)  grep -q '^exported=' "$file" || continue ;;
+			--none) grep -q '^exported=none$' "$file" || continue ;;
+			*)      [[ ${file##*/} == "$what.job" ]] || continue
+			        grep -q '^exported=' "$file" || archci_die "job $what carries no export mark" ;;
+		esac
+		tmp=$file.tmp
+		grep -v '^exported=' "$file" >"$tmp" && mv "$tmp" "$file"
+		(( ++n ))
+	done
+	case $what in
+		--all|--none) archci_log "$n job(s) to export again" ;;
+		*) (( n )) || archci_die "job $what is not done or failed"; archci_log "$what: to export again" ;;
+	esac
+}
+
 cmd_requeue() {
 	local id=$1 file
 	archci_valid_id "$id" || archci_die "invalid job id"
@@ -379,6 +406,7 @@ case $cmd in
 	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; ARCHCI_LOG_JOB=$1 cmd_heartbeat "$@" ;;
 	report)    (( $# == 3 )) || archci_die "usage: archci-job report ID STATUS WORKER"; ARCHCI_LOG_JOB=$1 cmd_report "$1" "$2" "$3" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          ARCHCI_LOG_JOB=$1 cmd_requeue "$1" ;;
+	reexport)  (( $# == 1 )) || archci_die "usage: archci-job reexport ID | --none | --all"; cmd_reexport "$1" ;;
 	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; ARCHCI_LOG_JOB=$1 cmd_retry "$1" ;;   # prints the new job's id
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
 	*) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" >&2; exit 2 ;;

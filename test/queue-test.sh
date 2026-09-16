@@ -121,6 +121,12 @@ xf=$(find "$tmp/logs" -name '*.sse.zst'); [[ $xf == "$tmp/logs/omarchy/acl/1:2.3
 zstd -dc "$xf" | sed -n 2p | grep -q "\"exported\":\"${xf##*/}\"" || fail "the export's job event names the file: $(zstd -dc "$xf" | sed -n 2p | cut -c1-300)"
 grep -q "^exported=${xf##*/}$" "$ARCHCI_HOME/queue/done/$id.job" || fail "the job file names its export: $(grep exported "$ARCHCI_HOME/queue/done/$id.job")"
 [[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "not exported again"
+# reexport drops the mark, and the next pass exports the log again (the same bytes, the same name)
+"$job" reexport "$id" >/dev/null 2>&1 || fail "reexport of a done job"
+! grep -q '^exported=' "$ARCHCI_HOME/queue/done/$id.job" || fail "the mark is gone"
+[[ $("$master/archci-web" export "$tmp/logs") == 1 ]] || fail "exported again"
+grep -q "^exported=${xf##*/}$" "$ARCHCI_HOME/queue/done/$id.job" || fail "marked again with the same name"
+! "$job" reexport "9-1-omarchy,nope,1-1,x86_64" >/dev/null 2>&1 || fail "reexport of an unknown job fails"
 # a log over ARCHCI_LOG_MAX_LINES keeps its first three quarters and its last quarter, a marker between
 capped=$(ARCHCI_LOG_MAX_LINES=8 "$master/archci-web" sse "$id")
 [[ $(grep -c '^id: s=' <<<"$capped") == 8 ]] || fail "8 entries fit the cap of 8 uncut: $(grep -c '^id: s=' <<<"$capped")"

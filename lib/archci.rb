@@ -586,7 +586,10 @@ module Archci
     if j['arch'] == 'src'
       ['_SYSTEMD_UNIT=archci-sourcer.service', "_HOSTNAME=#{j['worker']}", 'SYSLOG_IDENTIFIER=archci-sourcer']
     else
-      name = "#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9:_.-]/, '_')
+      # as the worker names the unit: anything but [A-Za-z0-9_.-] is '_', the
+      # ':' of an epoch version included (zlib 1:1.3.2-3, grub 2:2.14-1 had
+      # no log on their pages and "none" for an export until this matched)
+      name = "#{j['repo']}-#{j['pkgbase']}-#{j['version']}-#{j['arch']}-a#{j['attempt']}".gsub(/[^A-Za-z0-9_.-]/, '_')
       ["_SYSTEMD_UNIT=archci-build@#{name}.service", *("_HOSTNAME=#{worker_host(j['worker']).first}" if j['worker'])]
     end
   end

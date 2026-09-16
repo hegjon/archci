@@ -65,6 +65,7 @@ archci top                          live view: workers' load and memory, running
 archci job retry <jobid>            a new job in the failed one's place (fresh id, the package's current commit and flags); prints its id
 archci job retry --all              the same for every failed job (also -a)
 archci job requeue <jobid>          put a running/failed job back, keep attempts
+archci job reexport <jobid>|--none|--all   drop the export mark(s): the next export pass writes the log(s) again
 archci publish --force              accept, index and publish now (and reconcile the release)
 archci unsigned                     what waits for the signer (0: all)
 archci build job.file /tmp/out      reproduce a build by hand on a worker (root)
