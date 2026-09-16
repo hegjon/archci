@@ -865,52 +865,7 @@ module Archci
     [err && lines[err], lines.last]
   end
 
-  # a build's stable start and stop, [started, stopped] as ISO timestamps or
-  # nil, for a query. archci-build (a package) and archci-sourcer (a source
-  # package) bracket the log with "... at <ts>" (first line) and "... finished
-  # with N at <ts>" (last). A running job reports its claim time as the start
-  # and no stop; a pending job neither. lines: the job's log (read_log), so
-  # a caller that has it does not read it again.
-  BUILD_TS = /(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/
   BUILD_END = ['==> archci-build finished with', '==> archci-sourcer finished with'].freeze
-  def self.build_span(j, lines = nil)
-    return [j['claimed'], nil] if j['state'] == 'running'
-    return [nil, nil] unless %w[done failed].include?(j['state'])
-
-    lines ||= read_log(j).first
-    started = lines.first(20).filter_map { |l| l[BUILD_TS, 1] }.first  # the header's "started" line
-    stopped = lines.last(50).reverse_each.find { |l| l.start_with?(*BUILD_END) }&.slice(BUILD_TS, 1)
-    [started, stopped]
-  end
-
-  # a package build's online (dependency install, with the network) and offline
-  # (the build itself) phase boundaries, for splitting its time: the time
-  # of archci-build's "==> Installing the pacman dependencies ..." record
-  # (online start) and of its "==> Building in the <slice> slice ..." one
-  # (build start, = online end), from the journal entry, or from the stamp
-  # an older archci-build (before 0.6.5) wrote into the line. {} for a src
-  # job, a running job, or a log without the records. entries: the job's
-  # log (read_entries), so a caller that has it does not read it again.
-  def self.build_phases(j, entries = nil)
-    return {} unless j['arch'] != 'src' && %w[done failed].include?(j['state'])
-
-    entries ||= read_entries(j).first
-    online = build = nil
-    entries.first(500).each do |e|
-      break if online && build
-
-      m = e['MESSAGE']
-      online ||= entry_stamp(e) if m.start_with?('==> Installing the pacman dependencies')
-      build  ||= entry_stamp(e) if m.start_with?('==> Building in the archci-')
-    end
-    { 'online_at' => online, 'build_at' => build }.compact
-  end
-
-  # an entry's time as an ISO timestamp to the second: the stamp in its line
-  # when there is one (an older worker's), else the journal's
-  def self.entry_stamp(e)
-    e['MESSAGE'][BUILD_TS, 1] || Time.at(e['__REALTIME_TIMESTAMP'].to_i / 1_000_000).utc.iso8601
-  end
 
   # the job's story in one line: state, where, when, what it had
   def self.story(j)

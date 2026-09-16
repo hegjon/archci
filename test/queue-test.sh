@@ -132,12 +132,7 @@ grep -q '"priority":"4","message":"... 4 line(s) not shown: the log has more tha
 ! grep -q '^id: *$' <<<"$capped" || fail "the marker has no id line at all (an empty one resets Last-Event-ID)"
 [[ $(grep -o '"message":"extra line [0-9]"' <<<"$capped" | tr '\n' ' ') == '"message":"extra line 3" "message":"extra line 4" ' ]] || fail "the tail is the last quarter: $(grep -o '"message":"extra line [0-9]"' <<<"$capped")"
 onejob=$("$master/archci-web" job "$id")
-ents=$("$master/archci-web" entries "$id")
-online_t=$(jq -r '.entries[] | select(.MESSAGE | startswith("==> Installing")) | .__REALTIME_TIMESTAMP | tonumber / 1000000 | floor | todate' <<<"$ents")
-build_t=$(jq -r '.entries[] | select(.MESSAGE | startswith("==> Building in")) | .__REALTIME_TIMESTAMP | tonumber / 1000000 | floor | todate' <<<"$ents")
-[[ $(jq -r '.started' <<<"$onejob") == 2026-09-15T10:00:00Z && $(jq -r '.stopped' <<<"$onejob") == 2026-09-15T10:01:43Z && $(jq -r '.online_at' <<<"$onejob") == "$online_t" && $(jq -r '.build_at' <<<"$onejob") == "$build_t" ]] || fail "the build's span comes from its header and end lines, its phases from the marker records' journal times: $onejob ($online_t, $build_t)"
-# an older worker stamped the marker lines: that stamp still wins
-[[ $(ARCHCI_CONF=/dev/null ruby -e 'require "'"$master"'/../lib/archci"; puts Archci.entry_stamp({ "MESSAGE" => "==> Building in the archci-offline slice (no network) at 2026-09-15T10:00:20Z", "__REALTIME_TIMESTAMP" => "1789577708098229" })') == 2026-09-15T10:00:20Z ]] || fail "an older log's stamp in the line is the phase time"
+[[ $(jq -c '[.started, .stopped, .online_at, .build_at]' <<<"$onejob") == '[null,null,null,null]' ]] || fail "a finished job's JSON carries no times from the journal (the browser works them out from the log): $onejob"
 [[ $(jq -r '.log' <<<"$onejob") == "journalctl -D $ARCHCI_REMOTE_JOURNAL --no-pager -a -q -o json --since=@"*" --until=@"*" --output-fields=MESSAGE,PRIORITY,_PID,_SOURCE_REALTIME_TIMESTAMP,_SYSTEMD_INVOCATION_ID,ARCHCI_"*" _SYSTEMD_UNIT=$(build_unit acl 1:2.3.2-1 x86_64 1) _HOSTNAME=worker" ]] || fail "a job names its log as the journalctl the master runs for its entries: $(jq -r '.log' <<<"$onejob")"
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"
@@ -160,7 +155,7 @@ srec=$(<"$ARCHCI_HOME/built/omarchy-src/acl"); sf=${srec##* }
 [[ $srec == "1:2.3.2-1 $(pkgcommit acl) acl-1:2.3.2-1-"*.src.tar.gz && $sf =~ ^acl-1:2\.3\.2-1-[0-9a-f]{64}\.src\.tar\.gz$ ]] || fail "the src built record must name the (hashed) file: $srec"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/src/$sf && -f $ARCHCI_HOME/repo/omarchy/os/src/$sf.buildsig && -e $ARCHCI_HOME/publish.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage: $(ls "$ARCHCI_HOME/repo/omarchy/os/src")"
 [[ $(jq -c '[.lines[1], (.lines | length)]' <<<"$("$master/archci-web" log "$sid")") == '["fetched",3]' ]] || fail "a fetch's log is the sourcer service's entries on its host: $("$master/archci-web" log "$sid")"
-[[ $(jq -r '.started + " " + .stopped' <<<"$("$master/archci-web" job "$sid")") == "2026-09-15T10:02:00Z 2026-09-15T10:02:30Z" ]] || fail "a fetch's span comes from its journal entries: $("$master/archci-web" job "$sid")"
+[[ $(jq -c '[.started, .stopped]' <<<"$("$master/archci-web" job "$sid")") == '[null,null]' ]] || fail "a finished fetch's times are the browser's, from its log, not the master's: $("$master/archci-web" job "$sid")"
 [[ $("$next" src) == "5 omarchy src libsigc++ "* ]] || fail "acl's sources are in; libsigc++ is next: $("$next" src)"
 sid=$(claim_id sourcer src)
 inc=$ARCHCI_HOME/incoming/$sid
