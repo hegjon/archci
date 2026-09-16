@@ -14,7 +14,7 @@ out=$(unset JOURNAL_STREAM; archci_record "==> a line" ARCHCI_EVENT=start)
 [[ $out == "==> a line" ]] || fail "printed as is: $out"
 (unset JOURNAL_STREAM; ! archci_journal_open) || fail "no coprocess off a unit"
 
-if [[ ! -S /run/systemd/journal/socket ]] || ! command -v perl >/dev/null; then echo "(no journal socket or perl here: the rest skipped)"; echo "ALL OK"; exit 0; fi
+if [[ ! -S /run/systemd/journal/socket ]] || ! command -v ruby >/dev/null; then echo "(no journal socket or ruby here: the rest skipped)"; echo "ALL OK"; exit 0; fi
 echo "--- through the coprocess: a record with its fields, found in the journal by a field"
 tag=archci-record-test-$$-$RANDOM
 (

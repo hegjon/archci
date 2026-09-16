@@ -234,7 +234,7 @@ archci_arch_conf() {
 # them out of the text: ARCHCI_JOB, ARCHCI_ATTEMPT, ARCHCI_EVENT=start|slice|
 # signed|finish and the event's facts (ARCHCI_RC, ARCHCI_SLICE, ARCHCI_PACKAGE,
 # ...). The MESSAGE is the same human line as ever. They go through the
-# journal's native socket from a coprocess that lives as long as the script
+# journal's native socket from a coprocess (ruby) that lives as long as the script
 # (archci_journal_open), so journald attributes them to the unit (a
 # short-lived `logger` exits before journald reads its cgroup, and its entry
 # has no unit); they are sent where no build output is in flight (before the
@@ -243,14 +243,19 @@ archci_arch_conf() {
 # the tests) or without the socket, archci_record prints the line instead.
 archci_journal_open() {
 	[[ -n ${JOURNAL_STREAM:-} && -S /run/systemd/journal/socket ]] || return 1
-	command -v perl >/dev/null || return 1
-	# records on stdin, one field per line, a blank line ends a record
-	coproc ARCHCI_JOURNAL { perl -e '
-		use strict; use IO::Socket::UNIX;
-		my $s = IO::Socket::UNIX->new(Type => SOCK_DGRAM, Peer => "/run/systemd/journal/socket") or exit 1;
-		my $rec = "";
-		while (my $l = <STDIN>) { if ($l eq "\n") { $s->send($rec) if length $rec; $rec = ""; } else { $rec .= $l; } }
-		$s->send($rec) if length $rec;' 2>/dev/null; }
+	command -v ruby >/dev/null || return 1
+	# records on stdin, one field per line, a blank line ends a record; each
+	# one datagram on the journal's native socket
+	# shellcheck disable=SC2016  # $stdin is ruby's
+	coproc ARCHCI_JOURNAL { ruby -e '
+		require "socket"
+		s = Socket.new(:UNIX, :DGRAM)
+		s.connect(Socket.pack_sockaddr_un("/run/systemd/journal/socket"))
+		rec = +""
+		$stdin.each_line do |l|
+		  if l == "\n" then s.send(rec, 0) unless rec.empty?; rec = +"" else rec << l end
+		end
+		s.send(rec, 0) unless rec.empty?' 2>/dev/null; }
 	# one fd of our own to the coprocess's stdin; the coproc's array fd is
 	# closed so that closing ours is the EOF it waits for
 	exec {ARCHCI_JOURNAL_FD}>&"${ARCHCI_JOURNAL[1]}"

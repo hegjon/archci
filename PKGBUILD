@@ -48,7 +48,7 @@ check() {
 
 package_archci() {
   pkgdesc='Headless build farm for Arch Linux packages (shared library, config and user)'
-  depends=(bash git perl)
+  depends=(bash git ruby)   # ruby: the master's scripts, and the journal record sender every role uses
   backup=(etc/archci/archci.conf)
 
   cd "$srcdir/$_src"
