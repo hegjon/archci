@@ -117,7 +117,8 @@ rest=$("$master/archci-web" sse "$id" "$mid")
 mkdir -p "$tmp/logs"
 [[ $("$master/archci-web" export "$tmp/logs") == 1 ]] || fail "the finished job's log is exported once"
 xf=$(find "$tmp/logs" -name '*.sse.zst'); [[ $xf == "$tmp/logs/omarchy/acl/1:2.3.2-1/x86_64/acl-1:2.3.2-1-x86_64-"[0-9]*"-feedfacefeedfacefeedfacefeedface.sse.zst" ]] || fail "the export is named by pkgbase, version, arch, the start and the invocation: $xf"
-[[ $(zstd -dc "$xf") == "$sse" ]] || fail "the export is the same bytes as the live stream: $(diff <(echo "$sse") <(zstd -dc "$xf") | head -6)"
+[[ $(zstd -dc "$xf" | sed '2s/,"exported":"[^"]*"//') == "$sse" ]] || fail "the export is the live stream's bytes plus its own name in the job event: $(diff <(echo "$sse") <(zstd -dc "$xf") | head -6)"
+zstd -dc "$xf" | sed -n 2p | grep -q "\"exported\":\"${xf##*/}\"" || fail "the export's job event names the file: $(zstd -dc "$xf" | sed -n 2p | cut -c1-300)"
 grep -q "^exported=${xf##*/}$" "$ARCHCI_HOME/queue/done/$id.job" || fail "the job file names its export: $(grep exported "$ARCHCI_HOME/queue/done/$id.job")"
 [[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "not exported again"
 # a log over ARCHCI_LOG_MAX_LINES keeps its first three quarters and its last quarter, a marker between

@@ -760,13 +760,24 @@ module Archci
   # index and its rc and packages. sse_events gives the lines for a slice of
   # entries; a live reader gets the header once, then the entries after its
   # cursor, then the end.
-  def self.sse_job_event(j, entries)
+  # The job event is the whole job page's data: everything the page shows
+  # besides the lines, so a page built from the exported file alone (on
+  # the release, keyed by the job id) lacks nothing the master would add:
+  # the job file's fields, the state and story, the package's origin, the
+  # host and archci version that built it, the unit's invocation, the src
+  # job that made its source package (the page links it), the package
+  # files the build produced (their hashed names in the release), and,
+  # for an export, the file's own name (exported:).
+  def self.sse_job_event(j, entries, exported: nil)
     start = entries.find { |e| e['ARCHCI_EVENT'] == 'start' } || {}
+    finish = entries.reverse_each.find { |e| e['ARCHCI_EVENT'] == 'finish' } || {}
     pkg = packages.find { |p| p['pkgbase'] == j['pkgbase'] }
+    src_job = find_src_job(j['repo'], j['pkgbase'], j['version']) if j['sources'] && j['arch'] != 'src'
     # ('log', the journalctl find_job adds, and the report's summary lines are not the log's business)
-    job = j.except('path', 'mtime', 'error', 'last', 'log', 'origin').merge(
+    job = j.except('path', 'mtime', 'error', 'last', 'log', 'origin', 'exported').merge(
       'mtime' => j['mtime']&.utc&.iso8601, 'story' => story(j), 'origin' => origin(pkg) || '-',
-      'host' => start['ARCHCI_HOST'], 'archci' => start['ARCHCI_VERSION'], 'invocation' => entries.first&.dig('_SYSTEMD_INVOCATION_ID')
+      'host' => start['ARCHCI_HOST'], 'archci' => start['ARCHCI_VERSION'], 'invocation' => entries.first&.dig('_SYSTEMD_INVOCATION_ID'),
+      'sources_job' => src_job, 'packages' => finish['ARCHCI_PACKAGES']&.split, 'exported' => exported
     ).compact
     "event: job\ndata: #{JSON.generate(job)}\n\n"
   end
@@ -830,7 +841,7 @@ module Archci
         path = File.join(dir, j['repo'], j['pkgbase'], j['version'], j['arch'], name)
         FileUtils.mkdir_p(File.dirname(path))
         File.open("#{path}.tmp", 'w') do |f|
-          f.write(sse_job_event(j, entries))
+          f.write(sse_job_event(j, entries, exported: "#{name}.zst"))
           entries.each { |e| f.write(sse_entry(e)) }
           f.write(sse_end_event(j, entries, err))
         end
