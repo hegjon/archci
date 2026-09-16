@@ -413,7 +413,14 @@ container=(arch-nspawn -c "$cachedir" "$copydir" --machine="$machine" --hostname
 	--bind="$srcdir:/startdir" --bind="$SRCDEST:/srcdest" --bind="$outdir:/pkgdest" --bind="$outdir:/logdest" --bind="$outdir:/srcpkgdest"
 	"$ARCHCI_CONTAINER_TMP")
 [[ -n $vendor_conf ]] && container+=(--bind-ro="$vendor_conf:/build/.config")
-deps_args=(--syncdeps --noconfirm --skipinteg --nobuild --noextract --noprepare "${extra_makepkg_args[@]}")
+# A PKGBUILD with a pkgver() has makepkg run it even with --nobuild, after
+# the dependencies are installed, and with --noextract there is nothing
+# for it to cd into (a VCS package's checkout is made by the extraction):
+# "cd: brotli: No such file or directory", the deps step fails. Such a
+# package extracts its sources in the deps step too (twice per build;
+# prepare() stays with the offline build).
+deps_args=(--syncdeps --noconfirm --skipinteg --nobuild --noprepare "${extra_makepkg_args[@]}")
+grep -qE '^pkgver\(\)' "$srcdir/PKGBUILD" || deps_args+=(--noextract)
 # (no --log: the build's output is its unit's journal, which the master keeps; makepkg's per-function log files would only repeat it)
 build_args=(--syncdeps --noconfirm --skipinteg "${extra_makepkg_args[@]}")
 # Through archci_watchdog's pipe on purpose: systemd-nspawn (arch-nspawn's
