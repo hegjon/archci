@@ -14,7 +14,7 @@ grep -q '^  job  *the queue: enqueue, retry, requeue, report' <<<"$help" || fail
 grep -q '^  top  *the farm live' <<<"$help" || fail "archci help must list top with its description"
 grep -q '^  shell' <<<"$help" && fail "archci-shell is not a subcommand"
 [[ $("$archci" next x86_64) == "$("$next" x86_64)" ]] || fail "archci next must run archci-next"
-[[ $("$archci" job retry -a 2>&1) == *'retried from scratch'* ]] || fail "archci job must pass its arguments on"
+[[ $("$archci" job retry -a 2>&1) == *'retried as new jobs'* ]] || fail "archci job must pass its arguments on"
 ! "$archci" shell 2>/dev/null || fail "archci shell must be refused"
 [[ $("$archci" version) == "archci "?* && $("$archci" --version) == "$("$archci" version)" ]] || fail "archci version must print a version: $("$archci" version)"
 ! "$archci" nosuch 2>/dev/null || fail "an unknown subcommand must fail"
