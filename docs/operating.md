@@ -62,7 +62,7 @@ journalctl -u archci-publish         the signatures accepted, the index, the pub
 archci job enqueue extra firefox    build the current release now (priority 0)
 archci top                          live view: workers' load and memory, running
                                     jobs with phase and last output, failures
-archci job retry <jobid>            reset attempts of a failed job and requeue
+archci job retry <jobid>            a new job in the failed one's place (fresh id, the package's current commit and flags); prints its id
 archci job retry --all              the same for every failed job (also -a)
 archci job requeue <jobid>          put a running/failed job back, keep attempts
 archci publish --force              accept, index and publish now (and reconcile the release)

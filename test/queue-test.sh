@@ -219,15 +219,21 @@ nid=$(claim_id worker-9 x86_64)
 grep -q '^network=full$' "$ARCHCI_HOME/queue/running/$nid.job" || fail "the job must carry network=full: $(cat "$ARCHCI_HOME/queue/running/$nid.job")"
 "$job" report "$nid" failure "$(owner "$nid")" >/dev/null
 grep -q '^network=full$' "$ARCHCI_HOME/queue/failed/$nid.job" || fail "a failure keeps the flag"
-# a retry follows the package's current package.json: the flag taken away, then loopback given, reach the retried job
+# a retry is a new job, unrelated to the failed one: a fresh id, the package as its package.json has it now (here: the flag taken away), the failed file gone
 mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch"}'; commit_pkgs "netpkg offline"; "$scan" >/dev/null 2>&1
-"$job" retry "$nid" >/dev/null 2>&1
-! grep -q '^network=' "$ARCHCI_HOME/queue/pending/$nid.job" || fail "the retry drops the flag the package no longer has: $(cat "$ARCHCI_HOME/queue/pending/$nid.job")"
+sleep 1   # the new id's second differs from the failed one's
+rid=$("$job" retry "$nid" 2>/dev/null)
+[[ $rid == 0-*-omarchy,netpkg,1-1,x86_64 && $rid != "$nid" ]] || fail "retry prints the new job's id: $rid"
+[[ -f $ARCHCI_HOME/queue/pending/$rid.job && ! -e $ARCHCI_HOME/queue/failed/$nid.job ]] || fail "the new job is pending, the failed one gone: $(ls "$ARCHCI_HOME"/queue/*/ | grep netpkg)"
+! grep -q '^network=' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "the new job has the flag the package has now, none: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
+grep -q '^attempt=0$' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "a new job starts at attempt 0: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
+! "$job" retry "$rid" >/dev/null 2>&1 || fail "only a failed job is retried (a pending one is not)"
+# a requeue keeps the job and takes the package's current flag: loopback given after the claim reaches the requeued job
 mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch", "network": "loopback"}'; commit_pkgs "netpkg loopback"; "$scan" >/dev/null 2>&1
-nid2=$(claim_id worker-9 x86_64); [[ $nid2 == "$nid" ]] || fail "the retried job is claimed: $nid2"
-"$job" requeue "$nid" >/dev/null 2>&1
-grep -q '^network=loopback$' "$ARCHCI_HOME/queue/pending/$nid.job" || fail "a requeue gives the job the flag the package has now: $(cat "$ARCHCI_HOME/queue/pending/$nid.job")"
-rm -f "$ARCHCI_HOME"/queue/*/"$nid.job"   # it is pending again; out of the way of what follows
+nid2=$(claim_id worker-9 x86_64); [[ $nid2 == "$rid" ]] || fail "the new job is claimed: $nid2"
+"$job" requeue "$rid" >/dev/null 2>&1
+grep -q '^network=loopback$' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "a requeue gives the job the flag the package has now: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
+rm -f "$ARCHCI_HOME"/queue/*/"$rid.job"   # it is pending again; out of the way of what follows
 mkpkgbuild loopy 1-1 x86_64 '{"source": "arch", "network": "loopback"}'
 commit_pkgs loopy; "$scan" >/dev/null 2>&1
 [[ $("$master/archci-pkgindex" loopy | awk '{print $7}') == loopback ]] || fail "the index must know the loopback state: $("$master/archci-pkgindex" loopy)"
@@ -250,11 +256,12 @@ journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "stder
 xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.zst'); [[ $(zstd -dc "$xf" | tail -2 | head -1) == 'data: {"state":"failed","error_at":1,"finished":"20'* ]] || fail "the end event of a failed job: $(zstd -dc "$xf" 2>/dev/null | tail -2) / exported: $(find "$tmp/logs" -name "*.sse.zst")"
 # what counts as the first error: not a test suite's summary counts, not a warning flag; a build killed for silence does
 [[ $(ARCHCI_CONF=/dev/null ruby -e 'require "'"$master"'/../lib/archci"; puts ["# ERROR: 0", "# FAIL:  3", "-Werror=format", "ERROR: real", "==> build killed after 90 min without output", "Container archci-build-x86-64-2-guile terminated by signal KILL."].map { |l| Archci.error_line?(l) ? 1 : 0 }.join') == 000111 ]] || fail "error_line?: summary counts and -Werror are not errors, a real one and a killed build are"
-# a retry drops the export mark: the next attempt is a new log, exported afresh (the sourcer's failed linux fetch, exported above)
+# a retry of an exported job: the new job carries no export mark (its own log is exported afresh), the failed one is gone (its log stays on the release under its id)
 lsid=$(find "$ARCHCI_HOME/queue/failed" -name '*,linux,*,src.job' -printf '%f\n' | head -1); lsid=${lsid%.job}
 grep -q '^exported=' "$ARCHCI_HOME/queue/failed/$lsid.job" || fail "the exported src job carries the mark: $(cat "$ARCHCI_HOME/queue/failed/$lsid.job")"
-"$job" retry "$lsid" >/dev/null 2>&1
-! grep -q '^exported=' "$ARCHCI_HOME/queue/pending/$lsid.job" || fail "a retry drops the export mark: $(cat "$ARCHCI_HOME/queue/pending/$lsid.job")"
+lrid=$("$job" retry "$lsid" 2>/dev/null)
+[[ -f $ARCHCI_HOME/queue/pending/$lrid.job && ! -e $ARCHCI_HOME/queue/failed/$lsid.job ]] || fail "a new pending job, the failed one gone: $lrid"
+! grep -q '^exported=' "$ARCHCI_HOME/queue/pending/$lrid.job" || fail "the new job carries no export mark: $(cat "$ARCHCI_HOME/queue/pending/$lrid.job")"
 "$failed" | grep "^libsigc++ 2.12.2-1 .* x86_64  *arch  *worker-2  *1/2 retry  *20.*: ==> ERROR: A failure occurred in build()" >/dev/null || fail "archci failed must list the failure with the first error line of its log: $("$failed")"
 # a job file without the report's summary (from before it kept one): the listing reads the journal
 sed -i '/^error=/d; /^last=/d' "$ARCHCI_HOME/queue/failed/$id.job"
@@ -372,7 +379,7 @@ story=$(ARCHCI_SOURCES_REQUIRED=1 "$master/archci-web" snapshot | jq -r '.jobs[]
 [[ $(ARCHCI_SOURCES_REQUIRED=1 "$master/archci-web" snapshot | jq -r '.queue.held') == 2 ]] || fail "the held count includes builds waiting for sources (linux, and acl whose sources were never fetched): $(ARCHCI_SOURCES_REQUIRED=1 "$master/archci-web" snapshot | jq -c '[.queue, [.jobs[] | select(.state == "pending") | .story]]')"
 rm -f "$ARCHCI_HOME"/queue/pending/*linux*
 
-echo "--- retry --all gives every failed job a fresh first attempt"
+echo "--- retry --all gives every failed job a new job in its place"
 # two jobs that gave up (final after max attempts), as report leaves them
 failed_ids=()
 for p in acl:1:2.3.2-1 libsigc++:3.6.0-1; do
@@ -384,9 +391,12 @@ done
 "$job" retry --all
 [[ -z $(ls -A "$ARCHCI_HOME/queue/failed") ]] || fail "retry --all must empty failed/"
 for f in "${failed_ids[@]}"; do
-	[[ -f $ARCHCI_HOME/queue/pending/$f ]] || fail "$f not requeued by retry --all"
-	grep -q '^attempt=0$' "$ARCHCI_HOME/queue/pending/$f" || fail "attempt not reset in $f"
-	grep -q '^final=' "$ARCHCI_HOME/queue/pending/$f" && fail "final flag kept in $f"
+	[[ ! -e $ARCHCI_HOME/queue/pending/$f ]] || fail "$f must not come back under its old id"
+	p=${f#*-omarchy,}; p=${p%%,*}
+	nf=$(find "$ARCHCI_HOME/queue/pending" -name "5-*-omarchy,$p,*,x86_64.job" -printf '%f\n' | head -1)
+	[[ -n $nf ]] || fail "no new job for $p: $(ls "$ARCHCI_HOME/queue/pending")"
+	grep -q '^attempt=0$' "$ARCHCI_HOME/queue/pending/$nf" || fail "a new job starts at attempt 0: $nf"
+	grep -q '^final=' "$ARCHCI_HOME/queue/pending/$nf" && fail "final flag in the new job $nf"
 done
 ! "$job" retry 2>/dev/null || fail "retry needs a job id or --all"
 "$job" retry -a   # nothing failed: fine, retries 0
@@ -420,8 +430,9 @@ touch -d '2 days ago' "$ARCHCI_HOME/hosts/idle-host-1"
 echo "--- a report or heartbeat from a worker the job was taken from is refused"
 tid=$(claim_id taken-1 x86_64)
 [[ -n $tid ]] || fail "taken-1 should have got a job"
-"$job" retry "$tid" >/dev/null                      # requeued while taken-1 still builds it
-[[ $(claim_id taker-1 x86_64) == "$tid" ]] || fail "the retried job goes to the next claim"
+! "$job" retry "$tid" >/dev/null 2>&1 || fail "a running job is not retried (requeue is for that)"
+"$job" requeue "$tid" >/dev/null                    # requeued while taken-1 still builds it
+[[ $(claim_id taker-1 x86_64) == "$tid" ]] || fail "the requeued job goes to the next claim"
 ! "$job" heartbeat "$tid" worker=taken-1 load=1 2>/dev/null || fail "the old worker's heartbeat must be refused"
 ! "$job" report "$tid" failure taken-1 2>/dev/null || fail "the old worker's report must be refused"
 ! "$job" heartbeat "$tid" load=1 2>/dev/null || fail "a heartbeat that names no worker must be refused"

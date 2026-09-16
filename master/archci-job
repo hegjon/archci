@@ -30,8 +30,12 @@
 #                             the master; the report keeps its first error
 #                             line and its last in the job file)
 #   requeue ID                move a running/failed job back to pending
-#   retry ID | -a|--all       reset the attempt counter and requeue: one job,
-#                             or every failed job (final ones included)
+#   retry ID | -a|--all       a new job for the failed job's package and arch,
+#                             at the package's current version, commit and
+#                             network flag, with a fresh id and attempt 0; the
+#                             failed job's file goes (its logs stay on the
+#                             release under its id). Prints the new id. --all:
+#                             every failed job (final ones included)
 #   enqueue PKGBASE [P] [ARCH]
 #                             queue the package's current version (from the
 #                             PKGBUILD repository clone), priority P (default
@@ -287,28 +291,47 @@ cmd_requeue() {
 	archci_log "$id requeued"
 }
 
+# retry_file FILE (lock held): a retry is a new job, unrelated to the failed
+# one: a fresh id (so every build of an id is one of its own attempts, and
+# the id's logs on the release are its own), the package as its PKGBUILD
+# repository has it now (version, commit, network flag), the failed job's
+# file gone (its logs stay on the release under its id). Prints the new id;
+# a package the repository no longer has gets no job (the file goes too).
+retry_file() {
+	local file=$1 id pkgbase arch repo prio line name version commit parch profile build old new
+	id=$(sed -n 's/^id=//p' "$file"); pkgbase=$(sed -n 's/^pkgbase=//p' "$file")
+	arch=$(sed -n 's/^arch=//p' "$file"); repo=$(sed -n 's/^repo=//p' "$file"); prio=${id%%-*}
+	line=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase" 2>/dev/null)
+	rm -f "$file"; rm -rf "${ARCHCI_HOME:?}/incoming/$id"
+	if [[ -z $line ]]; then
+		archci_log "$id: $pkgbase is no longer in the PKGBUILD repository; the failed job is dropped, no new one"
+		return 1
+	fi
+	read -r name version commit parch profile _ build _ <<<"$line"
+	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected index line: $line"
+	for old in "$Q_PENDING"/*-"$repo,$pkgbase,"*",$arch.job"; do   # one pending job per package and arch, as enqueue keeps it
+		[[ -e $old ]] && rm -f "$old"
+	done
+	new=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile" "$build")
+	archci_log "$id retried as ${new%.job}: a new job at the package's current commit"
+	printf '%s\n' "${new%.job}"
+}
+
 cmd_retry() {
 	local id=$1 file n=0
 	if [[ $id == -a || $id == --all ]]; then
-		# every failed job, final ones included, as a fresh first attempt
 		lock_queue
 		for file in "$Q_FAILED"/*.job; do
 			[[ -f $file ]] || continue
-			set_attempt "$file" 0
-			refresh_flags "$file"
-			requeue_file "$file"
-			(( ++n ))
+			retry_file "$file" >/dev/null && (( ++n ))
 		done
-		archci_log "$n failed job(s) retried from scratch"
+		archci_log "$n failed job(s) retried as new jobs"
 		return 0
 	fi
 	archci_valid_id "$id" || archci_die "invalid job id"
 	lock_queue
-	file=$(find_job "$id" "$Q_RUNNING" "$Q_FAILED") || archci_die "job $id is not running or failed"
-	set_attempt "$file" 0
-	refresh_flags "$file"
-	requeue_file "$file"
-	archci_log "$id retried from scratch"
+	file=$(find_job "$id" "$Q_FAILED") || archci_die "job $id is not failed (a running job goes back to pending with: archci-job requeue $id)"
+	retry_file "$file" || exit 1
 }
 
 cmd_enqueue() {
@@ -348,7 +371,7 @@ case $cmd in
 	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; ARCHCI_LOG_JOB=$1 cmd_heartbeat "$@" ;;
 	report)    (( $# == 3 )) || archci_die "usage: archci-job report ID STATUS WORKER"; ARCHCI_LOG_JOB=$1 cmd_report "$1" "$2" "$3" ;;
 	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          ARCHCI_LOG_JOB=$1 cmd_requeue "$1" ;;
-	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; ARCHCI_LOG_JOB=$1 cmd_retry "$1" ;;
+	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; ARCHCI_LOG_JOB=$1 cmd_retry "$1" ;;   # prints the new job's id
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
 	*) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" >&2; exit 2 ;;
 esac
