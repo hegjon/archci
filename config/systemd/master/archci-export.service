@@ -1,0 +1,16 @@
+[Unit]
+Description=archci: export the finished jobs' logs from the journal as SSE files
+RequiresMountsFor=/var/lib/archci
+# not while a publish pass moves logs/ to the release: an export writes
+# <name>.sse.tmp and renames it to .sse.zst when whole, and the move takes
+# only *.sse.zst, so the two could overlap; this keeps them apart anyway
+After=archci-publish.service
+
+[Service]
+Type=oneshot
+User=archci
+ExecStart=/usr/lib/archci/master/archci-web export /var/lib/archci/logs
+# one journalctl per finished job over the workers' remote journal, ruby
+# in between: the pass the master feels most, so it yields to the rest
+Nice=10
+IOSchedulingClass=idle

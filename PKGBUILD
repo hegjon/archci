@@ -81,7 +81,8 @@ package_archci-master() {
   optdepends=('libmicrohttpd: receive worker journals with systemd-journal-remote')
 
   _install_role master archci-master.target archci-scan.service archci-scan.timer \
-    archci-housekeeping.service archci-housekeeping.timer archci-publish.service archci-publish.timer
+    archci-housekeeping.service archci-housekeeping.timer archci-publish.service archci-publish.timer \
+    archci-export.service archci-export.timer
   _install_cli master
   cd "$srcdir/$_src"
   install -Dm644 config/systemd/master/archci-journal-remote.service \

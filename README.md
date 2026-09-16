@@ -290,7 +290,7 @@ repo/<repo>/os/<arch>/      the pool: what is built and not published yet (btrfs
 journal/                    the workers' journals (systemd-journal-remote): every job's log is read from here
 logs/<repo>/<pkgbase>/<version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst
                             a finished attempt's log, exported from the journal as server-sent events once the
-                            journal has its finish record (archci-publish), on its way to the release as
+                            journal has its finish record (archci-export.timer, every minute), on its way to the release as
                             <repo>/log/...; the job file names it (exported=). start: the attempt's first entry,
                             seconds since the epoch; invocation: the build unit's _SYSTEMD_INVOCATION_ID
 sigs/<repo>/os/<arch>/      where the signer returns <file>.sig (rrsync, write-only); archci-publish verifies and moves each beside its file

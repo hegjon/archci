@@ -34,12 +34,14 @@
 #      leave the pool with their .buildsig: the pool is what is not
 #      published yet. Without ARCHCI_R2_RELEASE the pass ends after the
 #      index (a farm without a release, the tests) and signed files stay.
-#   4. logs: the logs of the jobs finished since the last pass, whole in the
-#      journal by now, are exported as SSE (archci-web export: one
-#      <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst per attempt
-#      under logs/<repo>/<pkgbase>/<version>/<arch>/) and moved to the release
-#      as <repo>/log/..., served with Content-Encoding zstd so a browser
-#      decodes them itself. Without ARCHCI_R2_RELEASE they stay under logs/.
+#   4. logs: what archci-export.service (its own timer, every minute) has
+#      exported under logs/<repo>/<pkgbase>/<version>/<arch>/ as
+#      <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst (archci-web
+#      export: one journalctl per finished job, whole in the journal by
+#      then) is moved to the release as <repo>/log/..., served with
+#      Content-Encoding zstd so a browser decodes it itself. An export in
+#      progress is a .tmp until whole, so the move never takes a partial
+#      file. Without ARCHCI_R2_RELEASE the exports stay under logs/.
 # Every object's name but the databases' and release.pub's carries a hash or
 # a timestamp, so those get a year of immutable caching; the rest no-cache
 # (rclone --header-upload).
@@ -199,14 +201,10 @@ write_listings() {
 	done
 }
 
-# --- the logs of the jobs finished since the last pass, as SSE files ---------
-exported=$("$ARCHCI_MASTER_DIR/archci-web" export "$logs" 2>/dev/null || echo 0)
-(( exported )) && archci_log "exported $exported build log(s)"
-
 # --- 3. publish -----------------------------------------------------------------
 if [[ -z $ARCHCI_R2_RELEASE ]]; then
 	write_listings   # nothing to wait for: what is indexed is what there is
-	(( indexed || accepted || exported )) && archci_log "ARCHCI_R2_RELEASE is empty: indexed, not published"
+	(( indexed || accepted )) && archci_log "ARCHCI_R2_RELEASE is empty: indexed, not published"
 	exit 0
 fi
 command -v rclone >/dev/null || archci_die "rclone is not installed"

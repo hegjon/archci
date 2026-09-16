@@ -55,7 +55,7 @@ archci web job <jobid>              one job as JSON (no snapshot): its fields, s
 archci web log <jobid>              a job's log as JSON: the lines and the index of the first error (a running job's tail)
 archci web entries <jobid>          the same as journal entries, each line with its time and phase
 archci web sse <jobid>              the log as server-sent events: the job, one event per line with its cursor, the end; what the web streams and what is exported to R2
-archci web export DIR               export the logs of the jobs finished since the last export (archci-publish does this every pass)
+archci web export DIR               export the logs of the jobs finished since the last export (archci-export.timer does this every minute)
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
 journalctl -u archci-publish         the signatures accepted, the index, the publish to R2
