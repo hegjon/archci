@@ -34,8 +34,13 @@ case $sub in
 		exit 0 ;;
 	version|-V|--version) echo "archci $(archci_version)"; exit 0 ;;
 esac
+# The master's state is the archci user's: run as root (ssh in, sudo), a
+# command would leave the job files it rewrites root-owned and the units
+# (User=archci) could not touch them again; so root drops to archci.
+as_archci=()
+if (( EUID == 0 )) && id -u archci >/dev/null 2>&1; then as_archci=(runuser -u archci --); fi
 for c in "${commands[@]}"; do
-	[[ ${c%% *} == "$sub" ]] && exec "$root/master/archci-$sub" "$@"
+	[[ ${c%% *} == "$sub" ]] && exec "${as_archci[@]}" "$root/master/archci-$sub" "$@"
 done
 echo "archci: unknown subcommand '$sub' ('archci help' lists the master's)" >&2
 exit 2
