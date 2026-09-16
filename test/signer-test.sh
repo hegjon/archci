@@ -59,7 +59,8 @@ case $sub in
   lsf) [[ -d ${pos[0]} ]] && (cd "${pos[0]}" && find . -maxdepth 1 -type f -printf '%P\n');;
   copyto) [[ -f ${pos[0]} ]] || exit 1; mkdir -p "$(dirname "${pos[1]}")"; cp "${pos[0]}" "${pos[1]}";;
   deletefile) rm -f "${pos[0]}";;
-  copy) while IFS= read -r f; do [[ -f ${pos[0]}/$f ]] || continue; mkdir -p "$(dirname "${pos[1]}/$f")"; cp "${pos[0]}/$f" "${pos[1]}/$f"; done <"$list";;
+  copy) [[ -e $TESTTMP/rclone.fail ]] && { echo "rclone: the bucket is down (test)" >&2; exit 1; }
+        while IFS= read -r f; do [[ -f ${pos[0]}/$f ]] || continue; mkdir -p "$(dirname "${pos[1]}/$f")"; cp "${pos[0]}/$f" "${pos[1]}/$f"; done <"$list";;
   delete) while IFS= read -r f; do rm -f "${pos[0]}/$f"; done <"$list";;
   move) [[ -d ${pos[0]} ]] && (cd "${pos[0]}" && find . -type f -printf '%P\n') | while IFS= read -r f; do [[ -f ${pos[1]}/$f ]] && continue; mkdir -p "$(dirname "${pos[1]}/$f")"; mv "${pos[0]}/$f" "${pos[1]}/$f"; done;;
 esac
@@ -211,6 +212,25 @@ out=$("$publish" --force 2>&1)
 [[ $out == *"reconcile: pruning 1 file(s) from omarchy/os/x86_64"* ]] || fail "the stray is pruned: $out"
 [[ ! -e $rel/stray-1-1-x86_64-$(printf 'a%.0s' {1..64}).pkg.tar.zst ]] || fail "the stray must be gone"
 [[ $out == *"skipping the reconcile of core/os/x86_64"* && -f $release/core/os/x86_64/survivor-1-1-x86_64.pkg.tar.zst ]] || fail "an empty database never empties its release directory: $out"
+
+echo "--- the listings wait for the upload: a pass whose upload fails names nothing new (a claim would send the worker to a 404)"
+lp=$(mkpkg "$pool/omarchy/os/x86_64" late 1-1); ln=${lp##*/}; bsig "$gpgb" archci-builder "$lp"
+mkdir -p "$pool/omarchy/os/src"; mkdir -p "$pool/omarchy/os/src"; echo "sources late" | zstd -q >"$tmp/s"; lsp=$pool/omarchy/os/src/late-1-1-$(sha256sum "$tmp/s" | cut -c1-64).src.tar.zst; mv "$tmp/s" "$lsp"; lsn=${lsp##*/}; bsig "$gpgb" archci-builder "$lsp"
+mkdir -p "$ARCHCI_HOME/sigs/omarchy/os/x86_64" "$ARCHCI_HOME/sigs/omarchy/os/src"
+gpg --homedir "$gpgr" --batch --detach-sign -u archci-release -o "$ARCHCI_HOME/sigs/omarchy/os/x86_64/$ln.sig" "$lp"
+gpg --homedir "$gpgr" --batch --detach-sign -u archci-release -o "$ARCHCI_HOME/sigs/omarchy/os/src/$lsn.sig" "$lsp"
+touch "$ARCHCI_HOME/publish.needed" "$TESTTMP/rclone.fail"
+out=$("$publish" 2>&1) && fail "a pass whose upload fails must fail: $out"
+[[ $out == *"indexed 1 package(s) into [omarchy] x86_64"* ]] || fail "indexed before the upload: $out"
+[[ -e $ARCHCI_HOME/publish.needed ]] || fail "the failed pass keeps its trigger"
+! grep -qx "late 1-1" "$ARCHCI_HOME/released/omarchy-x86_64" || fail "not listed as released: the database is not up: $(cat "$ARCHCI_HOME/released/omarchy-x86_64")"
+! grep -qxF "$lsn" "$ARCHCI_HOME/released/omarchy-src" || fail "the source package is not listed: it is not up"
+[[ ! -e $release/omarchy/os/src/$lsn && -f $lsp && -f $lsp.sig ]] || fail "nothing uploaded, the pool keeps the signed files"
+rm -f "$TESTTMP/rclone.fail"
+out=$("$publish" 2>&1) || fail "the next pass publishes: $out"
+{ grep -qx "late 1-1" "$ARCHCI_HOME/released/omarchy-x86_64" && grep -qxF "$lsn" "$ARCHCI_HOME/released/omarchy-src"; } || fail "listed once up: $(cat "$ARCHCI_HOME"/released/omarchy-x86_64 "$ARCHCI_HOME"/released/omarchy-src)"
+[[ -f $rel/$ln && -f $release/omarchy/os/src/$lsn && ! -e $lp && ! -e $lsp ]] || fail "late published and out of the pool"
+[[ ! -e $ARCHCI_HOME/publish.needed ]] || fail "the trigger is consumed"
 
 echo "--- without ARCHCI_R2_RELEASE: index only, the pool keeps the signed files"
 mkdir -p "$pool/omarchy/os/x86_64"

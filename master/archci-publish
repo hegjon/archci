@@ -178,19 +178,26 @@ for osdir in "$pool"/*/os/*/; do
 	done
 done
 # the listings a claim reads: "name version" per database entry; the source
-# packages by file name (signed, so on their way out or out)
-for dbfile in "$dbs"/*/os/*/*.db.tar.gz; do
-	d=${dbfile%/*}; arch=${d##*/}; repo=${d#"$dbs"/}; repo=${repo%%/*}
-	bsdtar -tf "$dbfile" >/dev/null 2>&1 || { archci_log "not listing $repo/os/$arch: its database is unreadable"; continue; }
-	# an empty database (a fresh farm) has no desc to extract, so bsdtar exits 1: still an empty listing
-	{ bsdtar -xOf "$dbfile" '*/desc' 2>/dev/null || true; } | awk '$0 == "%NAME%" { getline; n = $0 } $0 == "%VERSION%" { getline; print n, $0 }' >"$listings/$repo-$arch.tmp" &&
-		mv "$listings/$repo-$arch.tmp" "$listings/$repo-$arch"
-done
-for srcdir in "$pool"/*/os/src/; do
-	repo=${srcdir#"$pool"/}; repo=${repo%%/*}
-	{ cat "$listings/$repo-src" 2>/dev/null || true; for f in "$srcdir"*.src.tar.*; do [[ $f == *.sig || $f == *.buildsig || $f == *.rejected ]] && continue; [[ -f $f.sig ]] && printf '%s\n' "${f##*/}"; done; } | sort -u >"$listings/$repo-src.tmp"
-	mv "$listings/$repo-src.tmp" "$listings/$repo-src"
-done
+# packages by file name (signed and, with a release, uploaded). Written
+# only once the release has what they name: a claim sends the worker to
+# the release for the source package and the chroot to its database, and
+# an upload takes minutes on a small master, so a listing written at the
+# index would send builds to files not there yet (404, a wasted attempt).
+write_listings() {
+	local dbfile d arch repo srcdir f
+	for dbfile in "$dbs"/*/os/*/*.db.tar.gz; do
+		d=${dbfile%/*}; arch=${d##*/}; repo=${d#"$dbs"/}; repo=${repo%%/*}
+		bsdtar -tf "$dbfile" >/dev/null 2>&1 || { archci_log "not listing $repo/os/$arch: its database is unreadable"; continue; }
+		# an empty database (a fresh farm) has no desc to extract, so bsdtar exits 1: still an empty listing
+		{ bsdtar -xOf "$dbfile" '*/desc' 2>/dev/null || true; } | awk '$0 == "%NAME%" { getline; n = $0 } $0 == "%VERSION%" { getline; print n, $0 }' >"$listings/$repo-$arch.tmp" &&
+			mv "$listings/$repo-$arch.tmp" "$listings/$repo-$arch"
+	done
+	for srcdir in "$pool"/*/os/src/; do
+		repo=${srcdir#"$pool"/}; repo=${repo%%/*}
+		{ cat "$listings/$repo-src" 2>/dev/null || true; for f in "$srcdir"*.src.tar.*; do [[ $f == *.sig || $f == *.buildsig || $f == *.rejected ]] && continue; [[ -f $f.sig ]] && printf '%s\n' "${f##*/}"; done; } | sort -u >"$listings/$repo-src.tmp"
+		mv "$listings/$repo-src.tmp" "$listings/$repo-src"
+	done
+}
 
 # --- the logs of the jobs finished since the last pass, as SSE files ---------
 exported=$("$ARCHCI_MASTER_DIR/archci-web" export "$logs" 2>/dev/null || echo 0)
@@ -198,6 +205,7 @@ exported=$("$ARCHCI_MASTER_DIR/archci-web" export "$logs" 2>/dev/null || echo 0)
 
 # --- 3. publish -----------------------------------------------------------------
 if [[ -z $ARCHCI_R2_RELEASE ]]; then
+	write_listings   # nothing to wait for: what is indexed is what there is
 	(( indexed || accepted || exported )) && archci_log "ARCHCI_R2_RELEASE is empty: indexed, not published"
 	exit 0
 fi
@@ -258,6 +266,8 @@ for key in "${!touched[@]}"; do
 	comm -23 <(sort <<<"${before[$key]}") <(db_files "$dbs/$key/$db.db.tar.gz" | sort) |
 		while IFS= read -r f; do [[ -n $f ]] && printf '%s\n%s.sig\n' "$key/$f" "$key/$f"; done >>"$gone" || true
 done
+# the packages and the databases are up: now the claims may name them
+write_listings
 # a source package supersedes the older versions of its package: among the
 # release's files that start with the pkgbase, those whose rest is a version
 # vercmp puts before this one (another package whose name starts the same
