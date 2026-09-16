@@ -767,7 +767,9 @@ module Archci
   # <version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst
   # (start: the attempt's first entry, seconds since the epoch; invocation:
   # the build unit's _SYSTEMD_INVOCATION_ID, fresh per unit start), zstd at
-  # level 19; archci-publish moves that tree to R2 as <repo>/log/. Each job
+  # its default level (3: a log is small, and the master is; -19 took ten
+  # times the CPU for a sixth off); archci-publish moves that tree to R2
+  # as <repo>/log/. Each job
   # once (exported=<file> in its file, under the queue lock), as soon as its
   # log is whole in the journal (log_complete?); a log that never completes
   # (a build killed hard) is exported as it stands settle_after seconds
@@ -797,7 +799,7 @@ module Archci
           entries.each { |e| f.write(sse_entry(e)) }
           f.write(sse_end_event(j, entries, err))
         end
-        system('zstd', '-q', '-19', '--rm', '-o', "#{path}.zst", "#{path}.tmp", exception: true)
+        system('zstd', '-q', '--rm', '-o', "#{path}.zst", "#{path}.tmp", exception: true)
         mark_exported(j, "#{name}.zst")
         n += 1
       rescue ArgumentError
