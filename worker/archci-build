@@ -426,9 +426,9 @@ build_args=(--syncdeps --noconfirm --skipinteg "${extra_makepkg_args[@]}")
 build_once() {
 	local rcf idle; rcf=$(mktemp); idle=$(( ARCHCI_BUILD_MAX_IDLE_MINUTES * 60 ))
 	{
-		archci_record "==> Installing the pacman dependencies in the archci-online slice (with network) at $(archci_now)" "${fields[@]}" ARCHCI_EVENT=slice ARCHCI_SLICE=online
+		archci_record "==> Installing the pacman dependencies in the archci-online slice (with network)" "${fields[@]}" ARCHCI_EVENT=slice ARCHCI_SLICE=online
 		if archci_watchdog "$idle" -- "${container[@]}" --slice=archci-online /chrootbuild "${deps_args[@]}"; then
-			archci_record "==> Building in the $build_slice slice ($build_net) at $(archci_now)" "${fields[@]}" ARCHCI_EVENT=slice "ARCHCI_SLICE=${build_slice#archci-}" "ARCHCI_NETWORK=${job_network:-}"
+			archci_record "==> Building in the $build_slice slice ($build_net)" "${fields[@]}" ARCHCI_EVENT=slice "ARCHCI_SLICE=${build_slice#archci-}" "ARCHCI_NETWORK=${job_network:-}"
 			if archci_watchdog "$idle" -- "${container[@]}" --slice="$build_slice" /chrootbuild "${build_args[@]}"; then echo 0 >"$rcf"; else echo $? >"$rcf"; fi
 		else
 			echo $? >"$rcf"

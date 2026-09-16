@@ -56,7 +56,7 @@ COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  -        arch     acl 1:2.3
 
 echo "--- a job's log is its entries in the workers' journal: a running job's so far, with a cursor to poll from"
 # what the build's unit logged on the worker's host (worker-1: host "worker"), streamed to the master
-journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> archci-build 0.5.0 $id on worker at 2026-09-15T10:00:00Z" "    repo=omarchy arch=x86_64" "==> Installing the pacman dependencies in the archci-online slice (with network) at 2026-09-15T10:00:05Z" "==> Building in the archci-offline slice (no network) at 2026-09-15T10:00:20Z" "building"
+journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> archci-build 0.5.0 $id on worker at 2026-09-15T10:00:00Z" "    repo=omarchy arch=x86_64" "==> Installing the pacman dependencies in the archci-online slice (with network)" "==> Building in the archci-offline slice (no network)" "building"
 log=$("$master/archci-web" log "$id")
 [[ $(jq -r '.lines | length' <<<"$log") == 5 && $(jq -r '.lines[0]' <<<"$log") == "==> archci-build 0.5.0 $id on worker at"* && $(jq -r '.state' <<<"$log") == running ]] || fail "archci web log of a running job is its journal so far: $log"
 cursor=$(jq -r '.cursor' <<<"$log")
@@ -128,7 +128,12 @@ grep -q '"priority":"4","message":"... 4 line(s) not shown: the log has more tha
 ! grep -q '^id: *$' <<<"$capped" || fail "the marker has no id line at all (an empty one resets Last-Event-ID)"
 [[ $(grep -o '"message":"extra line [0-9]"' <<<"$capped" | tr '\n' ' ') == '"message":"extra line 3" "message":"extra line 4" ' ]] || fail "the tail is the last quarter: $(grep -o '"message":"extra line [0-9]"' <<<"$capped")"
 onejob=$("$master/archci-web" job "$id")
-[[ $(jq -r '.started' <<<"$onejob") == 2026-09-15T10:00:00Z && $(jq -r '.stopped' <<<"$onejob") == 2026-09-15T10:01:43Z && $(jq -r '.online_at' <<<"$onejob") == 2026-09-15T10:00:05Z && $(jq -r '.build_at' <<<"$onejob") == 2026-09-15T10:00:20Z ]] || fail "the build's span and phases come from its journal entries: $onejob"
+ents=$("$master/archci-web" entries "$id")
+online_t=$(jq -r '.entries[] | select(.MESSAGE | startswith("==> Installing")) | .__REALTIME_TIMESTAMP | tonumber / 1000000 | floor | todate' <<<"$ents")
+build_t=$(jq -r '.entries[] | select(.MESSAGE | startswith("==> Building in")) | .__REALTIME_TIMESTAMP | tonumber / 1000000 | floor | todate' <<<"$ents")
+[[ $(jq -r '.started' <<<"$onejob") == 2026-09-15T10:00:00Z && $(jq -r '.stopped' <<<"$onejob") == 2026-09-15T10:01:43Z && $(jq -r '.online_at' <<<"$onejob") == "$online_t" && $(jq -r '.build_at' <<<"$onejob") == "$build_t" ]] || fail "the build's span comes from its header and end lines, its phases from the marker records' journal times: $onejob ($online_t, $build_t)"
+# an older worker stamped the marker lines: that stamp still wins
+[[ $(ARCHCI_CONF=/dev/null ruby -e 'require "'"$master"'/../lib/archci"; puts Archci.entry_stamp({ "MESSAGE" => "==> Building in the archci-offline slice (no network) at 2026-09-15T10:00:20Z", "__REALTIME_TIMESTAMP" => "1789577708098229" })') == 2026-09-15T10:00:20Z ]] || fail "an older log's stamp in the line is the phase time"
 [[ $(jq -r '.log' <<<"$onejob") == "journalctl -D $ARCHCI_REMOTE_JOURNAL --no-pager -a -q -o json --since=@"*" --until=@"*" --output-fields=MESSAGE,PRIORITY,_PID,_SOURCE_REALTIME_TIMESTAMP,_SYSTEMD_INVOCATION_ID,ARCHCI_"*" _SYSTEMD_UNIT=$(build_unit acl 1:2.3.2-1 x86_64 1) _HOSTNAME=worker" ]] || fail "a job names its log as the journalctl the master runs for its entries: $(jq -r '.log' <<<"$onejob")"
 [[ ! -e $inc ]] || fail "incoming not cleaned"
 [[ $("$next") == "5 omarchy x86_64 libsigc++ "* ]] || fail "built package must not be outstanding"

@@ -881,23 +881,32 @@ module Archci
   end
 
   # a package build's online (dependency install, with the network) and offline
-  # (the build itself) phase boundaries, for splitting its time: archci-build
-  # stamps "==> Installing the dependencies ... at <ts>" (online start) and
-  # "==> Building in the <slice> slice at <ts>" (build start, = online end).
-  # {} for a src job, a running job, or an older log without the stamps.
-  # lines as for build_span.
-  def self.build_phases(j, lines = nil)
+  # (the build itself) phase boundaries, for splitting its time: the time
+  # of archci-build's "==> Installing the pacman dependencies ..." record
+  # (online start) and of its "==> Building in the <slice> slice ..." one
+  # (build start, = online end), from the journal entry, or from the stamp
+  # an older archci-build (before 0.6.5) wrote into the line. {} for a src
+  # job, a running job, or a log without the records. entries: the job's
+  # log (read_entries), so a caller that has it does not read it again.
+  def self.build_phases(j, entries = nil)
     return {} unless j['arch'] != 'src' && %w[done failed].include?(j['state'])
 
-    lines ||= read_log(j).first
+    entries ||= read_entries(j).first
     online = build = nil
-    lines.first(500).each do |l|
+    entries.first(500).each do |e|
       break if online && build
 
-      online ||= l[BUILD_TS, 1] if l.start_with?('==> Installing the pacman dependencies')
-      build  ||= l[BUILD_TS, 1] if l.start_with?('==> Building in the archci-')
+      m = e['MESSAGE']
+      online ||= entry_stamp(e) if m.start_with?('==> Installing the pacman dependencies')
+      build  ||= entry_stamp(e) if m.start_with?('==> Building in the archci-')
     end
     { 'online_at' => online, 'build_at' => build }.compact
+  end
+
+  # an entry's time as an ISO timestamp to the second: the stamp in its line
+  # when there is one (an older worker's), else the journal's
+  def self.entry_stamp(e)
+    e['MESSAGE'][BUILD_TS, 1] || Time.at(e['__REALTIME_TIMESTAMP'].to_i / 1_000_000).utc.iso8601
   end
 
   # the job's story in one line: state, where, when, what it had
