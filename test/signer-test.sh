@@ -137,6 +137,20 @@ echo "other" | zstd -q >"$tmp/s"; hw=$pool/omarchy/os/src/hello-world-2-1-$(sha2
 bsdtar -xOf "$db" '*/desc' | grep -c '\.pkg\.tar\.zst$' | grep -qx 2 || fail "the x86_64 db names hello 1-2 and the keyring, nothing else"
 { grep -qx "hello 1-2" "$ARCHCI_HOME/released/omarchy-x86_64" && ! grep -qx "hello 1-1" "$ARCHCI_HOME/released/omarchy-x86_64"; } || fail "the listing follows the database"
 
+echo "--- two versions signed in one pass: repo-add -R keeps the newer, the older leaves the pool whole, never published"
+mkdir -p "$pool/omarchy/os/x86_64"
+o1=$(mkpkg "$pool/omarchy/os/x86_64" twice 1-1); bsig "$gpgb" archci-builder "$o1"; touch -d '-1 minute' "$o1"
+o2=$(mkpkg "$pool/omarchy/os/x86_64" twice 1-2); bsig "$gpgb" archci-builder "$o2"
+"$sign" >/dev/null 2>&1; "$publish" >/dev/null 2>&1
+[[ ! -e $o1 && ! -e $o1.sig && ! -e $o1.buildsig && ! -e $rel/${o1##*/} && -f $rel/${o2##*/}.sig ]] || fail "only 1-2 is published; 1-1, its signatures included, is gone from the pool and never reached the release: $(ls "$pool/omarchy/os/x86_64" "$rel")"
+echo "--- an older version arriving after a newer was published never downgrades the release"
+mkdir -p "$pool/omarchy/os/x86_64"
+o0=$(mkpkg "$pool/omarchy/os/x86_64" twice 1-0); bsig "$gpgb" archci-builder "$o0"
+"$sign" >/dev/null 2>&1; out=$("$publish" 2>&1)
+[[ $out == *"${o0##*/}: older than the database's version"* ]] || fail "the stale build is refused: $out"
+{ bsdtar -xOf "$db" '*/desc' | grep -qxF "${o2##*/}" && ! bsdtar -xOf "$db" '*/desc' | grep -qxF "${o0##*/}"; } || fail "the database keeps 1-2"
+[[ ! -e $o0 && ! -e $o0.sig && ! -e $o0.buildsig && ! -e $rel/${o0##*/} && -f $rel/${o2##*/} ]] || fail "1-0 leaves the pool and never reaches the release: $(ls "$pool/omarchy/os/x86_64" "$rel")"
+
 echo "--- a pass takes ARCHCI_SIGN_BATCH files, the farm's own first, then the oldest"
 mkdir -p "$pool/omarchy/os/x86_64"
 for n in zzz-late archci-master aaa-early; do f=$(mkpkg "$pool/omarchy/os/x86_64" $n 1-1); bsig "$gpgb" archci-builder "$f"; declare "bn_${n//-/_}=${f##*/}"; done
@@ -149,7 +163,7 @@ out=$(ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
 out=$(ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
 [[ $out == *"signed 1, rejected 0"* ]] || fail "the next pass takes the rest: $out"
 "$publish" >/dev/null 2>&1
-bsdtar -xOf "$db" '*/desc' | grep -c '\.pkg\.tar\.zst$' | grep -qx 5 || fail "all three joined hello and the keyring in the db"
+bsdtar -xOf "$db" '*/desc' | grep -c '\.pkg\.tar\.zst$' | grep -qx 6 || fail "all three joined hello, the keyring and twice in the db"
 
 echo "--- sign-health: quiet when healthy, warns on a backlog, a locked key, an unreachable master"
 mkdir -p "$pool/omarchy/os/x86_64"

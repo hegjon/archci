@@ -18,7 +18,7 @@
 #      one check it can make, and it catches a wrong key and a corrupt
 #      transfer.
 #   2. index: every signed package not yet in its database is added with
-#      repo-add -R (one version of a name) to the master's persistent
+#      repo-add -R -p (one version of a name, never a downgrade) to the master's persistent
 #      databases under db/<repo>/os/<arch>/ (<repo> is also <repo>-debug).
 #      The released/<repo>-<arch> listing, "name version" per database entry
 #      (what a claim reads to know a dependency is out), is rewritten from
@@ -60,6 +60,12 @@ mkdir -p "$pool" "$sigs" "$dbs" "$listings" "$ARCHCI_HOME/lock"
 exec 9>"$ARCHCI_HOME/lock/publish.lock"
 flock -n 9 || { archci_log "another archci-publish is running"; exit 0; }
 rm -f "$flag"
+# a pass that fails (rclone down) keeps its trigger, so the next tick tries
+# again rather than waiting for the next signature or the reconcile
+work=''
+# shellcheck disable=SC2329  # the EXIT trap's
+finish() { local rc=$?; (( rc )) && touch "$flag"; [[ -n $work ]] && rm -rf "$work"; return 0; }
+trap finish EXIT
 
 # rel PATH -> the path relative to the pool (<repo>/os/<arch>/<file>)
 rel() { printf '%s\n' "${1#"$pool"/}"; }
@@ -130,10 +136,32 @@ for osdir in "$pool"/*/os/*/; do
 		add+=("$pkg")
 	done
 	(( ${#add[@]} )) || continue
-	repo-add -R -q "$dbfile" "${add[@]}" >/dev/null
+	# -R: one version of a name, the replaced file (and its .sig) deleted from
+	# the pool; -p: an older version than the database's is not added (a
+	# stale build arriving late would otherwise downgrade the release)
+	repo-add -R -p -q "$dbfile" "${add[@]}" >/dev/null
 	touched[$key]=$db
 	indexed=$(( indexed + ${#add[@]} ))
 	archci_log "indexed ${#add[@]} package(s) into [$db] $arch"
+done
+# a signed package its database does not name is one repo-add did not take:
+# older than what the database holds (-p), so never published: it leaves
+# the pool. And what repo-add -R deleted (the replaced file and its .sig)
+# leaves its .buildsig behind: the orphans go too.
+for osdir in "$pool"/*/os/*/; do
+	osdir=${osdir%/}; arch=${osdir##*/}
+	[[ $arch == src ]] && continue
+	db=${osdir#"$pool"/}; db=${db%%/*}; key=${osdir#"$pool"/}
+	indb=$(db_files "$dbs/$key/$db.db.tar.gz")
+	for pkg in "$osdir"/*.pkg.tar.zst; do
+		[[ -f $pkg.sig ]] || continue
+		grep -qxF "${pkg##*/}" <<<"$indb" && continue
+		archci_log "${pkg##*/}: older than the database's version; dropped from the pool, not published"
+		rm -f "$pkg" "$pkg.sig" "$pkg.buildsig"
+	done
+	for f in "$osdir"/*.sig "$osdir"/*.buildsig "$osdir"/*.rejected; do
+		[[ -e ${f%.*} ]] || rm -f "$f"
+	done
 done
 # the listings a claim reads: "name version" per database entry; the source
 # packages by file name (signed, so on their way out or out)
@@ -159,7 +187,7 @@ if [[ -z $ARCHCI_R2_RELEASE ]]; then
 fi
 command -v rclone >/dev/null || archci_die "rclone is not installed"
 export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
-work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+work=$(mktemp -d)
 upload=$work/upload.list copies=$work/copies.list gone=$work/gone.list
 : >"$upload"; : >"$copies"; : >"$gone"
 declare -A published=()   # pool files this pass publishes (with their arch copies), to leave the pool

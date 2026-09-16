@@ -68,13 +68,13 @@ ent=$("$master/archci-web" entries "$id")
 [[ $(jq -r '.entries[2].phase' <<<"$ent") == online && $(jq -r '.entries[3].phase' <<<"$ent") == offline && $(jq -r '.entries[4] | has("phase")' <<<"$ent") == false ]] || fail "entries carry the slice marker's phase: $ent"
 [[ $(jq -r '.cursor' <<<"$ent") == "$cursor" && $(jq -r '.entries[-1].__CURSOR' <<<"$ent") == "$cursor" ]] || fail "the entries' cursor is the last entry's, the same as log's: $(jq -r .cursor <<<"$ent") vs $cursor"
 [[ $(jq -c '[.entries, .cursor]' <<<"$("$master/archci-web" entries "$id" "$cursor")") == "[[],\"$cursor\"]" ]] || fail "entries after the cursor: nothing new yet, the cursor kept: $("$master/archci-web" entries "$id" "$cursor")"
-journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> Starting build()..." "fields:ARCHCI_EVENT=finish|ARCHCI_RC=0|ARCHCI_JOB=$id||==> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst"
+journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "==> Starting build()..." "fields:ARCHCI_EVENT=finish|ARCHCI_RC=0|ARCHCI_JOB=$id||==> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst" "a stdout line the pipe held back, logged after the finish record"
 [[ $(jq -r '.entries[0].MESSAGE' <<<"$("$master/archci-web" entries "$id" "$cursor")") == "==> Starting build()..." && $(jq -r '.entries[0].phase' <<<"$("$master/archci-web" entries "$id" "$cursor")") == build ]] || fail "entries after the cursor: only the new ones, makepkg's step as the phase: $("$master/archci-web" entries "$id" "$cursor")"
 [[ $(jq -r '.entries[1].ARCHCI_EVENT + " " + .entries[1].ARCHCI_RC' <<<"$("$master/archci-web" entries "$id" "$cursor")") == "finish 0" ]] || fail "an archci record's fields come with the entry: $("$master/archci-web" entries "$id" "$cursor")"
 [[ $(jq -r '.lines[0]' <<<"$("$master/archci-web" log "$id" "$cursor")") == "==> Starting build()..." ]] || fail "after the cursor, only the new lines: $("$master/archci-web" log "$id" "$cursor")"
 journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 2)" "another attempt's line"   # not this attempt's
 journal_add worker9 "$(build_unit acl 1:2.3.2-1 x86_64 1)" "the same unit on another host"   # not this worker's
-[[ $(jq -r '.lines | length' <<<"$("$master/archci-web" log "$id")") == 7 ]] || fail "a job's log is its own unit's on its own host: $("$master/archci-web" log "$id")"
+[[ $(jq -r '.lines | length' <<<"$("$master/archci-web" log "$id")") == 8 ]] || fail "a job's log is its own unit's on its own host: $("$master/archci-web" log "$id")"
 
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
@@ -98,15 +98,15 @@ sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/
 [[ -e $ARCHCI_HOME/publish.needed ]] || fail "publish flag missing"
 [[ -z $(ls -A "$ARCHCI_HOME/logs") ]] || fail "the build log is the journal's, nothing is archived: $(find "$ARCHCI_HOME/logs")"
 grep -q '^claimed=20' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job keeps its claim time (it bounds its journal entries)"
-grep -q '^last===> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst$' "$ARCHCI_HOME/queue/done/$id.job" || fail "the report keeps the log's last line in the job file: $(cat "$ARCHCI_HOME/queue/done/$id.job")"
+grep -q '^last=a stdout line the pipe held back, logged after the finish record$' "$ARCHCI_HOME/queue/done/$id.job" || fail "the report keeps the log's last line in the job file: $(cat "$ARCHCI_HOME/queue/done/$id.job")"
 grep -q '^error=' "$ARCHCI_HOME/queue/done/$id.job" && fail "no error line in a clean log"
 log=$("$master/archci-web" log "$id")
-[[ $(jq -r '.lines | length' <<<"$log") == 7 && $(jq -r '.cursor' <<<"$log") == null && $(jq -r '.error_at' <<<"$log") == null ]] || fail "a done job's log is read whole from the journal, no cursor: $log"
-[[ $(jq -c '[(.entries | length), .cursor, .error_at, .state]' <<<"$("$master/archci-web" entries "$id")") == '[7,null,null,"done"]' ]] || fail "a done job's entries, whole, no cursor: $("$master/archci-web" entries "$id")"
+[[ $(jq -r '.lines | length' <<<"$log") == 8 && $(jq -r '.cursor' <<<"$log") == null && $(jq -r '.error_at' <<<"$log") == null ]] || fail "a done job's log is read whole from the journal, no cursor: $log"
+[[ $(jq -c '[(.entries | length), .cursor, .error_at, .state]' <<<"$("$master/archci-web" entries "$id")") == '[8,null,null,"done"]' ]] || fail "a done job's entries, whole, no cursor: $("$master/archci-web" entries "$id")"
 echo "--- the log as server-sent events, live (archci web sse) and exported for R2 (archci web export), one framing"
 sse=$("$master/archci-web" sse "$id")
 [[ $sse == "event: job"$'\n'"data: {"* ]] || fail "the stream opens with the job event: ${sse:0:200}"
-[[ $(grep -c '^id: s=' <<<"$sse") == 7 && $(grep -c '^data: {"time":"2026-' <<<"$sse") == 7 ]] || fail "one event per entry, its cursor as the id, its time in the data: $sse"
+[[ $(grep -c '^id: s=' <<<"$sse") == 8 && $(grep -c '^data: {"time":"2026-' <<<"$sse") == 8 ]] || fail "one event per entry, its cursor as the id, its time in the data: $sse"
 { grep -q '"phase":"build"' <<<"$sse" && grep -q '"event":"finish"' <<<"$sse"; } || fail "the entries carry the phase and archci's event: $sse"
 [[ $sse == *$'\n'"event: end"$'\n'"data: {\"state\":\"done\","*'"rc":0'* ]] || fail "a finished job's stream ends with the end event, its rc from the finish record: ${sse: -200}"
 grep -q '"invocation":"feedfacefeedfacefeedfacefeedface"' <<<"$sse" || fail "the job event names the unit's invocation: ${sse:0:400}"

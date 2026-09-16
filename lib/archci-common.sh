@@ -204,7 +204,7 @@ archci_log() {
 		fi
 	fi
 }
-archci_die() { archci_log "$@"; exit 1; }
+archci_die() { archci_log "$@"; archci_journal_close 2>/dev/null || true; exit 1; }
 archci_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # Job ids look like "<prio>-<epoch>-<repo>,<pkgbase>,<version>,<arch>"; they

@@ -756,9 +756,11 @@ module Archci
 
   # a finished job's log: is it whole in the journal? By the finish record
   # (ARCHCI_EVENT=finish), or an older worker's last line
+  # (the record goes through the journal's native socket and can be logged
+  # a line or two before a stdout line still in the pipe, so it need not be
+  # the last entry)
   def self.log_complete?(entries)
-    last = entries.last or return false
-    last['ARCHCI_EVENT'] == 'finish' || last['MESSAGE'].start_with?(*BUILD_END)
+    entries.last(20).any? { |e| e['ARCHCI_EVENT'] == 'finish' || e['MESSAGE'].start_with?(*BUILD_END) }
   end
 
   # Export the logs of finished jobs as SSE files under DIR/<repo>/<pkgbase>/
