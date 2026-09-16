@@ -175,7 +175,7 @@ grep -q '^error===> ERROR: Failure while downloading https://example/linux.tar.x
 [[ $(jq -c '[.error_at, (.entries | length), .entries[1].MESSAGE]' <<<"$("$master/archci-web" entries "$sid")") == '[1,3,"==> ERROR: Failure while downloading https://example/linux.tar.xz"]' ]] || fail "a failed job's entries are its own, from its header, and point at the first error: $("$master/archci-web" entries "$sid")"
 [[ -f $ARCHCI_HOME/queue/failed/$sid.job ]] || fail "a failed fetch is a failed job"
 [[ -z $("$next" src) ]] || fail "a failed src job is not offered again before its retry: $("$next" src)"
-"$top" | grep "^sources: 2 packaged  1 to fetch  1 failed   (last fetch " >/dev/null || fail "top must show the sources' state: $("$top" | grep ^sources)"
+"$top" | grep "^sources: 2 packaged  1 to fetch  2 failed   (last fetch " >/dev/null || fail "top must show the sources' state (the retried fetch stays a failed one; grouping is the UI's): $("$top" | grep ^sources)"
 "$top" | grep "^built: x86_64 1/3  any 0/0  src 2/3$" >/dev/null || fail "top must count the source packages beside the arches: $("$top" | grep ^built)"
 "$failed" | grep "^linux 7.2.3.arch1-2 .* src  *arch  *sourcer  *1/2 retry .*: ==> ERROR: Failure while downloading" >/dev/null || fail "archci failed must list the fetch with its error: $("$failed" | grep ^linux)"
 # a build waits for its source package while builds must not fetch
@@ -224,7 +224,10 @@ mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch"}'; commit_pkgs "netpkg offline";
 sleep 1   # the new id's second differs from the failed one's
 rid=$("$job" retry "$nid" 2>/dev/null)
 [[ $rid == 0-*-omarchy,netpkg,1-1,x86_64 && $rid != "$nid" ]] || fail "retry prints the new job's id: $rid"
-[[ -f $ARCHCI_HOME/queue/pending/$rid.job && ! -e $ARCHCI_HOME/queue/failed/$nid.job ]] || fail "the new job is pending, the failed one gone: $(ls "$ARCHCI_HOME"/queue/*/ | grep netpkg)"
+[[ -f $ARCHCI_HOME/queue/pending/$rid.job && -f $ARCHCI_HOME/queue/failed/$nid.job ]] || fail "the new job is pending, the failed one stays as history: $(ls "$ARCHCI_HOME"/queue/*/ | grep netpkg)"
+{ grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$nid.job" && grep -q "^retried_as=$rid$" "$ARCHCI_HOME/queue/failed/$nid.job"; } || fail "the failed job is given up and names its retry: $(cat "$ARCHCI_HOME/queue/failed/$nid.job")"
+! "$job" retry "$nid" >/dev/null 2>&1 || fail "a job already retried is not retried again"
+"$failed" | grep -q "^netpkg 1-1 .* 1/2 retried " || fail "archci failed says it was retried: $("$failed" | grep netpkg)"
 ! grep -q '^network=' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "the new job has the flag the package has now, none: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
 grep -q '^attempt=0$' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "a new job starts at attempt 0: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
 ! "$job" retry "$rid" >/dev/null 2>&1 || fail "only a failed job is retried (a pending one is not)"
@@ -260,7 +263,7 @@ xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.zst'); [[ $(zstd
 lsid=$(find "$ARCHCI_HOME/queue/failed" -name '*,linux,*,src.job' -printf '%f\n' | head -1); lsid=${lsid%.job}
 grep -q '^exported=' "$ARCHCI_HOME/queue/failed/$lsid.job" || fail "the exported src job carries the mark: $(cat "$ARCHCI_HOME/queue/failed/$lsid.job")"
 lrid=$("$job" retry "$lsid" 2>/dev/null)
-[[ -f $ARCHCI_HOME/queue/pending/$lrid.job && ! -e $ARCHCI_HOME/queue/failed/$lsid.job ]] || fail "a new pending job, the failed one gone: $lrid"
+[[ -f $ARCHCI_HOME/queue/pending/$lrid.job && -f $ARCHCI_HOME/queue/failed/$lsid.job ]] || fail "a new pending job, the failed one kept: $lrid"
 ! grep -q '^exported=' "$ARCHCI_HOME/queue/pending/$lrid.job" || fail "the new job carries no export mark: $(cat "$ARCHCI_HOME/queue/pending/$lrid.job")"
 "$failed" | grep "^libsigc++ 2.12.2-1 .* x86_64  *arch  *worker-2  *1/2 retry  *20.*: ==> ERROR: A failure occurred in build()" >/dev/null || fail "archci failed must list the failure with the first error line of its log: $("$failed")"
 # a job file without the report's summary (from before it kept one): the listing reads the journal
@@ -327,7 +330,7 @@ commit_pkgs bump
 "$scan"
 "$housekeeping"
 ls "$ARCHCI_HOME/queue/pending" | grep 'linux,7.2.3.arch1-2' >/dev/null && fail "superseded pending job not dropped"
-[[ -z $(ls -A "$ARCHCI_HOME/queue/failed") ]] || fail "superseded final failure not dropped"
+for f in "$ARCHCI_HOME"/queue/failed/*.job; do [[ -e $f ]] || continue; grep -q '^retried_as=' "$f" || fail "superseded final failure not dropped (only a job retried as a new one stays, as history): $(ls "$ARCHCI_HOME/queue/failed")"; done
 # a package removed from the repository takes its queued and failed jobs with it
 mkpkgbuild gone 1-1; commit_pkgs gone; "$scan" >/dev/null 2>&1
 "$job" enqueue gone 0 >/dev/null 2>&1
@@ -389,9 +392,9 @@ for p in acl:1:2.3.2-1 libsigc++:3.6.0-1; do
 	failed_ids+=("$fid")
 done
 "$job" retry --all
-[[ -z $(ls -A "$ARCHCI_HOME/queue/failed") ]] || fail "retry --all must empty failed/"
 for f in "${failed_ids[@]}"; do
 	[[ ! -e $ARCHCI_HOME/queue/pending/$f ]] || fail "$f must not come back under its old id"
+	grep -q '^retried_as=' "$ARCHCI_HOME/queue/failed/$f" || fail "$f stays in failed/, marked retried: $(cat "$ARCHCI_HOME/queue/failed/$f" 2>&1 | tail -3)"
 	p=${f#*-omarchy,}; p=${p%%,*}
 	nf=$(find "$ARCHCI_HOME/queue/pending" -name "5-*-omarchy,$p,*,x86_64.job" -printf '%f\n' | head -1)
 	[[ -n $nf ]] || fail "no new job for $p: $(ls "$ARCHCI_HOME/queue/pending")"

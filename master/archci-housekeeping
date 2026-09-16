@@ -51,6 +51,7 @@ done
 for file in "$Q_FAILED"/*.job; do
 	archci_read_job "$file" || continue
 	(( job_attempt < ARCHCI_MAX_ATTEMPTS )) || continue
+	grep -q '^retried_as=' "$file" && continue   # retried as a new job: history, not this job's to retry
 	age=$(( now - $(stat -c %Y "$file") ))
 	(( age >= ARCHCI_RETRY_MINUTES * 60 )) || continue
 	# a build that failed for want of a library this repository is still to

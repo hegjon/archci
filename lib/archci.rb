@@ -496,7 +496,7 @@ module Archci
     failed = jobs('failed').sort_by { |j| -j['mtime'].to_i }.map do |j|
       j = j.merge('state' => 'failed')
       job[j].merge('id' => j['id'], 'final' => j['final'] == '1', 'finished' => j['finished'], 'log' => log_where(j),
-                   **j.slice('state', 'claimed', 'created', 'error', 'last'))
+                   **j.slice('state', 'claimed', 'created', 'error', 'last', 'retried_as'))
     end
     signer = signer_status(now)
     done_paths = Dir.glob(File.join(queue('done'), '*.job'))
@@ -845,7 +845,8 @@ module Archci
           entries.each { |e| f.write(sse_entry(e)) }
           f.write(sse_end_event(j, entries, err))
         end
-        system('zstd', '-q', '--rm', '-o', "#{path}.zst", "#{path}.tmp", exception: true)
+        # (-f: a file of that name is the same attempt's log, from a job that was retried into a new one)
+        system('zstd', '-q', '-f', '--rm', '-o', "#{path}.zst", "#{path}.tmp", exception: true)
         mark_exported(j, "#{name}.zst")
         n += 1
       rescue ArgumentError
@@ -887,7 +888,7 @@ module Archci
           "pending since #{j['created']}, attempt #{j['attempt'] + 1} of #{max} next#{held ? ", held: #{held}" : ''}"
         when 'running' then "running on #{j['worker']} since #{j['claimed']}, attempt #{j['attempt']} of #{max}#{j['phase'] ? ", in #{j['phase']}" : ''}"
         when 'done' then "done #{j['finished']} on #{j['worker']}, attempt #{j['attempt']}"
-        when 'failed' then "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{max}#{j['final'] ? ': gave up' : ''}"
+        when 'failed' then "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{max}#{j['retried_as'] ? ", retried as #{j['retried_as']}" : (j['final'] ? ': gave up' : '')}"
         end
     had = []   # the source package is a fact of its own on the job page, not the story's
     had << "network #{j['network']}" if j['network']

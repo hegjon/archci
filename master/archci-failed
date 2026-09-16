@@ -23,7 +23,7 @@ unless $stdout.tty? && $stdin.tty?
   failed_jobs.each do |j|
     err, = Archci.log_summary(j)
     puts format('%-34s %-7s %-8s %-17s %d/%d %-7s %s: %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], (j['origin'] || '-')[0, 8],
-                j['worker'].to_s[0, 17], j['attempt'], MAX_ATTEMPTS, j['final'] ? 'gave up' : 'retry', j['finished'], err ? err.strip[0, 160] : '?')
+                j['worker'].to_s[0, 17], j['attempt'], MAX_ATTEMPTS, j['retried_as'] ? 'retried' : (j['final'] ? 'gave up' : 'retry'), j['finished'], err ? err.strip[0, 160] : '?')
   end
   exit
 end
@@ -55,6 +55,7 @@ end
 # the story of the selected job: what happened, what comes next
 story = lambda do |j|
   s = "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{MAX_ATTEMPTS}"
+  return "#{s}, retried as #{j['retried_as']} (this one is history)" if j['retried_as']
   return "#{s}: gave up" if j['final']
 
   due = begin
@@ -79,7 +80,7 @@ frame = lambda do
   list_top = selected - list_rows + 1 if selected >= list_top + list_rows
   jobs[list_top, list_rows].to_a.each_with_index do |j, i|
     line = format('%-34s %-7s %-8s %-17s %5s %-7s %s', "#{j['pkgbase']} #{j['version']}"[0, 34], j['arch'], (j['origin'] || '-')[0, 8],
-                  j['worker'].to_s[0, 17], "#{j['attempt']}/#{MAX_ATTEMPTS}", j['final'] ? 'gave up' : 'retry', j['finished'])[0, cols]
+                  j['worker'].to_s[0, 17], "#{j['attempt']}/#{MAX_ATTEMPTS}", j['retried_as'] ? 'retried' : (j['final'] ? 'gave up' : 'retry'), j['finished'])[0, cols]
     out << (list_top + i == selected ? reverse(line.ljust(cols)) : line)
   end
   out << '(nothing failed)' if n.zero?

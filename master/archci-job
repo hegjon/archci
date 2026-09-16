@@ -294,26 +294,34 @@ cmd_requeue() {
 # retry_file FILE (lock held): a retry is a new job, unrelated to the failed
 # one: a fresh id (so every build of an id is one of its own attempts, and
 # the id's logs on the release are its own), the package as its PKGBUILD
-# repository has it now (version, commit, network flag), the failed job's
-# file gone (its logs stay on the release under its id). Prints the new id;
-# a package the repository no longer has gets no job (the file goes too).
+# repository has it now (version, commit, network flag). The failed job
+# stays in failed/ as history (the overview shows it), final and marked
+# retried_as=<new id>, so it is neither retried again by housekeeping nor
+# by retry --all. Prints the new id; a package the repository no longer
+# has gets no job (the failed one stays, unmarked).
 retry_file() {
-	local file=$1 id pkgbase arch repo prio line name version commit parch profile build old new
+	local file=$1 id pkgbase arch repo prio line name version commit parch profile build old new tmp
 	id=$(sed -n 's/^id=//p' "$file"); pkgbase=$(sed -n 's/^pkgbase=//p' "$file")
 	arch=$(sed -n 's/^arch=//p' "$file"); repo=$(sed -n 's/^repo=//p' "$file"); prio=${id%%-*}
-	line=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase" 2>/dev/null)
-	rm -f "$file"; rm -rf "${ARCHCI_HOME:?}/incoming/$id"
-	if [[ -z $line ]]; then
-		archci_log "$id: $pkgbase is no longer in the PKGBUILD repository; the failed job is dropped, no new one"
+	if grep -q '^retried_as=' "$file"; then
+		archci_log "$id was already retried as $(sed -n 's/^retried_as=//p' "$file")"
 		return 1
 	fi
+	line=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase" 2>/dev/null)
+	if [[ -z $line ]]; then
+		archci_log "$id: $pkgbase is no longer in the PKGBUILD repository; no new job"
+		return 1
+	fi
+	rm -rf "${ARCHCI_HOME:?}/incoming/$id"
 	read -r name version commit parch profile _ build _ <<<"$line"
 	[[ $name == "$pkgbase" && -n $commit ]] || archci_die "unexpected index line: $line"
 	for old in "$Q_PENDING"/*-"$repo,$pkgbase,"*",$arch.job"; do   # one pending job per package and arch, as enqueue keeps it
 		[[ -e $old ]] && rm -f "$old"
 	done
 	new=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile" "$build")
-	archci_log "$id retried as ${new%.job}: a new job at the package's current commit"
+	tmp=$file.tmp
+	{ grep -v '^final=' "$file"; printf 'final=1\nretried_as=%s\n' "${new%.job}"; } >"$tmp" && mv "$tmp" "$file"
+	archci_log "$id retried as ${new%.job}: a new job at the package's current commit; the failed one stays, given up"
 	printf '%s\n' "${new%.job}"
 }
 
