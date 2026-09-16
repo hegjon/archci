@@ -75,7 +75,7 @@ _install_cli() {
 
 package_archci-master() {
   pkgdesc='Headless build farm for Arch Linux packages (master: sync the PKGBUILD repository, hand out jobs, stage results)'
-  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone attr btrfs-progs)
+  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone attr btrfs-progs libarchive)
   # the release key is never on the master
   conflicts=(archci-signer)
   optdepends=('libmicrohttpd: receive worker journals with systemd-journal-remote')
@@ -147,7 +147,7 @@ package_archci-worker-qemu-riscv64() {
 
 package_archci-sourcer() {
   pkgdesc='Headless build farm for Arch Linux packages (sourcer: fetches upstream sources into source packages for the workers)'
-  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools git gnupg openssh rsync btrfs-progs)
+  depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools git gnupg openssh rsync btrfs-progs zstd libarchive)
   conflicts=(archci-worker)   # one role's /usr/bin/archci per host
 
   _install_role sourcer archci-sourcer.service

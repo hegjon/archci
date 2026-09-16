@@ -107,4 +107,9 @@ echo "--- archci_srcpkg_add_file: the SBOM joins the source package under its pk
 echo "$bom" >"$tmp/sbom.cdx.json"
 archci_srcpkg_add_file "$tmp/hello-1-1.src.tar.gz" hello "$tmp/sbom.cdx.json" sbom.cdx.json || fail "adding the SBOM failed"
 tar -tzf "$tmp/hello-1-1.src.tar.gz" | grep -qx "hello/sbom.cdx.json" || fail "the SBOM must sit at hello/sbom.cdx.json"
+# the same on a zstd source package (the sourcer's format now)
+tar -cf - -C "$tmp/pkg" hello | zstd -q >"$tmp/hello-1-1.src.tar.zst"
+archci_srcpkg_add_file "$tmp/hello-1-1.src.tar.zst" hello "$tmp/sbom.cdx.json" sbom.cdx.json || fail "adding the SBOM to a .src.tar.zst failed"
+zstd -t -q "$tmp/hello-1-1.src.tar.zst" || fail "the result must still be zstd"
+tar -tf "$tmp/hello-1-1.src.tar.zst" | grep -qx "hello/sbom.cdx.json" || fail "the SBOM must sit at hello/sbom.cdx.json in the zst package"
 echo "ALL OK"

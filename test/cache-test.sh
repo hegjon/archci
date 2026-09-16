@@ -9,7 +9,8 @@ export ARCHCI_CONF=/dev/null
 source "$here/../lib/archci-common.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 c=$tmp/cache; mkdir -p "$c"
-for f in foo-1.0-1-x86_64 foo-1.2-1-x86_64 foo-1.2-2-x86_64 foo-1:0.9-1-x86_64 lib32-foo-1.2-1-x86_64 bar-baz-2.0-3-any bar-baz-10.0-1-any; do
+h=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef   # the farm's names carry a sha256
+for f in foo-1.0-1-x86_64 foo-1.2-1-x86_64 foo-1.2-2-x86_64 foo-1:0.9-1-x86_64 lib32-foo-1.2-1-x86_64 bar-baz-2.0-3-any bar-baz-10.0-1-any qux-1.0-1-x86_64-$h qux-2.0-1-x86_64-$h; do
 	: >"$c/$f.pkg.tar.zst"; : >"$c/$f.pkg.tar.zst.sig"
 done
 : >"$c/not-a-package.txt"
@@ -22,7 +23,8 @@ find "$c" -maxdepth 1 -type f -printf "%f\\n" | sort | tr "\\n" " "; echo
 [[ -f $c/lib32-foo-1.2-1-x86_64.pkg.tar.zst ]] || fail "lib32-foo is another name"
 [[ -f $c/bar-baz-10.0-1-any.pkg.tar.zst && ! -e $c/bar-baz-2.0-3-any.pkg.tar.zst ]] || fail "10.0 is newer than 2.0 (version sort), names may hold dashes"
 [[ -f $c/not-a-package.txt ]] || fail "other files are left alone"
-[[ $(find "$c" -maxdepth 1 -name "*.pkg.tar.zst" | wc -l) == 3 ]] || fail "one version per name"
+[[ -f $c/qux-2.0-1-x86_64-$h.pkg.tar.zst && ! -e $c/qux-1.0-1-x86_64-$h.pkg.tar.zst ]] || fail "hashed names group by name and version too"
+[[ $(find "$c" -maxdepth 1 -name "*.pkg.tar.zst" | wc -l) == 4 ]] || fail "one version per name"
 
 echo "--- keep 0: nothing is deleted; a missing directory is fine"
 : >"$c/foo-0.1-1-x86_64.pkg.tar.zst"

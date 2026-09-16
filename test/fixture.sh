@@ -16,12 +16,21 @@ next=$master/archci-next
 housekeeping=$master/archci-housekeeping
 top=$master/archci-top
 fail() { echo "FAIL: $*" >&2; exit 1; }
-# mkpkg DIR NAME VERSION [ARCH] -- smallest thing repo-add accepts as a package
+# mkpkg DIR NAME VERSION [ARCH] -- smallest thing repo-add accepts as a package,
+# named as a worker names it: NAME-VERSION-ARCH-<sha256>.pkg.tar.zst; prints the path
 mkpkg() {
-	local d=$tmp/mkpkg arch=${4:-x86_64}; rm -rf "$d"; mkdir -p "$d"
+	local d=$tmp/mkpkg arch=${4:-x86_64} f=$1/$2-$3-${4:-x86_64}.pkg.tar.zst sha; rm -rf "$d"; mkdir -p "$d"
 	printf 'pkgname = %s\npkgbase = %s\npkgver = %s\npkgdesc = fake\nurl = x\nbuilddate = 1\npackager = t\nsize = 0\narch = %s\n' \
 		"$2" "${2%-debug}" "$3" "$arch" >"$d/.PKGINFO"
-	bsdtar -C "$d" -cf - .PKGINFO | zstd -q >"$1/$2-$3-$arch.pkg.tar.zst"
+	bsdtar -C "$d" -cf - .PKGINFO | zstd -q >"$f"
+	sha=$(sha256sum "$f"); mv "$f" "${f%.pkg.tar.zst}-${sha%% *}.pkg.tar.zst"
+	printf '%s\n' "${f%.pkg.tar.zst}-${sha%% *}.pkg.tar.zst"
+}
+# pkgfile DIR NAME VERSION [ARCH] -- the one NAME-VERSION-ARCH-<sha256>.pkg.tar.zst in DIR
+pkgfile() {
+	local -a m; shopt -s nullglob; m=("$1/$2-$3-${4:-x86_64}-"*.pkg.tar.zst); shopt -u nullglob
+	(( ${#m[@]} == 1 )) || { echo "pkgfile: ${#m[@]} matches for $2-$3-${4:-x86_64} in $1" >&2; return 1; }
+	printf '%s\n' "${m[0]}"
 }
 # mkpkgbuild NAME VERSION [ARCH] [JSON] -- VERSION is [epoch:]pkgver-pkgrel
 mkpkgbuild() {
@@ -68,9 +77,9 @@ claim_id() { sed -n 's/^id=//p' < <("$job" claim "$@"); }
 owner() { sed -n 's/^worker=//p' "$ARCHCI_HOME/queue/running/$1.job"; }   # the worker a running job is claimed by
 # upload_ok ID NAME VERSION [ARCH] -- a successful build's upload: log, package, buildsig
 upload_ok() {
-	local inc=$ARCHCI_HOME/incoming/$1
-	mkpkg "$inc" "$2" "$3" "${4:-x86_64}"
-	: >"$inc/$2-$3-${4:-x86_64}.pkg.tar.zst.buildsig"
+	local inc=$ARCHCI_HOME/incoming/$1 f
+	f=$(mkpkg "$inc" "$2" "$3" "${4:-x86_64}")
+	: >"$f.buildsig"
 }
 
 mkdir -p "$ARCHCI_HOME"/{queue/{pending,running,done,failed},built,logs,lock,incoming,repo}

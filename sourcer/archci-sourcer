@@ -128,6 +128,13 @@ prepare_root() {
 prepare_copy() {
 	archci_chroot_copy "$chroot/root" "$copy" || return 1
 	archci_chroot_prepare "$copy" "$uid" "$gid" "$ARCHCI_PACKAGER"
+	# source packages as .src.tar.zst at zstd's default level: devtools'
+	# makepkg.conf compresses with --ultra -20, right for packages and far too
+	# slow here, where the contents are mostly compressed already (upstream
+	# tarballs, vendored archives) and a worker unpacks the result for every
+	# attempt
+	sed -e '/^\(SRCEXT\|COMPRESSZST\)=/d' -i "$copy/etc/makepkg.conf"
+	printf '%s\n' "SRCEXT='.src.tar.zst'" 'COMPRESSZST=(zstd -c -T0 -)' >>"$copy/etc/makepkg.conf"
 	# the fetch, as the build user. "sources": the keys the PKGBUILD names
 	# (keys/pgp/, then the keyservers), .SRCINFO for the host, then every
 	# source. "vendor VAR=VALUE...": the dependencies makepkg -o's prepare()
@@ -236,12 +243,12 @@ fetch_one() {
 		fi
 	fi
 	(( rc == 124 )) && say "==> timed out after $ARCHCI_SOURCER_TIMEOUT_MINUTES min"
-	f=$(find "$w/out" -maxdepth 1 -name '*.src.tar.gz' -print -quit)
+	f=$(find "$w/out" -maxdepth 1 -name '*.src.tar.*' -print -quit)
 	# what makepkg's "-> Adding <name>..." packed, with each source's size and
 	# kind (a git checkout, or a plain file), read back from the source package
 	if (( rc == 0 )) && [[ -n $f ]]; then
 		say "==> packaged sources:"
-		tar -tzvf "$f" 2>/dev/null | awk -v pb="$job_pkgbase" '
+		tar -tvf "$f" 2>/dev/null | awk -v pb="$job_pkgbase" '
 			{ n=$NF; sub("^"pb"/","",n); top0=n; sub("/.*","",top0); if (n=="" || n=="PKGBUILD" || n==".SRCINFO" || top0=="keys") next
 			  i=index(n,"/"); top=(i? substr(n,1,i-1):n); sz[top]+=$3; if(i) dir[top]=1 }
 			END { for (t in sz) printf "      %8.1f MiB  %s%s\n", sz[t]/1048576, t, (dir[t]?" (git checkout)":"") }' \
@@ -284,6 +291,11 @@ fetch_one() {
 				say "==> capturing the ${capture[*]} dependencies failed"
 			fi
 		fi
+	fi
+	# its content-addressed name, <pkgbase>-<version>-<sha256>.src.tar.zst, once
+	# nothing more goes into it, before the signature
+	if (( rc == 0 )) && [[ -n $f ]]; then
+		if ! f=$(archci_hash_rename "$f"); then say "==> could not hash ${f##*/}"; rc=1; fi
 	fi
 	if (( rc == 0 )) && [[ -n $f ]]; then
 		mv "$f" "$out/${f##*/}"

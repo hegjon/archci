@@ -83,7 +83,7 @@ start_worker
 wait_for 20 'omarchy,acl,1:2.4.0-1,x86_64: success after' "$tmp/worker.log" || fail "the job did not finish: $(<"$tmp/worker.log")"
 wait_for 10 . "$ARCHCI_HOME/built/omarchy-x86_64/acl" || fail "the master did not record acl as built: $(<"$tmp/worker.log")"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.4.0-1 "* ]] || fail "built record wrong: $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl")"
-[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.4.0-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
+compgen -G "$ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.4.0-1-x86_64-*.pkg.tar.zst" >/dev/null || fail "package not pooled (under its hashed name): $(ls "$ARCHCI_HOME/repo/omarchy/os/x86_64")"
 # the master writes the built record, then moves the job to done/: give a slow host a moment
 for ((i = 0; i < 100; i++)); do (( $(find "$ARCHCI_HOME/queue/done" -type f | wc -l) == 1 )) && break; sleep 0.1; done
 (( $(find "$ARCHCI_HOME/queue/done" -type f | wc -l) == 1 )) || fail "job not in done/"

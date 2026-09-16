@@ -201,15 +201,16 @@ from_srcpkg=0
 if [[ -n ${job_sources:-} && -n $ARCHCI_RELEASE_URL ]]; then
 	srcurl=$ARCHCI_RELEASE_URL/$job_repo/os/src/$job_sources
 	say "Fetching source package %s" "$srcurl"
-	rm -rf "$srcdir" "$srcdir.src.tar.gz" "$srcdir.src.tar.gz.sig"
+	# (whatever its compression, .src.tar.zst or an older .src.tar.gz: bsdtar reads either)
+	rm -rf "$srcdir" "$srcdir.srcpkg" "$srcdir.srcpkg.sig"
 	mkdir -p "$srcdir"
-	if ! curl -fsSL --retry 3 --max-time 1800 -o "$srcdir.src.tar.gz" "$srcurl" ||
-		! curl -fsSL --retry 3 --max-time 120 -o "$srcdir.src.tar.gz.sig" "$srcurl.sig"; then
+	if ! curl -fsSL --retry 3 --max-time 1800 -o "$srcdir.srcpkg" "$srcurl" ||
+		! curl -fsSL --retry 3 --max-time 120 -o "$srcdir.srcpkg.sig" "$srcurl.sig"; then
 		archci_die "could not fetch $srcurl (and its .sig)"
 	fi
-	pacman-key --verify "$srcdir.src.tar.gz.sig" >/dev/null 2>&1 || archci_die "$job_sources: release signature does not verify"
-	bsdtar -xf "$srcdir.src.tar.gz" --strip-components=1 -C "$srcdir" || archci_die "$job_sources does not unpack"
-	rm -f "$srcdir.src.tar.gz" "$srcdir.src.tar.gz.sig"
+	pacman-key --verify "$srcdir.srcpkg.sig" >/dev/null 2>&1 || archci_die "$job_sources: release signature does not verify"
+	bsdtar -xf "$srcdir.srcpkg" --strip-components=1 -C "$srcdir" || archci_die "$job_sources does not unpack"
+	rm -f "$srcdir.srcpkg" "$srcdir.srcpkg.sig"
 	[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $job_sources"
 	# the build user's: git refuses a clone (a VCS source's snapshot) owned by
 	# anyone else
@@ -465,6 +466,19 @@ pkgs=("$outdir"/*.pkg.tar.zst)
 if (( rc == 0 && ${#pkgs[@]} == 0 )); then
 	echo "==> build reported success but produced no packages"
 	rc=1
+fi
+
+# Content-addressed names: <name>-<ver>-<rel>-<arch>-<sha256>.pkg.tar.zst, the
+# hash of the file's own bytes (archci_hash_rename), before the builder
+# signature, so it and the release signature follow the final name.
+if (( rc == 0 && ${#pkgs[@]} )); then
+	hashed=()
+	for pkg in "${pkgs[@]}"; do
+		if new=$(archci_hash_rename "$pkg"); then hashed+=("$new")
+		else echo "==> could not hash ${pkg##*/}"; rc=1; break
+		fi
+	done
+	pkgs=("${hashed[@]}")
 fi
 
 # Builder signature: internal provenance the signer verifies before it adds the

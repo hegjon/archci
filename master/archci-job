@@ -181,13 +181,20 @@ ingest() {
 	archci_log "$id: pooled $n package(s) for [$job_repo]"
 }
 
-# A src job's results: the source package (named by the job: pkgbase and
-# version, as makepkg names it) and its builder signature, pooled under
-# <repo>/os/src for archci-stage as a package is; the built record names the
-# file, which a build claim hands to the worker once it is released.
+# A src job's results: the source package (<pkgbase>-<version>-<sha256>
+# .src.tar.zst, as the sourcer names it; an older sourcer's
+# <pkgbase>-<version>.src.tar.gz gets its hash here) and its builder
+# signature, pooled under <repo>/os/src for archci-stage as a package is;
+# the built record names the file, which a build claim hands to the worker
+# once it is released.
 ingest_src() {
-	local id=$1 inc=$2 f=$job_pkgbase-$job_version.src.tar.gz dir=$ARCHCI_HOME/repo/$job_repo/os/src
-	[[ -f $inc/$f && -f $inc/$f.buildsig ]] || { archci_log "$id: no $f with its .buildsig in the upload"; return 1; }
+	local id=$1 inc=$2 f dir=$ARCHCI_HOME/repo/$job_repo/os/src
+	local -a cands
+	shopt -s nullglob; cands=("$inc/$job_pkgbase-$job_version"*.src.tar.zst "$inc/$job_pkgbase-$job_version"*.src.tar.gz); shopt -u nullglob
+	(( ${#cands[@]} == 1 )) || { archci_log "$id: expected one $job_pkgbase-$job_version*.src.tar.* in the upload, found ${#cands[@]}"; return 1; }
+	[[ -f ${cands[0]}.buildsig ]] || { archci_log "$id: no ${cands[0]##*/}.buildsig in the upload"; return 1; }
+	f=$(archci_hash_rename "${cands[0]}") || { archci_log "$id: could not hash ${cands[0]##*/}"; return 1; }
+	f=${f##*/}
 	(
 		exec 8>"$ARCHCI_HOME/lock/repo.lock"
 		flock 8

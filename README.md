@@ -70,15 +70,15 @@ flowchart LR
   end
   subgraph R2["Cloudflare R2"]
     STG[("staging/ : unsigned pkgs + .buildsig")]
-    REL[("release/ : signed pkgs + db, os/src: signed src.tar.gz")]
+    REL[("release/ : signed pkgs + db, os/src: signed src.tar.zst")]
   end
   PK -->|git pull| SCAN
   WL -->|ssh claim / report| JOB
   WL --> BUILD
-  SRCR -->|ssh claim src / rsync src.tar.gz + .buildsig / report| JOB
+  SRCR -->|ssh claim src / rsync src.tar.zst + .buildsig / report| JOB
   PK -->|git archive at commit| SRCR
   UP["upstream sites"] --> SRCR
-  REL -->|src.tar.gz named by the claim, .sig checked| BUILD
+  REL -->|src.tar.zst named by the claim, .sig checked| BUILD
   PK -.->|git archive, without a source package| BUILD
   BUILD -->|rsync pkg + .buildsig| JOB
   JOB --> STAGE --> STG --> SIGN --> REL
@@ -262,7 +262,13 @@ built/<repo>-<arch>/<name>  "version commit" of the last good build; for an any
                             (one directory per arch, plus <repo>-any); for
                             <repo>-src the source package's file name
 incoming/<jobid>/           worker uploads (btrfs subvolume, rrsync jail)
-repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume); os/src the source packages (each carries <pkgbase>/sbom.cdx.json for a Rust package)
+repo/<repo>/os/<arch>/      pooled packages awaiting staging (btrfs subvolume); os/src the source packages (each carries <pkgbase>/sbom.cdx.json for a Rust package).
+                            Every file carries the sha256 of its own bytes in its name, <name>-<ver>-<rel>-<arch>-<sha256>.pkg.tar.zst
+                            and <pkgbase>-<version>-<sha256>.src.tar.zst: the worker and the sourcer name their outputs so before
+                            signing them, the master gives an upload that lacks the hash one at ingest, and reads a package's arch
+                            from its .PKGINFO, never from its name. A retry or a second build of the same version never collides, and
+                            a published file never changes under its name; the db's SHA256SUM is the same hash. (pacman and repo-add
+                            take any file name; paccache, which parses names, mis-groups these.)
 journal/                    the workers' journals (systemd-journal-remote): every job's log is read from here
 logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N-<pkg>-{prepare,build,check,package}.log
                             makepkg's own logs, sent with a build's results; copied to ARCHCI_R2_LOGS if set
@@ -294,7 +300,7 @@ attempt=1
 created=2026-09-05T07:40:00Z
 worker=build-a-1
 claimed=2026-09-05T07:41:12Z
-sources=linux-7.2.3.arch1-2.src.tar.gz
+sources=linux-7.2.3.arch1-2-9f2c1e6d3b0a7c5d8e4f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d.src.tar.zst
 ```
 
 ## Install
@@ -479,7 +485,8 @@ chroot (devtools; `ARCHCI_CHROOTS` on btrfs for a snapshot per job): every
 source of every arch downloaded, checksummed and signature-checked, the
 cargo, go, npm, pip or maven packages its prepare() fetches captured
 under `vendor/`, and packed as
-`<pkgbase>-<version>.src.tar.gz`, which it hands in like a build's
+`<pkgbase>-<version>-<sha256>.src.tar.zst` (zstd at its default level; the
+contents are mostly compressed already), which it hands in like a build's
 packages; the signer releases it under `<repo>/os/src/`. Workers with
 `ARCHCI_RELEASE_URL` take source packages from there; without it they fetch
 upstream as before. `archci job enqueue PKGBASE 0 src` on the master

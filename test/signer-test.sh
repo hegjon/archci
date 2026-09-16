@@ -16,7 +16,7 @@ gpg --homedir "$gpgb" --batch --pinentry-mode loopback --passphrase '' --quick-g
 gpg --homedir "$gpgr" --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'archci-release <r@t>' ed25519 sign never 2>/dev/null
 gpg --homedir "$gpgx" --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'evil <e@t>' ed25519 sign never 2>/dev/null
 gpg --homedir "$gpgb" --armor --export b@t | gpg --homedir "$gpgk" --batch --import 2>/dev/null   # trust only the real builder
-mkpkg "$tmp" gate 1-1; pk=$tmp/gate-1-1-x86_64.pkg.tar.zst
+pk=$(mkpkg "$tmp" gate 1-1)
 gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$pk.buildsig" "$pk"
 gpg --homedir "$gpgk" --batch --verify "$pk.buildsig" "$pk" 2>/dev/null || fail "authorized builder signature must verify"
 gpg --homedir "$gpgx" --batch --detach-sign -u evil -o "$tmp/evil.buildsig" "$pk"
@@ -71,12 +71,10 @@ mkdir -p "$ARCHCI_SIGNER_HOME"
 
 # a good package (built + builder-signed by the trusted key) lands in the master pool
 mkdir -p "$ARCHCI_HOME/repo/omarchy/os/x86_64"
-mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" hello 1-1
-hp=$ARCHCI_HOME/repo/omarchy/os/x86_64/hello-1-1-x86_64.pkg.tar.zst
+hp=$(mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" hello 1-1); hn=${hp##*/}
 gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$hp.buildsig" "$hp"
 # an untrusted package (signed by the attacker key) also lands in the pool
-mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" evil 1-1
-ep=$ARCHCI_HOME/repo/omarchy/os/x86_64/evil-1-1-x86_64.pkg.tar.zst
+ep=$(mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" evil 1-1); en=${ep##*/}
 gpg --homedir "$gpgx" --batch --detach-sign -u evil -o "$ep.buildsig" "$ep"
 
 # a makepkg log a build sent (the build log itself is the journal's), in the
@@ -85,7 +83,7 @@ logdir=$ARCHCI_HOME/logs/omarchy/hello/1-1/x86_64
 mkdir -p "$logdir"; printf 'building hello\n==> done\n' >"$logdir/attempt-1-hello-1-1-x86_64-build.log"
 ARCHCI_R2_LOGS=$R2/logs "$master/archci-stage" --force
 [[ ! -e $hp && ! -e $ep ]] || fail "stage must move packages out of the pool"
-[[ -f $staging/omarchy/os/x86_64/hello-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not staged"
+[[ -f $staging/omarchy/os/x86_64/$hn.buildsig ]] || fail "buildsig not staged"
 [[ -f $R2/logs/omarchy/hello/1-1/x86_64/attempt-1-hello-1-1-x86_64-build.log ]] || fail "the makepkg log must be archived to R2"
 [[ -f $logdir/attempt-1-hello-1-1-x86_64-build.log ]] || fail "stage must keep the local log (archive is a copy)"
 # a log already in R2 is not re-uploaded (ignore-existing): change it locally,
@@ -99,56 +97,57 @@ ARCHCI_R2_LOGS=$R2/logs "$master/archci-stage" --force
 "$sign"
 # the trusted package is released and signed; the attacker package is rejected
 rel=$release/omarchy/os/x86_64
-[[ -f $rel/hello-1-1-x86_64.pkg.tar.zst && -f $rel/hello-1-1-x86_64.pkg.tar.zst.sig ]] || fail "trusted package not released+signed"
-[[ ! -e $release/omarchy/os/x86_64/evil-1-1-x86_64.pkg.tar.zst ]] || fail "attacker package must not be released"
+[[ -f $rel/$hn && -f $rel/$hn.sig ]] || fail "trusted package not released+signed"
+[[ ! -e $release/omarchy/os/x86_64/$en ]] || fail "attacker package must not be released"
 [[ -f $rel/omarchy.db.tar.gz && -f $rel/omarchy.db ]] || fail "release database (both names) missing"
-bsdtar -xOf "$rel/omarchy.db.tar.gz" '*/desc' | grep -xF 'hello-1-1-x86_64.pkg.tar.zst' >/dev/null || fail "hello not in release db"
-gpg --homedir "$relpub" --batch --verify "$rel/hello-1-1-x86_64.pkg.tar.zst.sig" "$rel/hello-1-1-x86_64.pkg.tar.zst" 2>/dev/null || fail "released signature must verify for clients"
+bsdtar -xOf "$rel/omarchy.db.tar.gz" '*/desc' | grep -xF "$hn" >/dev/null || fail "hello not in release db under its hashed name"
+bsdtar -xOf "$rel/omarchy.db.tar.gz" '*/desc' | grep -A1 -x '%SHA256SUM%' | grep -qxF "${hn: -76:64}" || fail "the db's SHA256SUM is the hash in the name"
+gpg --homedir "$relpub" --batch --verify "$rel/$hn.sig" "$rel/$hn" 2>/dev/null || fail "released signature must verify for clients"
 # staging is drained (both the released and the rejected package removed)
 [[ -z $(find "$staging" -name '*.pkg.tar.zst' 2>/dev/null) ]] || fail "staging must be drained"
 
 echo "--- a newer version prunes the one it replaces, from the database diff, the pass it lands"
-mkdir -p "$ARCHCI_HOME/repo/omarchy/os/x86_64"; mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" hello 1-2
-hp2=$ARCHCI_HOME/repo/omarchy/os/x86_64/hello-1-2-x86_64.pkg.tar.zst
+mkdir -p "$ARCHCI_HOME/repo/omarchy/os/x86_64"; hp2=$(mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" hello 1-2); hn2=${hp2##*/}
 gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$hp2.buildsig" "$hp2"
 "$master/archci-stage" --force
 out=$("$here/../signer/archci-sign" 2>&1)
 [[ $out == *"pruning 1 superseded package(s) from [omarchy]"* ]] || fail "the replaced version must be pruned by the diff: $out"
-[[ -f $rel/hello-1-2-x86_64.pkg.tar.zst.sig && ! -e $rel/hello-1-1-x86_64.pkg.tar.zst && ! -e $rel/hello-1-1-x86_64.pkg.tar.zst.sig ]] || fail "hello 1-1 and its signature must be gone, 1-2 released: $(ls "$rel")"
+[[ -f $rel/$hn2.sig && ! -e $rel/$hn && ! -e $rel/$hn.sig ]] || fail "hello 1-1 and its signature must be gone, 1-2 released: $(ls "$rel")"
 [[ -f $ARCHCI_SIGNER_HOME/prune-omarchy-os-x86_64.stamp ]] || fail "the listing prune leaves a stamp"
 
 echo "--- a source package (os/src): released with its .sig, no database, the older version pruned"
 mkdir -p "$ARCHCI_HOME/repo/omarchy/os/src"
-for v in 1-1 1-2; do
-	sp=$ARCHCI_HOME/repo/omarchy/os/src/hello-$v.src.tar.gz
-	echo "sources $v" >"$sp"
-	gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$sp.buildsig" "$sp"
-done
-echo "other" >"$ARCHCI_HOME/repo/omarchy/os/src/hello-world-2-1.src.tar.gz"   # another package whose name starts the same way
-gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$ARCHCI_HOME/repo/omarchy/os/src/hello-world-2-1.src.tar.gz.buildsig" "$ARCHCI_HOME/repo/omarchy/os/src/hello-world-2-1.src.tar.gz"
+# hello 1-1 an older sourcer's (unhashed .gz), hello 1-2 the current one's (hashed .zst)
+sp1=$ARCHCI_HOME/repo/omarchy/os/src/hello-1-1.src.tar.gz; echo "sources 1-1" | gzip >"$sp1"
+gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$sp1.buildsig" "$sp1"
+echo "sources 1-2" | zstd -q >"$tmp/s12"; sp2=$ARCHCI_HOME/repo/omarchy/os/src/hello-1-2-$(sha256sum "$tmp/s12" | cut -c1-64).src.tar.zst; mv "$tmp/s12" "$sp2"; sn2=${sp2##*/}
+gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$sp2.buildsig" "$sp2"
+echo "other" | zstd -q >"$tmp/hw"; hw=$ARCHCI_HOME/repo/omarchy/os/src/hello-world-2-1-$(sha256sum "$tmp/hw" | cut -c1-64).src.tar.zst; mv "$tmp/hw" "$hw"; hwn=${hw##*/}   # another package whose name starts the same way
+gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$hw.buildsig" "$hw"
 "$master/archci-stage" --force
 out=$("$sign" 2>&1)
 srel=$release/omarchy/os/src
-[[ -f $srel/hello-1-2.src.tar.gz && -f $srel/hello-1-2.src.tar.gz.sig && -f $srel/hello-world-2-1.src.tar.gz.sig ]] || fail "source packages must be released with their signatures: $(ls "$srel")"
+[[ -f $srel/$sn2 && -f $srel/$sn2.sig && -f $srel/$hwn.sig ]] || fail "source packages must be released with their signatures: $(ls "$srel")"
 [[ ! -e $srel/hello-1-1.src.tar.gz && ! -e $srel/hello-1-1.src.tar.gz.sig ]] || fail "the older source package must be pruned: $(ls "$srel")"
 [[ $out == *"pruning superseded omarchy/os/src/hello-1-1.src.tar.gz"* ]] || fail "the prune must be logged: $out"
 ! compgen -G "$srel/*.db*" >/dev/null || fail "os/src gets no database"
-gpg --homedir "$relpub" --batch --verify "$srel/hello-1-2.src.tar.gz.sig" "$srel/hello-1-2.src.tar.gz" 2>/dev/null || fail "a source package's release signature must verify"
-[[ -z $(find "$staging" -name '*.src.tar.gz' 2>/dev/null) ]] || fail "staging must be drained of source packages"
+gpg --homedir "$relpub" --batch --verify "$srel/$sn2.sig" "$srel/$sn2" 2>/dev/null || fail "a source package's release signature must verify"
+[[ -z $(find "$staging" -name '*.src.tar.*' 2>/dev/null) ]] || fail "staging must be drained of source packages"
 
 echo "--- a pass takes ARCHCI_SIGN_BATCH packages, the farm's own first, the rest wait"
 bs=$tmp/batch; mkdir -p "$bs/staging/omarchy/os/x86_64" "$bs/release/omarchy/os/x86_64" "$tmp/bs-signer"
+declare -A bn=()   # name -> the hashed file name
 for n in zzz-late archci-master aaa-early; do
-	mkpkg "$bs/staging/omarchy/os/x86_64" $n 1-1
-	gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$bs/staging/omarchy/os/x86_64/$n-1-1-x86_64.pkg.tar.zst.buildsig" "$bs/staging/omarchy/os/x86_64/$n-1-1-x86_64.pkg.tar.zst"
+	f=$(mkpkg "$bs/staging/omarchy/os/x86_64" $n 1-1); bn[$n]=${f##*/}
+	gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$f.buildsig" "$f"
 done
-touch -d '-2 hours' "$bs/staging/omarchy/os/x86_64/zzz-late-1-1-x86_64.pkg.tar.zst"   # the oldest, but archci comes first
+touch -d '-2 hours' "$bs/staging/omarchy/os/x86_64/${bn[zzz-late]}"   # the oldest, but archci comes first
 out=$(ARCHCI_R2_STAGING=$bs/staging ARCHCI_R2_RELEASE=$bs/release ARCHCI_SIGNER_HOME=$tmp/bs-signer ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
 [[ $out == *"this pass takes 2"* && $out == *"signed 2, rejected 0; 1 left"* ]] || fail "batch of 2 out of 3: $out"
-[[ -f $bs/release/omarchy/os/x86_64/archci-master-1-1-x86_64.pkg.tar.zst.sig ]] || fail "the farm's own package must be in the first pass"
-[[ -f $bs/release/omarchy/os/x86_64/zzz-late-1-1-x86_64.pkg.tar.zst.sig ]] || fail "then the oldest"
-[[ ! -e $bs/release/omarchy/os/x86_64/aaa-early-1-1-x86_64.pkg.tar.zst && -f $bs/staging/omarchy/os/x86_64/aaa-early-1-1-x86_64.pkg.tar.zst ]] || fail "the third waits in staging"
-[[ ! -e $bs/staging/omarchy/os/x86_64/archci-master-1-1-x86_64.pkg.tar.zst.buildsig ]] || fail "signed packages leave staging with their buildsig"
+[[ -f $bs/release/omarchy/os/x86_64/${bn[archci-master]}.sig ]] || fail "the farm's own package must be in the first pass"
+[[ -f $bs/release/omarchy/os/x86_64/${bn[zzz-late]}.sig ]] || fail "then the oldest"
+[[ ! -e $bs/release/omarchy/os/x86_64/${bn[aaa-early]} && -f $bs/staging/omarchy/os/x86_64/${bn[aaa-early]} ]] || fail "the third waits in staging"
+[[ ! -e $bs/staging/omarchy/os/x86_64/${bn[archci-master]}.buildsig ]] || fail "signed packages leave staging with their buildsig"
 out=$(ARCHCI_R2_STAGING=$bs/staging ARCHCI_R2_RELEASE=$bs/release ARCHCI_SIGNER_HOME=$tmp/bs-signer ARCHCI_SIGN_BATCH=2 "$sign" 2>&1)
 [[ $out == *"signed 1, rejected 0; 0 left"* ]] || fail "the next pass drains the rest: $out"
 bsdtar -xOf "$bs/release/omarchy/os/x86_64/omarchy.db.tar.gz" '*/desc' | grep -c '\.pkg\.tar\.zst$' | grep -x 3 >/dev/null || fail "all three in the release db"
@@ -174,14 +173,13 @@ echo "--- sign prune guard: keep release packages when the local db was not seed
 pg=$tmp/prune-guard
 mkdir -p "$pg/release/core/os/x86_64" "$pg/staging/core/os/x86_64" "$tmp/pg-signer"
 # release already holds a package but NO database, so the seed-from-release fails
-mkpkg "$pg/release/core/os/x86_64" survivor 1-1
-: >"$pg/release/core/os/x86_64/survivor-1-1-x86_64.pkg.tar.zst.sig"
+sv=$(mkpkg "$pg/release/core/os/x86_64" survivor 1-1)
+: >"$sv.sig"
 # a new, validly builder-signed package (trusted key $gpgb) is waiting in staging
-mkpkg "$pg/staging/core/os/x86_64" newpkg 1-1
-np=$pg/staging/core/os/x86_64/newpkg-1-1-x86_64.pkg.tar.zst
+np=$(mkpkg "$pg/staging/core/os/x86_64" newpkg 1-1)
 gpg --homedir "$gpgb" --batch --detach-sign -u archci-builder -o "$np.buildsig" "$np"
 out=$(ARCHCI_R2_STAGING=$pg/staging ARCHCI_R2_RELEASE=$pg/release ARCHCI_SIGNER_HOME=$tmp/pg-signer "$sign" 2>&1)
 [[ $out == *"skipping prune"* ]] || fail "guard should skip prune when the db was not seeded: $out"
-[[ -f $pg/release/core/os/x86_64/survivor-1-1-x86_64.pkg.tar.zst ]] || fail "prune guard must not delete the survivor"
-[[ -f $pg/release/core/os/x86_64/newpkg-1-1-x86_64.pkg.tar.zst ]] || fail "the new package should still be released"
+[[ -f $sv ]] || fail "prune guard must not delete the survivor"
+[[ -f $pg/release/core/os/x86_64/${np##*/} ]] || fail "the new package should still be released"
 echo "ALL OK"

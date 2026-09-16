@@ -64,8 +64,8 @@ upload_ok "$id" acl 1:2.3.2-1 aarch64
 "$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "aarch64 job not done"
 [[ $(<"$ARCHCI_HOME/built/omarchy-aarch64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "aarch64 built record"
-[[ -f $ARCHCI_HOME/repo/omarchy/os/aarch64/acl-1:2.3.2-1-aarch64.pkg.tar.zst.buildsig ]] || fail "aarch64 package not pooled with its buildsig"
-[[ ! -e $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-aarch64.pkg.tar.zst ]] || fail "aarch64 package must not land in x86_64"
+[[ -f $(pkgfile "$ARCHCI_HOME/repo/omarchy/os/aarch64" acl 1:2.3.2-1 aarch64).buildsig ]] || fail "aarch64 package not pooled with its buildsig"
+! compgen -G "$ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-aarch64-*" >/dev/null || fail "aarch64 package must not land in x86_64"
 [[ $(jq -r '.lines[0]' <<<"$("$master/archci-web" log "$id")") == "built on arm" ]] || fail "the aarch64 job's log is its unit's entries on its host: $("$master/archci-web" log "$id")"
 
 echo "--- an any package: offered to ARCHCI_ANY_ARCH workers only, pooled into every arch"
@@ -82,8 +82,8 @@ upload_ok "$id" archlinux-keyring 20260901-1 any
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "any job not done"
 [[ $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring") == "20260901-1 $(pkgcommit archlinux-keyring) x86_64,aarch64" ]] || fail "any built record: $(<"$ARCHCI_HOME/built/omarchy-any/archlinux-keyring")"
 for a in x86_64 aarch64; do
-	[[ -f $ARCHCI_HOME/repo/omarchy/os/$a/archlinux-keyring-20260901-1-any.pkg.tar.zst ]] || fail "any package not pooled for $a"
-	[[ -f $ARCHCI_HOME/repo/omarchy/os/$a/archlinux-keyring-20260901-1-any.pkg.tar.zst.buildsig ]] || fail "any buildsig not pooled for $a"
+	ap=$(pkgfile "$ARCHCI_HOME/repo/omarchy/os/$a" archlinux-keyring 20260901-1 any) || fail "any package not pooled for $a"
+	[[ -f $ap.buildsig ]] || fail "any buildsig not pooled for $a"
 done
 [[ ! -e $ARCHCI_HOME/incoming/$id ]] || fail "incoming not cleaned"
 [[ $("$next" x86_64) != *archlinux-keyring* ]] || fail "built any package must not be outstanding"

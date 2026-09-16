@@ -63,7 +63,7 @@ archci_load_conf
 : "${ARCHCI_INDEX_CACHE:=file}"
 # Sources. "src" is a job arch: the sourcer claims src jobs the way a
 # worker claims builds, fetches every source the package's PKGBUILD names
-# into a source package (<pkgbase>-<version>.src.tar.gz), builder-signs it
+# into a source package (<pkgbase>-<version>-<sha256>.src.tar.zst), builder-signs it
 # and hands it in like a build's packages; it is pooled under
 # <repo>/os/src, staged, release-signed and published beside the arches,
 # and a build claim names it (sources=) once archci-signer-status has
@@ -212,6 +212,50 @@ archci_arch_conf() {
 	printf '%s\n' "$3"
 }
 
+# --- content-addressed names ---------------------------------------------
+# Every built artifact carries the sha256 of its own bytes in its name:
+# <name>-<ver>-<rel>-<arch>-<sha256>.pkg.tar.zst and
+# <pkgbase>-<version>-<sha256>.src.tar.zst. A retry, a second build of the
+# same version and a fresh rebuild never collide, and every published object
+# is immutable under its name. The worker and the sourcer name their outputs
+# so before signing them (the builder and release signatures follow the
+# final name); the master gives an upload that lacks the hash one at ingest
+# (an older worker), so the pool always holds hashed names.
+# archci_artifact_stem NAME -> NAME (a path or a file name) without its extension
+archci_artifact_stem() {
+	local n=${1##*/}
+	n=${n%.pkg.tar.zst}; n=${n%.src.tar.zst}; n=${n%.src.tar.gz}
+	printf '%s\n' "$n"
+}
+# archci_artifact_ext NAME -> the extension, with its leading dot
+archci_artifact_ext() { local n=${1##*/}; printf '%s\n' "${n#"$(archci_artifact_stem "$n")"}"; }
+# archci_hashed NAME -> 0 when the stem ends in -<64 hex>
+archci_hashed() { [[ $(archci_artifact_stem "$1") =~ -[0-9a-f]{64}$ ]]; }
+# archci_unhashed_stem NAME -> the stem without a trailing -<sha256>, so
+# <name>-<ver>-<rel>-<arch> or <pkgbase>-<version>, hashed or not
+archci_unhashed_stem() {
+	local s; s=$(archci_artifact_stem "$1")
+	[[ $s =~ ^(.*)-[0-9a-f]{64}$ ]] && s=${BASH_REMATCH[1]}
+	printf '%s\n' "$s"
+}
+# archci_hash_rename FILE -- FILE renamed to its hashed name (as it is when
+# it has one), and its .buildsig and .sig beside it renamed with it; prints
+# the new path
+archci_hash_rename() {
+	local f=$1 dir stem ext sha new s
+	if archci_hashed "$f"; then printf '%s\n' "$f"; return 0; fi
+	dir=${f%/*}; [[ $dir == "$f" ]] && dir=.
+	stem=$(archci_artifact_stem "$f"); ext=$(archci_artifact_ext "$f")
+	sha=$(sha256sum -- "$f") || return 1
+	new=$dir/$stem-${sha%% *}$ext
+	mv -- "$f" "$new" || return 1
+	for s in buildsig sig; do [[ -f $f.$s ]] && mv -- "$f.$s" "$new.$s"; done
+	printf '%s\n' "$new"
+}
+# archci_pkginfo FILE FIELD -> FIELD's value from the package's .PKGINFO (the
+# package itself says what it is; its file name is not parsed)
+archci_pkginfo() { bsdtar -xOf "$1" .PKGINFO 2>/dev/null | sed -n "s/^$2 = //p" | head -1; }
+
 # archci_prune_cache DIR KEEP -- delete all but the KEEP newest versions of
 # each package in the pacman cache DIR, with their signatures. A worker's
 # caches grow by a version of everything it builds against; nothing else
@@ -221,7 +265,8 @@ archci_prune_cache() {
 	(( keep > 0 )) && [[ -d $dir ]] || return 0
 	# "<name>|<version>|<file>" per package file, newest version of a name first
 	find "$dir" -maxdepth 1 -type f -name '*.pkg.tar.*' ! -name '*.sig' -printf '%f\n' |
-		sed -En 's/^(.+)-([^-]+)-([^-]+)-([^-]+)\.pkg\.tar\.[a-z0-9]+$/\1|\2-\3|&/p' |
+		sed -En -e 's/^(.+)-([^-]+)-([^-]+)-([^-]+)-[0-9a-f]{64}\.pkg\.tar\.[a-z0-9]+$/\1|\2-\3|&/p' -e t \
+		    -e 's/^(.+)-([^-]+)-([^-]+)-([^-]+)\.pkg\.tar\.[a-z0-9]+$/\1|\2-\3|&/p' |
 		sort -t'|' -k1,1 -k2,2rV |
 		awk -F'|' -v keep="$keep" '{ if (++n[$1] > keep) print $3 }' |
 	while IFS= read -r line; do
@@ -440,21 +485,32 @@ archci_pool() {
 	local -a pkgs
 	shopt -s nullglob; pkgs=("$dir"/*.pkg.tar.zst); shopt -u nullglob
 	(( ${#pkgs[@]} )) || { archci_log "no packages in $dir"; return 1; }
-	local -A dest=()   # package -> arches to pool it for
+	local -A dest=() debug=()   # package -> arches to pool it for; -> 1 for a debug package
 	for p in "${pkgs[@]}"; do
-		base=${p##*/}; parch=${base%.pkg.tar.zst}; parch=${parch##*-}
+		base=${p##*/}
+		# what the package says it is, not what its name says
+		parch=$(archci_pkginfo "$p" arch)
+		[[ -n $parch ]] || { archci_log "refusing $base: no .PKGINFO"; return 1; }
+		[[ $(archci_pkginfo "$p" pkgname) == *-debug ]] && debug[$p]=1
 		if [[ $parch == any ]]; then dest[$p]=$ARCHCI_ARCHES
 		elif archci_enabled_arch "$parch" && archci_can_build "$parch" "$jobarch"; then dest[$p]=$parch
 		else archci_log "refusing $base: arch $parch is not $jobarch or enabled"; return 1
 		fi
 	done
+	# the hashed name, for an upload that lacks it (an older worker)
+	local -a hashed=()
+	for p in "${pkgs[@]}"; do
+		hashed+=("$(archci_hash_rename "$p")") || { archci_log "could not hash ${p##*/}"; return 1; }
+		[[ ${hashed[-1]} == "$p" ]] || { dest[${hashed[-1]}]=${dest[$p]}; [[ -n ${debug[$p]:-} ]] && debug[${hashed[-1]}]=1; }
+	done
+	pkgs=("${hashed[@]}")
 	(
 		exec 8>"$ARCHCI_HOME/lock/repo.lock"
 		flock 8
 		for p in "${pkgs[@]}"; do
 			base=${p##*/}
 			local r=$repo
-			[[ $base == *-debug-"$version"-*.pkg.tar.zst ]] && r=$repo-debug
+			[[ -n ${debug[$p]:-} ]] && r=$repo-debug
 			for a in ${dest[$p]}; do
 				mkdir -p "$ARCHCI_HOME/repo/$r/os/$a"
 				cp --reflink=auto "$p" "$ARCHCI_HOME/repo/$r/os/$a/$base" || exit 1
@@ -565,23 +621,27 @@ archci_vendor_replay_files() {
 		*) ;;
 	esac
 }
+# the source package's compression, by its extension: .src.tar.zst (the
+# sourcer's, zstd's default level) or .src.tar.gz (an older one)
+_srcpkg_unpack() { case $1 in *.zst) zstd -dcq -- "$1" ;; *) gzip -dc -- "$1" ;; esac; }
+_srcpkg_pack() { case $1 in *.zst) zstd -cq -T0 -- ;; *) gzip -c ;; esac; }
 # archci_srcpkg_add_vendor SRCPKG PKGBASE DIR -- put DIR into the source
-# package (a plain tar, gzipped, its entries under PKGBASE/) as
+# package (a plain tar, compressed, its entries under PKGBASE/) as
 # PKGBASE/vendor/, root's, in place
 archci_srcpkg_add_vendor() {
 	local srcpkg=$1 pkgbase=$2 dir=$3 tarball=$1.tar
-	gzip -dc "$srcpkg" >"$tarball" || return 1
+	_srcpkg_unpack "$srcpkg" >"$tarball" || return 1
 	tar -rf "$tarball" -C "$(dirname "$dir")" --owner=0 --group=0 --transform="s|^$(basename "$dir")|$pkgbase/vendor|" "$(basename "$dir")" || return 1
-	gzip -c "$tarball" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tarball"
+	_srcpkg_pack "$srcpkg" <"$tarball" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tarball"
 }
 
 # archci_srcpkg_add_file SRCPKG PKGBASE FILE DEST -- put FILE into the source
 # package as PKGBASE/DEST, root's, in place (as add_vendor does for a tree).
 archci_srcpkg_add_file() {
 	local srcpkg=$1 pkgbase=$2 file=$3 destname=$4 tarball=$1.tar
-	gzip -dc "$srcpkg" >"$tarball" || return 1
+	_srcpkg_unpack "$srcpkg" >"$tarball" || return 1
 	tar -rf "$tarball" -C "$(dirname "$file")" --owner=0 --group=0 --transform="s|^$(basename "$file")|$pkgbase/$destname|" "$(basename "$file")" || return 1
-	gzip -c "$tarball" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tarball"
+	_srcpkg_pack "$srcpkg" <"$tarball" >"$srcpkg.tmp" && mv "$srcpkg.tmp" "$srcpkg" && rm -f "$tarball"
 }
 
 # _sbom_emit PURL NAME VERSION [ALG HEX] -- one CycloneDX component, preceded

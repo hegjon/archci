@@ -73,9 +73,10 @@ journal_add worker9 "$(build_unit acl 1:2.3.2-1 x86_64 1)" "the same unit on ano
 echo "--- report success pools packages and their builder signatures"
 inc=$ARCHCI_HOME/incoming/$id
 echo "log" >"$inc/build.log"   # an older worker's copy of the journal: dropped
-mkpkg "$inc" acl 1:2.3.2-1
-mkpkg "$inc" acl-debug 1:2.3.2-1
-: >"$inc/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig"   # carried through to the signer
+pf=$(mkpkg "$inc" acl 1:2.3.2-1)
+mkpkg "$inc" acl-debug 1:2.3.2-1 >/dev/null
+: >"$pf.buildsig"   # carried through to the signer
+pn=${pf##*/}
 "$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "job not in done/"
 grep -q '^load=0.10$' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job must keep its last heartbeat stats"
@@ -86,8 +87,8 @@ sed -i "s/^heartbeat=.*/heartbeat=$(date -u -d '-20 minutes' +%FT%TZ)/" "$ARCHCI
 "$top" | grep "^worker  *-  *x86_64  *0.20 .* 4  *1  *0  0.3.19-1$" >/dev/null || fail "a worker silent for 20 minutes must leave the hosts table even with a recent job; its host keeps the other worker: $("$top" | grep ^worker)"
 sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/$id.job"
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
-[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst ]] || fail "package not pooled"
-[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-x86_64.pkg.tar.zst.buildsig ]] || fail "buildsig not kept"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/$pn ]] || fail "package not pooled under its hashed name: $(ls "$ARCHCI_HOME/repo/omarchy/os/x86_64")"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/$pn.buildsig ]] || fail "buildsig not kept"
 [[ -e $ARCHCI_HOME/stage.needed ]] || fail "stage flag missing"
 [[ -z $(ls -A "$ARCHCI_HOME/logs") ]] || fail "the build log is the journal's, nothing is archived: $(find "$ARCHCI_HOME/logs")"
 grep -q '^claimed=20' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job keeps its claim time (it bounds its journal entries)"
@@ -115,15 +116,21 @@ inc=$ARCHCI_HOME/incoming/$sid
 journal_add sourcer archci-sourcer.service "==> archci-sourcer 0.5.0 $sid on sourcer at 2026-09-15T10:02:00Z" "fetched" "==> archci-sourcer finished with 0 at 2026-09-15T10:02:30Z"
 : >"$inc/acl-1:2.3.2-1.src.tar.gz"; : >"$inc/acl-1:2.3.2-1.src.tar.gz.buildsig"
 "$job" report "$sid" success "$(owner "$sid")"
-[[ $(<"$ARCHCI_HOME/built/omarchy-src/acl") == "1:2.3.2-1 $(pkgcommit acl) acl-1:2.3.2-1.src.tar.gz" ]] || fail "the src built record must name the file: $(<"$ARCHCI_HOME/built/omarchy-src/acl")"
-[[ -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz && -f $ARCHCI_HOME/repo/omarchy/os/src/acl-1:2.3.2-1.src.tar.gz.buildsig && -e $ARCHCI_HOME/stage.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage"
+# an unhashed upload (an older sourcer): named with its sha256 at ingest, the record names that
+srec=$(<"$ARCHCI_HOME/built/omarchy-src/acl"); sf=${srec##* }
+[[ $srec == "1:2.3.2-1 $(pkgcommit acl) acl-1:2.3.2-1-"*.src.tar.gz && $sf =~ ^acl-1:2\.3\.2-1-[0-9a-f]{64}\.src\.tar\.gz$ ]] || fail "the src built record must name the (hashed) file: $srec"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/src/$sf && -f $ARCHCI_HOME/repo/omarchy/os/src/$sf.buildsig && -e $ARCHCI_HOME/stage.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage: $(ls "$ARCHCI_HOME/repo/omarchy/os/src")"
 [[ $(jq -c '[.lines[1], (.lines | length)]' <<<"$("$master/archci-web" log "$sid")") == '["fetched",3]' ]] || fail "a fetch's log is the sourcer service's entries on its host: $("$master/archci-web" log "$sid")"
 [[ $(jq -r '.started + " " + .stopped' <<<"$("$master/archci-web" job "$sid")") == "2026-09-15T10:02:00Z 2026-09-15T10:02:30Z" ]] || fail "a fetch's span comes from its journal entries: $("$master/archci-web" job "$sid")"
 [[ $("$next" src) == "5 omarchy src libsigc++ "* ]] || fail "acl's sources are in; libsigc++ is next: $("$next" src)"
 sid=$(claim_id sourcer src)
 inc=$ARCHCI_HOME/incoming/$sid
-: >"$inc/libsigc++-2.12.2-1.src.tar.gz"; : >"$inc/libsigc++-2.12.2-1.src.tar.gz.buildsig"
+# as the sourcer names it now: hashed, .src.tar.zst
+echo sources | zstd -q >"$inc/libsigc++-2.12.2-1.src.tar.zst"; lsha=$(sha256sum "$inc/libsigc++-2.12.2-1.src.tar.zst" | cut -c1-64)
+mv "$inc/libsigc++-2.12.2-1.src.tar.zst" "$inc/libsigc++-2.12.2-1-$lsha.src.tar.zst"; : >"$inc/libsigc++-2.12.2-1-$lsha.src.tar.zst.buildsig"
+lsf=libsigc++-2.12.2-1-$lsha.src.tar.zst
 "$job" report "$sid" success "$(owner "$sid")"
+[[ $(<"$ARCHCI_HOME/built/omarchy-src/libsigc++") == "2.12.2-1 $(pkgcommit libsigc++) $lsf" && -f $ARCHCI_HOME/repo/omarchy/os/src/$lsf ]] || fail "a hashed .src.tar.zst is pooled as is: $(<"$ARCHCI_HOME/built/omarchy-src/libsigc++")"
 sid=$(claim_id sourcer src)
 [[ $sid == *omarchy,linux,* ]] || fail "linux's sources are next: $sid"
 journal_add sourcer archci-sourcer.service "==> archci-sourcer 0.5.0 $sid on sourcer at 2026-09-15T10:03:00Z" "==> ERROR: Failure while downloading https://example/linux.tar.xz" "==> archci-sourcer finished with 1 at 2026-09-15T10:03:10Z"
@@ -151,9 +158,9 @@ mkdir -p "$ARCHCI_HOME/released"; : >"$ARCHCI_HOME/released/omarchy-src"
 id=$(claim_id worker-2 x86_64)
 grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must not name a source package the listing lacks, whatever its age"
 "$job" report "$id" abandoned "$(owner "$id")"
-echo libsigc++-2.12.2-1.src.tar.gz >"$ARCHCI_HOME/released/omarchy-src"
+echo "$lsf" >"$ARCHCI_HOME/released/omarchy-src"
 id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
-grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "listed as released, the claim names the source package at once: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
+grep -qxF "sources=$lsf" "$ARCHCI_HOME/queue/running/$id.job" || fail "listed as released, the claim names the source package at once: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
 (( $(grep -c '^sources=' "$ARCHCI_HOME/queue/running/$id.job") == 1 )) || fail "a claim after a requeue must name the source package once, not once per claim: $(grep '^sources=' "$ARCHCI_HOME/queue/running/$id.job")"
 "$job" report "$id" abandoned "$(owner "$id")"
 rm -r "$ARCHCI_HOME/released"
@@ -188,7 +195,7 @@ rm -rf "$ARCHCI_HOME"/queue/failed/*netpkg* "$pkgs/pkgbuilds/netpkg"; commit_pkg
 echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
-grep -q '^sources=libsigc++-2.12.2-1.src.tar.gz$' "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim must name the source package: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
+grep -qxF "sources=$lsf" "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim must name the source package: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
 journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "stderr:==> ERROR: A failure occurred in build()."
 "$job" report "$id" failure "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
@@ -211,7 +218,7 @@ srcjob=$(jq -r '.sources_job' <<<"$onejob")
 [[ $srcjob == *,libsigc++,2.12.2-1,src ]] || fail "archci web job must link the src job for a build with sources: $srcjob"
 [[ -f $ARCHCI_HOME/queue/done/$srcjob.job || -f $ARCHCI_HOME/queue/running/$srcjob.job || -f $ARCHCI_HOME/queue/failed/$srcjob.job ]] || fail "the linked src job must exist: $srcjob"
 ! "$master/archci-web" job "9-1-x,nope,1-1,x86_64" 2>/dev/null || fail "archci web job of an unknown id must fail"
-[[ $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap") == "failed "*" on worker-2, attempt 1 of 2; sources libsigc++-2.12.2-1.src.tar.gz" ]] || fail "each job tells its story: $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap")"
+[[ $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap") == "failed "*" on worker-2, attempt 1 of 2; sources $lsf" ]] || fail "each job tells its story: $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap")"
 [[ $(jq -r '.queue.failed' <<<"$snap") == $(find "$ARCHCI_HOME/queue/failed" -name "*.job" | wc -l) && $(jq -r '.generated' <<<"$snap") == 20*Z ]] || fail "the snapshot is archci top's plus jobs and generated: $(jq -c '[.queue, .generated]' <<<"$snap")"
 log=$("$master/archci-web" log "$id")
 [[ $(jq -r '.error_at' <<<"$log") == 1 && $(jq -r '.lines[1]' <<<"$log") == "==> ERROR: A failure occurred in build()." ]] || fail "archci web log gives the lines and the first error: $log"
