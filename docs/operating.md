@@ -9,7 +9,7 @@ test instance, four emulated builds running on the desktop and the x86_64
 workers idle:
 
 ```
-archci-top  21:09:10   pkgbuilds -> [hegjon-test]   arches: x86_64 aarch64 riscv64   (q or Esc quits)
+archci-top  21:09:10   pkgbuilds -> [archci-test2]   arches: x86_64 aarch64 riscv64   (q or Esc quits)
 queue: pending 9  running 4  failed 55  done 590 (3 in the last hour)    outstanding: 0 update(s), 850 unbuilt
 built: x86_64 428/569  aarch64 29/569  riscv64 16/569  any 85/119
 released: x86_64 366 pkg  aarch64 152 pkg  riscv64 139 pkg

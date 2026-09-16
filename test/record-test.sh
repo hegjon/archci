@@ -32,6 +32,10 @@ for _ in $(seq 50); do
 done
 if [[ -z $found ]]; then echo "(the journal cannot be read here: the lookup skipped)"; echo "ALL OK"; exit 0; fi
 (( $(grep -c . <<<"$found") == 2 )) || fail "two records expected: $found"
+echo "--- archci_log off a unit, with ARCHCI_LOG_JOB: the entry carries the job as a field"
+(unset JOURNAL_STREAM; ARCHCI_LOG_JOB="9-1-omarchy,rec,1-1,x86_64:$tag" archci_log "logged for a job" 2>/dev/null)
+for _ in $(seq 50); do lfound=$(journalctl -q -o json "ARCHCI_JOB=9-1-omarchy,rec,1-1,x86_64:$tag" 2>/dev/null || true); [[ -n $lfound ]] && break; sleep 0.1; done
+[[ -n $lfound && $(jq -r '.MESSAGE + " " + .SYSLOG_IDENTIFIER' <<<"$lfound") == "logged for a job record-test.sh" ]] || fail "archci_log's entry with the job field: $lfound"
 [[ $(head -1 <<<"$found" | jq -r '.MESSAGE + " " + .ARCHCI_EVENT + " " + .ARCHCI_RC + " " + .SYSLOG_IDENTIFIER') == "==> record test $tag start 0 record-test.sh" ]] || fail "the record's message, fields and identifier: $(head -1 <<<"$found")"
 [[ $(tail -1 <<<"$found" | jq -r '.ARCHCI_EVENT') == finish ]] || fail "records keep their order"
 echo "ALL OK"

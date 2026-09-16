@@ -39,9 +39,9 @@ write_files:
 
 runcmd:
   # trust the farm's release key and install the worker from its repository
-  - curl -sfO https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/release.pub
+  - curl -sfO https://pub-082311edbe1f4fcd95c9cfc965318156.r2.dev/release.pub
   - pacman-key --add release.pub && pacman-key --lsign-key 1E29618FAE38DE36160903CD60A80B4278269BB3
-  - printf '\n[hegjon-test]\nSigLevel = Required DatabaseOptional\nServer = https://pub-771dbcd770ba439baaf9c08e090268f8.r2.dev/$repo/os/$arch\n' >>/etc/pacman.conf
+  - printf '\n[archci-test2]\nSigLevel = Required DatabaseOptional\nServer = https://pub-082311edbe1f4fcd95c9cfc965318156.r2.dev/$repo/os/$arch\n' >>/etc/pacman.conf
   - pacman -Syu --noconfirm archci-worker
   # the shared fleet builder key, so every ephemeral worker signs with one key
   # the signer already trusts (archci-worker-setup would otherwise generate one)

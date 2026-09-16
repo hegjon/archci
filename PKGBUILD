@@ -48,7 +48,7 @@ check() {
 
 package_archci() {
   pkgdesc='Headless build farm for Arch Linux packages (shared library, config and user)'
-  depends=(bash git)
+  depends=(bash git perl)
   backup=(etc/archci/archci.conf)
 
   cd "$srcdir/$_src"
@@ -75,7 +75,7 @@ _install_cli() {
 
 package_archci-master() {
   pkgdesc='Headless build farm for Arch Linux packages (master: sync the PKGBUILD repository, hand out jobs, index and publish the release)'
-  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone attr btrfs-progs libarchive)
+  depends=("archci=$pkgver-$pkgrel" bash-completion ruby jq rsync openssh rclone attr btrfs-progs libarchive zstd)
   # the release key is never on the master
   conflicts=(archci-signer)
   optdepends=('libmicrohttpd: receive worker journals with systemd-journal-remote')

@@ -323,10 +323,10 @@ cmd=${1:-}
 shift || true
 case $cmd in
 	claim)     (( $# >= 2 )) || archci_die "usage: archci-job claim WORKER ARCH [K=V...]"; cmd_claim "$@" ;;
-	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; cmd_heartbeat "$@" ;;
-	report)    (( $# == 3 )) || archci_die "usage: archci-job report ID STATUS WORKER"; cmd_report "$1" "$2" "$3" ;;
-	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          cmd_requeue "$1" ;;
-	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; cmd_retry "$1" ;;
+	heartbeat) (( $# >= 1 )) || archci_die "usage: archci-job heartbeat ID [K=V...]"; ARCHCI_LOG_JOB=$1 cmd_heartbeat "$@" ;;
+	report)    (( $# == 3 )) || archci_die "usage: archci-job report ID STATUS WORKER"; ARCHCI_LOG_JOB=$1 cmd_report "$1" "$2" "$3" ;;
+	requeue)   (( $# == 1 )) || archci_die "usage: archci-job requeue ID";          ARCHCI_LOG_JOB=$1 cmd_requeue "$1" ;;
+	retry)     (( $# == 1 )) || archci_die "usage: archci-job retry ID | -a|--all"; ARCHCI_LOG_JOB=$1 cmd_retry "$1" ;;
 	enqueue)   (( $# >= 1 && $# <= 3 )) || archci_die "usage: archci-job enqueue PKGBASE [PRIO] [ARCH]"; cmd_enqueue "$@" ;;
 	*) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" >&2; exit 2 ;;
 esac

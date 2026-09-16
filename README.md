@@ -593,16 +593,16 @@ Server = https://<r2 release domain>/$repo/os/$arch
 
 It then behaves like any pacman repository. Queried from a client of the
 test instance ([docs/test-instance.md](docs/test-instance.md)), whose
-repository is called `hegjon-test` and held 970 x86_64 packages at the time:
+repository is called `archci-test2` and held 970 x86_64 packages at the time:
 
 ```
-$ pacman -Sl hegjon-test | head -3
-hegjon-test a52dec 0.8.0-3
-hegjon-test aalib 1.4rc5-19
-hegjon-test abseil-cpp 20260817.0-2 [installed]
+$ pacman -Sl archci-test2 | head -3
+archci-test2 a52dec 0.8.0-3
+archci-test2 aalib 1.4rc5-19
+archci-test2 abseil-cpp 20260817.0-2 [installed]
 
-$ pacman -Si hegjon-test/rclone
-Repository      : hegjon-test
+$ pacman -Si archci-test2/rclone
+Repository      : archci-test2
 Name            : rclone
 Version         : 1.75.1-1
 Description     : rsync for cloud storage

@@ -187,11 +187,21 @@ Q_RUNNING=$ARCHCI_HOME/queue/running
 Q_DONE=$ARCHCI_HOME/queue/done
 Q_FAILED=$ARCHCI_HOME/queue/failed
 
+# archci_log MESSAGE... -- to stderr (a unit's journal), and, for a command
+# invoked over ssh (no journal stream of its own: archci-job, archci-shell),
+# mirrored into the journal by logger; with ARCHCI_LOG_JOB set (the job a
+# claim, heartbeat or report is about) the entry carries it as the
+# ARCHCI_JOB field, so `journalctl ARCHCI_JOB=<id>` on the master is the
+# job's trace: its claim, heartbeats, report and pooling. (Not a setting:
+# set per command by archci-job.)
 archci_log() {
 	printf '%s: %s\n' "${0##*/}" "$*" >&2
-	# Commands invoked over ssh have no journal stream of their own; mirror them into it.
 	if [[ -z ${JOURNAL_STREAM:-} ]] && command -v logger >/dev/null; then
-		logger -t "${0##*/}" -- "$*" 2>/dev/null || true
+		if [[ -n ${ARCHCI_LOG_JOB:-} ]]; then
+			printf 'MESSAGE=%s\nPRIORITY=6\nSYSLOG_IDENTIFIER=%s\nARCHCI_JOB=%s\n' "$*" "${0##*/}" "$ARCHCI_LOG_JOB" | logger --journald 2>/dev/null || true
+		else
+			logger -t "${0##*/}" -- "$*" 2>/dev/null || true
+		fi
 	fi
 }
 archci_die() { archci_log "$@"; exit 1; }
