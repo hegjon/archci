@@ -1,11 +1,13 @@
 #!/bin/bash
-# archci-authorize [--sourcer|--web] PUBKEY | --revoke PUBKEY|COMMENT -- let
-# a worker key, with --sourcer the sourcer's key, or with --web a web front
-# end's key talk to this master, or stop it.
+# archci-authorize [--sourcer|--signer|--web] PUBKEY | --revoke PUBKEY|COMMENT --
+# let a worker key, with --sourcer the sourcer's key, with --signer the
+# signer's, or with --web a web front end's key talk to this master, or stop it.
 #
 # Appends the key, restricted to the job protocol by a forced command (the
-# sourcer's to src jobs: archci-shell sourcer; the web key to reading the
-# farm and the operator's queue commands: archci-shell web), to
+# sourcer's to src jobs: archci-shell sourcer; the signer's to listing and
+# fetching what waits for a signature and returning signatures: archci-shell
+# signer; the web key to reading the farm and the operator's queue commands:
+# archci-shell web), to
 # /etc/archci/authorized_keys (root-owned; sshd reads it for the archci user
 # through /etc/ssh/sshd_config.d/60-archci.conf, which the master package
 # installs). The key may also forward to the journal-remote
@@ -19,7 +21,7 @@
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
-usage="usage: archci authorize [--sourcer|--web] PUBKEY-FILE | 'ssh-ed25519 AAAA... comment' | --revoke PUBKEY-FILE|KEY|COMMENT"
+usage="usage: archci authorize [--sourcer|--signer|--web] PUBKEY-FILE | 'ssh-ed25519 AAAA... comment' | --revoke PUBKEY-FILE|KEY|COMMENT"
 akf=${ARCHCI_AUTHORIZED_KEYS:-/etc/archci/authorized_keys}
 keyre='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+|sk-[a-z0-9-]+@openssh.com) [A-Za-z0-9+/=]+'
 
@@ -53,6 +55,7 @@ fi
 shell=$ARCHCI_MASTER_DIR/archci-shell
 case ${1:-} in
 	--sourcer) shell="$shell sourcer"; shift ;;
+	--signer) shell="$shell signer"; shift ;;
 	--web) shell="$shell web"; shift ;;
 esac
 key=${1:-}

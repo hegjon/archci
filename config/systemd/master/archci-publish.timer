@@ -1,10 +1,10 @@
 [Unit]
-Description=archci: stage packages every 2 minutes
+Description=archci: publish every minute
 PartOf=archci-master.target
 
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=2min
+OnUnitActiveSec=1min
 
 [Install]
 WantedBy=timers.target

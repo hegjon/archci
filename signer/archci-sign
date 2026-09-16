@@ -1,20 +1,25 @@
 #!/bin/bash
-# archci-sign [--unlock] -- release-sign packages the master staged to R2.
+# archci-sign [--unlock] -- release-sign what the master pooled.
 #
-# Runs on the signer droplet (root) on a timer. It talks only to R2, never to
-# the master. Each pass takes up to ARCHCI_SIGN_BATCH packages from the
-# STAGING area, the farm's own first, then the oldest: pulls them with their
-# builder signatures in one transfer, verifies each builder signature against
-# the authorized builder keyring, makes the client-facing release signature
-# with the release key, adds each package to its release database (repo-add),
-# publishes packages + .sig in one transfer and then the databases to the
-# RELEASE area, and deletes the batch from STAGING. A source package
-# (<repo>/os/src/<pkgbase>-<version>.src.tar.gz, the sourcer's) goes the
-# same way, less the database: published with its .sig, and the older
-# versions of the same package pruned. The release private key
-# (passphrase-protected) never leaves this host.
-#
-#   --unlock   prime gpg-agent with the release passphrase (once per session)
+# Runs on the signer host (root) on a timer, a minute apart. It reaches the
+# master over ssh with its own key (ARCHCI_SIGNER_KEY, authorized there with
+# `archci authorize --signer`; the forced command is archci-shell signer) and
+# nothing else: no R2 credentials, no key on the master. A pass:
+#   1. `unsigned N`: the master names up to ARCHCI_SIGN_BATCH pooled files
+#      without a release signature, the farm's own first, then the oldest;
+#   2. rsync (read-only, the master's repo/) fetches them with their builder
+#      signatures in one transfer;
+#   3. each builder signature is verified against the authorized builder
+#      keyring; one that is missing, invalid or from an unknown key is
+#      reported (`rejected FILE REASON`) and the file never signed: the
+#      master parks it and does not offer it again;
+#   4. the release key makes the detached <file>.sig; the signatures go back
+#      by rsync (write-only, the master's sigs/) in one transfer, and
+#      `signed` tells the master to publish.
+# The release private key (passphrase-protected) never leaves this host; it
+# is unlocked into gpg-agent once per session:
+#   --unlock   prime gpg-agent with the release passphrase (ARCHCI_RELEASE_PASSPHRASE
+#              for a non-interactive unlock)
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
 
@@ -30,171 +35,63 @@ if [[ ${1:-} == --unlock ]]; then
 	rm -f "$tmp"; exit 0
 fi
 
-[[ -n $ARCHCI_R2_STAGING && -n $ARCHCI_R2_RELEASE ]] || archci_die "set ARCHCI_R2_STAGING and ARCHCI_R2_RELEASE"
-command -v rclone >/dev/null || archci_die "rclone is not installed"
 [[ -d $ARCHCI_RELEASE_GNUPGHOME ]] || archci_die "no release keyring at $ARCHCI_RELEASE_GNUPGHOME"
-[[ -d $ARCHCI_BUILDER_KEYRING ]] || archci_die "no builder keyring at $ARCHCI_BUILDER_KEYRING (archci-authorize-builder)"
+[[ -d $ARCHCI_BUILDER_KEYRING ]] || archci_die "no builder keyring at $ARCHCI_BUILDER_KEYRING (archci authorize-builder)"
+# the signer's ssh key: made here on first run, authorized on the master by hand
+if [[ ! -f $ARCHCI_SIGNER_KEY ]]; then
+	install -d -m 700 "${ARCHCI_SIGNER_KEY%/*}"
+	ssh-keygen -q -t ed25519 -N '' -C "archci-signer@${HOSTNAME%%.*}" -f "$ARCHCI_SIGNER_KEY"
+	archci_die "made $ARCHCI_SIGNER_KEY; authorize it on the master:  archci authorize --signer '$(<"$ARCHCI_SIGNER_KEY.pub")'"
+fi
+ssh_opts=(-i "$ARCHCI_SIGNER_KEY" -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=4
+	-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/etc/archci/known_hosts)
+master() { ssh -n "${ssh_opts[@]}" "$ARCHCI_MASTER" "$@"; }
 
+mkdir -p "$ARCHCI_SIGNER_HOME"
 exec 9>"$ARCHCI_SIGNER_HOME/sign.lock"
 flock -n 9 || { archci_log "another archci-sign is running"; exit 0; }
-
-export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
 work=$ARCHCI_SIGNER_HOME/work
-localrepo=$ARCHCI_SIGNER_HOME/repo         # persistent home of the release databases
-rm -rf "$work"; mkdir -p "$work" "$localrepo"
+rm -rf "$work"; mkdir -p "$work/in" "$work/sigs"
 
-# The farm's own packages first (a release must not queue behind a burst of
-# others), then oldest first: "<modtime>|<path>" from rclone, keyed by 0/1 for
-# archci or not and the time, then stripped to the path.
-mapfile -t rels < <(rclone lsf -R --files-only --format tp --separator '|' "$ARCHCI_R2_STAGING" 2>/dev/null | grep -E '\.(pkg\.tar\.zst|src\.tar\.(gz|zst))$' |
-	awk -F'|' '{ n = $2; sub(/.*\//, "", n); printf "%d|%s|%s\n", (n ~ /^archci(-[a-z0-9-]+)?-[0-9]/ ? 0 : 1), $1, $2 }' |
-	sort -t'|' -k1,1n -k2,2 | cut -d'|' -f3- || true)
-(( ${#rels[@]} )) || exit 0
-total=${#rels[@]}
-rels=("${rels[@]:0:ARCHCI_SIGN_BATCH}")
-archci_log "staging holds $total package(s) to sign; this pass takes ${#rels[@]}"
+# (a failure of the process substitution would not reach mapfile: ask first)
+listing=$(master unsigned "$ARCHCI_SIGN_BATCH") || archci_die "cannot reach the master ($ARCHCI_MASTER)"
+[[ -n $listing ]] || exit 0
+mapfile -t rels <<<"$listing"
+archci_log "the master has ${#rels[@]} file(s) to sign"
 
-# the batch, packages and builder signatures, in one transfer (a file that
-# is not there is simply not copied; the loop rejects what is missing)
-fetch=$work/fetch.list publish=$work/publish.list drop=$work/drop.list
-: >"$fetch"; : >"$publish"; : >"$drop"
+fetch=$work/fetch.list; : >"$fetch"
 for rel in "${rels[@]}"; do
-	[[ $rel == *..* || $rel == /* ]] && continue
+	[[ $rel == *..* || $rel == /* || $rel != */os/* ]] && continue
 	printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$fetch"
 done
-rclone copy --transfers 8 --files-from "$fetch" "$ARCHCI_R2_STAGING" "$work" 2>/dev/null || true
+rsync -a --timeout=600 --files-from="$fetch" -e "ssh ${ssh_opts[*]}" "$ARCHCI_MASTER:." "$work/in/" 2>/dev/null || true
 
-declare -A touched=()
-declare -A dbready=()   # per-repo: is the local db authoritative for release (safe to prune)?
-declare -A before=()    # per-repo: the package files its database named before this pass
-# db_files DIR DB -> the package files the local database names, one per line
-db_files() { bsdtar -xOf "$localrepo/$1/$2.db.tar.gz" '*/desc' 2>/dev/null | grep '\.pkg\.tar\.zst$' || true; }
-signed=0 rejected=0
-srcpublished=()   # the source packages this pass publishes: their older versions are pruned
+signed=0 rejected=0 locked=0
 for rel in "${rels[@]}"; do
-	[[ $rel == *..* || $rel == /* ]] && { archci_log "skip suspicious path: $rel"; continue; }
-	reldir=${rel%/*}; db=${rel%%/*}
-	mkdir -p "$localrepo/$reldir"
-	if [[ ! -f $work/$rel || ! -f $work/$rel.buildsig ]]; then
-		archci_log "REJECT $rel: could not fetch package or builder signature"
-		printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$drop"
+	[[ $rel == *..* || $rel == /* || $rel != */os/* ]] && { archci_log "skip suspicious path: $rel"; continue; }
+	f=$work/in/$rel
+	if [[ ! -f $f || ! -f $f.buildsig ]]; then
+		archci_log "REJECT $rel: could not fetch the file or its builder signature"
+		master rejected "$rel" "could not fetch the file or its builder signature" || true
 		(( ++rejected )); continue
 	fi
-	if ! gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --verify "$work/$rel.buildsig" "$work/$rel" 2>/dev/null; then
+	if ! gpg --homedir "$ARCHCI_BUILDER_KEYRING" --batch --verify "$f.buildsig" "$f" 2>/dev/null; then
 		archci_log "REJECT $rel: builder signature invalid or from an unknown key"
-		printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$drop"
-		rm -f "$work/$rel" "$work/$rel.buildsig"; (( ++rejected )); continue
+		master rejected "$rel" "builder signature invalid or from an unknown key" || true
+		(( ++rejected )); continue
 	fi
-	if ! release_sign "$work/$rel"; then
-		archci_log "release key is locked; run 'archci-sign --unlock' on the signer"
-		break
+	if ! release_sign "$f"; then
+		archci_log "release key is locked; run 'archci sign --unlock' on the signer"
+		locked=1; break
 	fi
-	printf '%s\n%s.sig\n' "$rel" "$rel" >>"$publish"
-	if [[ $rel == *.src.tar.* ]]; then
-		# a source package: no database; the older versions of its package
-		# go once this one is up (below)
-		srcpublished+=("$rel")
-		printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$drop"
-		(( ++signed )); continue
-	fi
-	# Add to the release database. The first time this run touches a repo,
-	# establish whether the local db is authoritative for the release area:
-	# it is if it already existed locally, or if it seeds cleanly from release.
-	# If neither (a fresh signer whose seed failed), mark it not-ready so the
-	# prune below is skipped and cannot delete live release packages.
-	if [[ -z ${dbready[$reldir]+set} ]]; then
-		if [[ -f $localrepo/$reldir/$db.db.tar.gz ]]; then
-			dbready[$reldir]=1
-		elif rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.db.tar.gz" "$localrepo/$reldir/$db.db.tar.gz" 2>/dev/null; then
-			rclone copyto "$ARCHCI_R2_RELEASE/$reldir/$db.files.tar.gz" "$localrepo/$reldir/$db.files.tar.gz" 2>/dev/null || true
-			dbready[$reldir]=1
-		else
-			dbready[$reldir]=0
-		fi
-	fi
-	[[ -n ${before[$reldir]+set} ]] || before[$reldir]=$(db_files "$reldir" "$db")
-	cp "$work/$rel" "$localrepo/$rel"
-	repo-add -R -q "$localrepo/$reldir/$db.db.tar.gz" "$localrepo/$rel" >/dev/null
-	rm -f "$localrepo/$rel"                       # keep only the database locally
-	touched[$reldir]=$db
-	printf '%s\n%s.buildsig\n' "$rel" "$rel" >>"$drop"
+	mkdir -p "$work/sigs/${rel%/*}"
+	mv "$f.sig" "$work/sigs/$rel.sig"
 	(( ++signed ))
 done
-
-# publish the signed packages and their signatures in one transfer, before
-# the databases that list them
-[[ -s $publish ]] && rclone copy --transfers 8 --files-from "$publish" "$work" "$ARCHCI_R2_RELEASE"
-# a source package supersedes the older versions of its package: the file is
-# <pkgbase>-<version>.src.tar.gz, so among the release's files that start
-# with the pkgbase, those whose rest is a version vercmp puts before this
-# one go (another package whose name starts the same way has no version
-# there, and stays)
-for rel in "${srcpublished[@]}"; do
-	reldir=${rel%/*}; name=${rel##*/}
-	version=$(archci_unhashed_stem "$name"); pkgbase=${version%-*-*}; version=${version#"$pkgbase-"}
-	while IFS= read -r f; do
-		[[ $f == "$pkgbase-"*.src.tar.* && $f != "$name" ]] || continue
-		v=$(archci_unhashed_stem "$f"); v=${v#"$pkgbase-"}
-		[[ $v =~ ^([0-9]+:)?[^-]+-[^-]+$ ]] || continue
-		(( $(vercmp "$v" "$version") < 0 )) || continue
-		archci_log "pruning superseded $reldir/$f from release"
-		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f" 2>/dev/null || true
-		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f.sig" 2>/dev/null || true
-	done < <(rclone lsf --files-only "$ARCHCI_R2_RELEASE/$reldir" 2>/dev/null || true)
-done
-
-# publish the updated databases (as <db>.db.tar.gz and the <db>.db clients fetch)
-for reldir in "${!touched[@]}"; do
-	db=${touched[$reldir]}
-	for pair in "db.tar.gz:db" "files.tar.gz:files"; do
-		src=$localrepo/$reldir/$db.${pair%%:*}
-		[[ -f $src ]] || continue
-		rclone copyto "$src" "$ARCHCI_R2_RELEASE/$reldir/$db.${pair%%:*}"
-		rclone copyto "$src" "$ARCHCI_R2_RELEASE/$reldir/$db.${pair##*:}"
-	done
-	# Prune release packages no longer in the database (superseded versions),
-	# but only when the local db is authoritative for release (see above): a
-	# transient db-loss must never delete live release packages.
-	if [[ ${dbready[$reldir]} != 1 ]]; then
-		archci_log "skipping prune of [$db]: local database was not seeded from release this run"
-		continue
-	fi
-	mapfile -t indb < <(db_files "$reldir" "$db")
-	if (( ${#indb[@]} == 0 )); then
-		archci_log "skipping prune of [$db]: local database is empty or unreadable"
-		continue
-	fi
-	# What this pass replaced (named by the database before, not after) goes
-	# now, in one delete, without listing the release area ...
-	gone=$work/gone.list; : >"$gone"
-	comm -23 <(sort <<<"${before[$reldir]}") <(printf '%s\n' "${indb[@]}" | sort) | grep '\.pkg\.tar\.zst$' |
-		while IFS= read -r f; do printf '%s\n%s.sig\n' "$reldir/$f" "$reldir/$f"; done >"$gone" || true
-	if [[ -s $gone ]]; then
-		archci_log "pruning $(( $(wc -l <"$gone") / 2 )) superseded package(s) from [$db]"
-		rclone delete --files-from "$gone" "$ARCHCI_R2_RELEASE" 2>/dev/null || true
-	fi
-	# ... and the listing that catches leftovers of an interrupted pass runs
-	# every ARCHCI_SIGN_PRUNE_MINUTES, not every minute
-	stamp=$ARCHCI_SIGNER_HOME/prune-${reldir//\//-}.stamp
-	[[ -n $(find "$stamp" -mmin -"$ARCHCI_SIGN_PRUNE_MINUTES" 2>/dev/null) ]] && continue
-	touch "$stamp"
-	# Membership through an associative array, not a pipeline into grep -q:
-	# grep quits at the first match, and with a database of a few hundred
-	# entries the printf feeding it then dies of SIGPIPE, which pipefail
-	# turned into "not in the database" -- and pruned live packages.
-	declare -A inset=()
-	for f in "${indb[@]}"; do inset[$f]=1; done
-	while IFS= read -r f; do
-		[[ $f == *.pkg.tar.zst ]] || continue
-		[[ -n ${inset[$f]:-} ]] && continue
-		archci_log "pruning superseded $reldir/$f from release"
-		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f" 2>/dev/null || true
-		rclone deletefile "$ARCHCI_R2_RELEASE/$reldir/$f.sig" 2>/dev/null || true
-	done < <(rclone lsf --files-only "$ARCHCI_R2_RELEASE/$reldir" 2>/dev/null | grep '\.pkg\.tar\.zst$' || true)
-done
-
-# drain what this pass signed or rejected from staging, in one call
-[[ -s $drop ]] && { rclone delete --files-from "$drop" "$ARCHCI_R2_STAGING" 2>/dev/null || true; }
-
-archci_log "signed $signed, rejected $rejected; $(( total - signed - rejected )) left for the next pass"
+if (( signed )); then
+	rsync -a --timeout=600 -e "ssh ${ssh_opts[*]}" "$work/sigs/" "$ARCHCI_MASTER:." || archci_die "could not return the signatures to the master"
+	master signed || true
+fi
+rm -rf "$work"
+archci_log "signed $signed, rejected $rejected$( (( locked )) && echo ', stopped: the release key is locked')"
 exit 0

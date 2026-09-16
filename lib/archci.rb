@@ -113,11 +113,10 @@ module Archci
     config['ARCHCI_ANY_ARCH'] || arches.first
   end
 
-  # What the signer has released, as archci-signer-status last listed it
-  # (released/<repo>-<arch>: "name version" per package the arch's database
-  # names; released/<repo>-src: the source packages found): a Set of the
-  # lines, nil without a listing (no signer status yet), cached by the
-  # file's mtime.
+  # What is released, as archci-publish last listed it (released/<repo>-
+  # <arch>: "name version" per package the arch's database names;
+  # released/<repo>-src: the signed source packages): a Set of the lines,
+  # nil without a listing (nothing indexed yet), cached by the file's mtime.
   @released = {}
   def self.released(repo, arch)
     path = File.join(home, 'released', "#{repo}-#{arch}")
@@ -153,6 +152,30 @@ module Archci
     released?(repo, 'src', file, path) ? file : nil
   rescue Errno::ENOENT
     nil
+  end
+
+  # The signing pipeline as the master sees it: what waits in the pool
+  # for the signer (files without a release signature, an any package once,
+  # the rejected ones apart, and the oldest's age) and what is released per
+  # arch (the listing archci-publish writes from each database: its entry
+  # count and when it last changed; nil before the first index).
+  def self.signer_status(now)
+    repo = config['ARCHCI_REPO']
+    pool = File.join(home, 'repo')
+    files = Dir.glob(File.join(pool, '*', 'os', '*', '*.{pkg.tar.zst,src.tar.zst,src.tar.gz}'))
+    waiting = files.reject { |f| File.exist?("#{f}.sig") || File.exist?("#{f}.rejected") }
+    names = waiting.map { |f| File.basename(f) }.uniq
+    oldest = waiting.map { |f| File.mtime(f) }.min
+    rejected = Dir.glob(File.join(pool, '*', 'os', '*', '*.rejected')).size
+    release = arches.to_h do |a|
+      listing = File.join(home, 'released', "#{repo}-#{a}")
+      if File.exist?(listing)
+        [a, { 'updated' => File.mtime(listing).utc.iso8601, 'packages' => File.readlines(listing).size }]
+      else
+        [a, { 'updated' => nil, 'packages' => nil }]
+      end
+    end
+    { 'unsigned' => { 'waiting' => names.size, 'oldest_s' => oldest && (now - oldest).to_i }, 'rejected' => rejected, 'release' => release }
   end
 
   # A worker id is <host>-<n> for a worker building the host's native arch
@@ -473,13 +496,7 @@ module Archci
       job[j].merge('id' => j['id'], 'final' => j['final'] == '1', 'finished' => j['finished'], 'log' => log_where(j),
                    **j.slice('state', 'claimed', 'created', 'error', 'last'))
     end
-    # What archci-signer-status last saw of the signer through R2, if it runs.
-    status = File.join(home, 'signer.status')
-    signer = begin
-      JSON.parse(File.read(status)).merge('age_s' => (now - File.mtime(status)).to_i)
-    rescue Errno::ENOENT, JSON::ParserError
-      nil
-    end
+    signer = signer_status(now)
     done_paths = Dir.glob(File.join(queue('done'), '*.job'))
     done = jobs('done', newest: 50).sort_by { |j| -j['mtime'].to_i }
     recent = done.map do |j|

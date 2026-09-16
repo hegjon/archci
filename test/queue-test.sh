@@ -39,9 +39,14 @@ me=$(cut -d. -f1 /proc/sys/kernel/hostname)
 ARCHCI_PKG_SOURCES=nothing "$job" claim worker-2 x86_64 load=0.20 mem=40 disk=61 cpus=4 archci=0.3.19-1 | grep . >/dev/null && fail "worker-2's poll must get no job with no sources enabled"
 "$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
 "$top" | grep "^worker  *DigitalOcean  *x86_64  *0.10 .* 4  *2  *1  0.3.19-1$" >/dev/null || fail "the archci version must come from whichever worker sent it: $("$top" | grep ^worker)"
-printf '{"generated":"2026-01-01T00:00:00Z","staging":{"waiting":2,"oldest_s":90},"release":{"x86_64":{"updated":"2026-01-01T00:00:00Z","packages":63},"aarch64":{"updated":null,"packages":null}}}\n' >"$ARCHCI_HOME/signer.status"
-"$top" | grep "^unsigned: 2 pkg in staging (oldest 1m30s)$" >/dev/null || fail "archci-top must show the unsigned staging backlog from signer.status: $("$top" | grep ^unsigned)"
-"$top" | grep "^released: x86_64 63 pkg  aarch64 unreachable$" >/dev/null || fail "the released line must show the released databases per arch: $("$top" | grep ^released)"
+# the signing pipeline as the master sees it: what the databases archci-publish
+# indexed hold (the released listings) and what waits in the pool for the signer
+mkdir -p "$ARCHCI_HOME/released" "$ARCHCI_HOME/repo/omarchy/os/x86_64"; seq 63 | sed 's/^/p&-1-1 /' >"$ARCHCI_HOME/released/omarchy-x86_64"
+w1=$(mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" waiting 1-1); touch -d '-90 seconds' "$w1"
+w2=$(mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" parked 1-1); : >"$w2.rejected"
+"$top" | grep "^unsigned: 1 pkg in the pool (oldest 1m[23][0-9]s)   rejected by the signer: 1$" >/dev/null || fail "archci-top must show what waits for the signer, the oldest's age and the rejected: $("$top" | grep ^unsigned)"
+ARCHCI_ARCHES="x86_64 aarch64" "$top" | grep "^released: x86_64 63 pkg  aarch64 none yet$" >/dev/null || fail "the released line must show the databases per arch: $(ARCHCI_ARCHES="x86_64 aarch64" "$top" | grep ^released)"
+rm -f "$w1" "$w2" "$w2.rejected"; rm -r "$ARCHCI_HOME/released"
 "$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=104858 peak=204800 build=134217728
 COLUMNS=200 "$top" | grep "  3.70  128G  102G  200G  -        arch     acl" >/dev/null || fail "memory from 100G up must keep five characters: $(COLUMNS=200 "$top" | grep worker-1)"
 "$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880 phase=check
@@ -89,7 +94,7 @@ sed -i "s/^heartbeat=.*/heartbeat=$(date -u +%FT%TZ)/" "$ARCHCI_HOME/queue/done/
 [[ $(<"$ARCHCI_HOME/built/omarchy-x86_64/acl") == "1:2.3.2-1 $(pkgcommit acl)" ]] || fail "built record wrong"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/$pn ]] || fail "package not pooled under its hashed name: $(ls "$ARCHCI_HOME/repo/omarchy/os/x86_64")"
 [[ -f $ARCHCI_HOME/repo/omarchy/os/x86_64/$pn.buildsig ]] || fail "buildsig not kept"
-[[ -e $ARCHCI_HOME/stage.needed ]] || fail "stage flag missing"
+[[ -e $ARCHCI_HOME/publish.needed ]] || fail "publish flag missing"
 [[ -z $(ls -A "$ARCHCI_HOME/logs") ]] || fail "the build log is the journal's, nothing is archived: $(find "$ARCHCI_HOME/logs")"
 grep -q '^claimed=20' "$ARCHCI_HOME/queue/done/$id.job" || fail "a finished job keeps its claim time (it bounds its journal entries)"
 grep -q '^last===> archci-build finished with 0 at 2026-09-15T10:01:43Z: acl-1:2.3.2-1-x86_64.pkg.tar.zst$' "$ARCHCI_HOME/queue/done/$id.job" || fail "the report keeps the log's last line in the job file: $(cat "$ARCHCI_HOME/queue/done/$id.job")"
@@ -119,7 +124,7 @@ journal_add sourcer archci-sourcer.service "==> archci-sourcer 0.5.0 $sid on sou
 # an unhashed upload (an older sourcer): named with its sha256 at ingest, the record names that
 srec=$(<"$ARCHCI_HOME/built/omarchy-src/acl"); sf=${srec##* }
 [[ $srec == "1:2.3.2-1 $(pkgcommit acl) acl-1:2.3.2-1-"*.src.tar.gz && $sf =~ ^acl-1:2\.3\.2-1-[0-9a-f]{64}\.src\.tar\.gz$ ]] || fail "the src built record must name the (hashed) file: $srec"
-[[ -f $ARCHCI_HOME/repo/omarchy/os/src/$sf && -f $ARCHCI_HOME/repo/omarchy/os/src/$sf.buildsig && -e $ARCHCI_HOME/stage.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage: $(ls "$ARCHCI_HOME/repo/omarchy/os/src")"
+[[ -f $ARCHCI_HOME/repo/omarchy/os/src/$sf && -f $ARCHCI_HOME/repo/omarchy/os/src/$sf.buildsig && -e $ARCHCI_HOME/publish.needed ]] || fail "the source package and its buildsig must be pooled under os/src for archci-stage: $(ls "$ARCHCI_HOME/repo/omarchy/os/src")"
 [[ $(jq -c '[.lines[1], (.lines | length)]' <<<"$("$master/archci-web" log "$sid")") == '["fetched",3]' ]] || fail "a fetch's log is the sourcer service's entries on its host: $("$master/archci-web" log "$sid")"
 [[ $(jq -r '.started + " " + .stopped' <<<"$("$master/archci-web" job "$sid")") == "2026-09-15T10:02:00Z 2026-09-15T10:02:30Z" ]] || fail "a fetch's span comes from its journal entries: $("$master/archci-web" job "$sid")"
 [[ $("$next" src) == "5 omarchy src libsigc++ "* ]] || fail "acl's sources are in; libsigc++ is next: $("$next" src)"
@@ -151,7 +156,7 @@ grep -q '^error===> ERROR: Failure while downloading https://example/linux.tar.x
 id=$(ARCHCI_RELEASE_LAG_MINUTES=60 claim_id worker-2 x86_64)
 grep -q '^sources=' "$ARCHCI_HOME/queue/running/$id.job" && fail "a claim must not name a source package the signer has not released yet"
 "$job" report "$id" abandoned "$(owner "$id")"
-# with archci-signer-status' listing of the release, the listing decides,
+# with archci-publish's listing of the release, the listing decides,
 # not the lag (the abandoned job waits in pending/, so the claim is what
 # shows it)
 mkdir -p "$ARCHCI_HOME/released"; : >"$ARCHCI_HOME/released/omarchy-src"

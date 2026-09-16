@@ -3,17 +3,14 @@
 # stalled. Runs on the signer on a timer; the journal streams to the master, so
 # a warning shows up in `journalctl -D /var/lib/archci/journal -t archci-sign-health`.
 #
-# Two failure modes it catches, both otherwise silent (no unit goes red):
+# Three failure modes it catches, all otherwise silent (no unit goes red):
 #   * the release key's gpg-agent cache expired -> archci-sign can't sign
-#   * packages piling up in staging (signer down, rclone failing, key locked)
+#   * unsigned files piling up on the master (signer down, key locked)
+#   * the master unreachable from here
 # It tests the key with `--pinentry-mode error`, which fails immediately if the
 # passphrase is not cached instead of prompting, so the check never blocks.
 set -uo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
-
-[[ -n $ARCHCI_R2_STAGING ]] || exit 0
-command -v rclone >/dev/null || exit 0
-export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
 
 locked=0
 if [[ -d $ARCHCI_RELEASE_GNUPGHOME ]]; then
@@ -23,13 +20,23 @@ if [[ -d $ARCHCI_RELEASE_GNUPGHOME ]]; then
 	rm -f "$tmp"
 fi
 
-waiting=$(rclone lsf -R --files-only "$ARCHCI_R2_STAGING" 2>/dev/null | grep -c '\.pkg\.tar\.zst$' || true)
+waiting=0 reach=1
+if [[ -f $ARCHCI_SIGNER_KEY ]]; then
+	if out=$(ssh -n -i "$ARCHCI_SIGNER_KEY" -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=accept-new \
+			-o UserKnownHostsFile=/etc/archci/known_hosts "$ARCHCI_MASTER" unsigned 0 2>/dev/null); then
+		waiting=$(grep -c . <<<"$out")
+	else
+		reach=0
+	fi
+fi
 
-if (( locked )) && (( waiting > 0 )); then
-	archci_log "ALERT: release key is LOCKED and $waiting package(s) wait in staging; run 'archci sign --unlock' on the signer"
+if (( ! reach )); then
+	archci_log "WARNING: cannot reach the master ($ARCHCI_MASTER) with $ARCHCI_SIGNER_KEY; nothing gets signed"
+elif (( locked )) && (( waiting > 0 )); then
+	archci_log "ALERT: release key is LOCKED and $waiting file(s) wait unsigned on the master; run 'archci sign --unlock' on the signer"
 elif (( locked )); then
-	archci_log "WARNING: release key is locked; run 'archci sign --unlock' before packages arrive (staging empty for now)"
-elif (( waiting >= ARCHCI_STAGING_WARN )); then
-	archci_log "WARNING: $waiting package(s) in staging are not draining; check 'systemctl status archci-sign.timer' and 'journalctl -u archci-sign'"
+	archci_log "WARNING: release key is locked; run 'archci sign --unlock' before packages arrive (nothing waits for now)"
+elif (( waiting >= ARCHCI_UNSIGNED_WARN )); then
+	archci_log "WARNING: $waiting file(s) wait unsigned on the master and are not draining; check 'systemctl status archci-sign.timer' and 'journalctl -u archci-sign'"
 fi
 exit 0

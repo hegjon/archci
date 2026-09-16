@@ -82,7 +82,7 @@ upload_ok() {
 	: >"$f.buildsig"
 }
 
-mkdir -p "$ARCHCI_HOME"/{queue/{pending,running,done,failed},built,logs,lock,incoming,repo}
+mkdir -p "$ARCHCI_HOME"/{queue/{pending,running,done,failed},built,logs,lock,incoming,repo,sigs,db,released}
 pkgs=$tmp/pkgs
 git -C "$tmp" init -q -b master "$pkgs"
 mkpkgbuild linux 7.2.3.arch1-2

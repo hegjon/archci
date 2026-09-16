@@ -11,7 +11,7 @@ source "$root/lib/archci-common.sh"
 # the commands: "name what it does"
 commands=(
 	"authorize-builder trust a worker's builder key on the signer"
-	"sign release-sign the packages the master staged to R2"
+	"sign release-sign what the master pooled, and return the signatures (--unlock: cache the passphrase)"
 	"sign-health warn in the journal when release signing is stalled"
 )
 

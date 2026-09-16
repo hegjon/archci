@@ -62,13 +62,13 @@ _archci() {
 			;;
 		top)      mapfile -t COMPREPLY < <(compgen -W '-n' -- "$cur") ;;
 		sign)     mapfile -t COMPREPLY < <(compgen -W '--unlock' -- "$cur") ;;
-		stage)    mapfile -t COMPREPLY < <(compgen -W '--force' -- "$cur") ;;
+		publish)  mapfile -t COMPREPLY < <(compgen -W '--force' -- "$cur") ;;
 		next)     mapfile -t COMPREPLY < <(compgen -W "$(_archci_arches)" -- "$cur") ;;
 		pkgindex) mapfile -t COMPREPLY < <(compgen -W "$(archci pkgindex 2>/dev/null | awk '{ print $1 }')" -- "$cur") ;;
 		web)      (( COMP_CWORD == 2 )) && mapfile -t COMPREPLY < <(compgen -W 'snapshot job log entries' -- "$cur")
 		          (( COMP_CWORD == 3 )) && [[ ${words[2]} == 'job' || ${words[2]} == 'log' ]] && mapfile -t COMPREPLY < <(compgen -W "$(_archci_jobs pending running 'done' failed)" -- "$cur") ;;
 		authorize)
-			if [[ $cur == -* ]]; then mapfile -t COMPREPLY < <(compgen -W '--revoke --sourcer --web' -- "$cur")
+			if [[ $cur == -* ]]; then mapfile -t COMPREPLY < <(compgen -W '--revoke --sourcer --signer --web' -- "$cur")
 			else mapfile -t COMPREPLY < <(compgen -f -- "$cur"); fi
 			;;
 		authorize-builder) mapfile -t COMPREPLY < <(compgen -f -- "$cur") ;;

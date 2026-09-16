@@ -247,15 +247,15 @@ def frame(journal)
     out << format('sources: %s packaged  %s to fetch  %s failed%s', bold(s['ready']), bold(s['needed']), bold(s['failed']),
                   s['last'] ? "   (last fetch #{elapsed(now - Time.iso8601(s['last']))} ago)" : '')
   end
-  # the signer, as seen through R2 by archci-signer-status: what is signed
-  # and released per arch on one line, what waits unsigned in staging on
+  # the signing pipeline: what is released per arch (the databases archci-
+  # publish indexes) on one line, what waits in the pool for the signer on
   # the next
   if (s = snap['signer'])
-    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} unreachable" }
+    rel = (s['release'] || {}).map { |a, r| r['updated'] ? "#{a} #{bold(r['packages'])} pkg" : "#{a} none yet" }
     out << "released: #{rel.join('  ')}" unless rel.empty?
-    st = s['staging'] || {}
-    line = format('unsigned: %s pkg in staging%s', bold(st['waiting'].to_i), st['oldest_s'] ? " (oldest #{elapsed(st['oldest_s'])})" : '')
-    line += "   [status #{elapsed(s['age_s'])} old]" if s['age_s'] > 600
+    u = s['unsigned'] || {}
+    line = format('unsigned: %s pkg in the pool%s', bold(u['waiting'].to_i), u['oldest_s'] ? " (oldest #{elapsed(u['oldest_s'])})" : '')
+    line += format('   rejected by the signer: %s', bold(s['rejected'])) if s['rejected'].to_i.positive?
     out << line
   end
   out << ''

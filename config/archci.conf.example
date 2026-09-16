@@ -52,10 +52,9 @@ ARCHCI_RETRY_MINUTES=180
 ARCHCI_RETRY_HOLD_MINUTES=720
 # Whether a build's packages, or a source package, have been released (a
 # dependent's chroot installs from the release; a build claim names the
-# source package) is read from the release itself: archci-signer-status
-# lists it every 2 minutes (released/ on the master). Until it has (no
-# ARCHCI_RELEASE_URL, or before its first pass) this many minutes after
-# the build stand in.
+# source package) is read from the databases archci-publish indexes
+# (released/ on the master, rewritten every pass). Before the first pass
+# this many minutes after the build stand in.
 ARCHCI_RELEASE_LAG_MINUTES=20
 # Where the master keeps what it can rebuild: the package index cache.
 ARCHCI_CACHE_DIR=/var/cache/archci
@@ -64,8 +63,8 @@ ARCHCI_CACHE_DIR=/var/cache/archci
 # are written; the scan's journal says what each rebuild cost.
 ARCHCI_INDEX_CACHE=file
 # Sources: the sourcer host claims src jobs and hands the master a source
-# package (<pkgbase>-<version>.src.tar.gz) per package, released beside the
-# arches under <repo>/os/src; a build claim names it to the worker.
+# package (<pkgbase>-<version>-<sha256>.src.tar.zst) per package, released
+# beside the arches under <repo>/os/src; a build claim names it to the worker.
 # Master: 1 holds a build until its source package is released, so no
 # build fetches upstream; 0 lets a build fetch upstream meanwhile.
 ARCHCI_SOURCES_REQUIRED=0
@@ -78,26 +77,23 @@ ARCHCI_SOURCER_TIMEOUT_MINUTES=30
 ARCHCI_REMOTE_JOURNAL=/var/lib/archci/journal
 # Finished job records are pruned from queue/done after this many days.
 ARCHCI_DONE_KEEP_DAYS=30
-# R2 hand-off (see README "Signing"). Master moves built packages to STAGING;
-# the signer reads STAGING and publishes the signed repo to RELEASE, which is
-# what clients use. rclone remotes, e.g. "r2:archci/staging" and "r2:archci".
-ARCHCI_R2_STAGING=""
+# The release (see README "Signing"): the rclone remote archci-publish on the
+# master publishes the signed pool to, the repository clients use, e.g.
+# "r2:archci-test2" (an R2 bucket; the master's token writes it). Empty:
+# the master indexes but publishes nothing.
 ARCHCI_R2_RELEASE=""
-# Off-volume archive of makepkg's own logs, sent with a build's results
-# (logs/<repo>/<pkgbase>/<version>/<arch>/attempt-N-<pkg>-build.log ...).
-# The build logs themselves are the workers' journal on the master
-# (ARCHCI_REMOTE_JOURNAL), not files. archci-stage copies new files here and
-# keeps the local copies. The master's rclone token must be allowed to write
-# this prefix. Empty: they stay only on the master. e.g. "r2:archci/logs".
-ARCHCI_R2_LOGS=""
 ARCHCI_RCLONE_CONFIG=/etc/archci/rclone.conf
+# Every this many minutes archci-publish lists each release directory and
+# deletes what its database does not name (a superseded version goes the
+# pass that replaces it; the listing catches leftovers of an interrupted
+# pass). Never against an empty database.
+ARCHCI_PUBLISH_RECONCILE_MINUTES=60
 # The released repo's public URL, as clients use it, e.g.
-# "https://pub-xxxx.r2.dev". On the master, archci-signer-status shows the
-# released databases' age and size from it in archci top. On a worker, the
-# chroots get [ARCHCI_REPO] at this URL above the mirrors, so builds use the
-# packages the farm has built; the host's pacman keyring must trust the
-# release key (it does when the worker installs archci from that repo).
-# Empty: the chroots use the mirrors only.
+# "https://pub-xxxx.r2.dev". On a worker, the chroots get [ARCHCI_REPO] at
+# this URL above the mirrors, so builds use the packages the farm has built,
+# and source packages are fetched from it; the host's pacman keyring must
+# trust the release key (it does when the worker installs archci from that
+# repo). Empty: the chroots use the mirrors only.
 ARCHCI_RELEASE_URL=""
 
 ## Signing (see README "Signing") --------------------------------------------
@@ -105,24 +101,29 @@ ARCHCI_RELEASE_URL=""
 # signs each package (<pkg>.buildsig) as internal provenance.
 ARCHCI_BUILDER_GNUPGHOME=/etc/archci/builder-gnupg
 ARCHCI_BUILDER_KEY=archci-builder
+# Master: the release PUBLIC key, an armored export from the signer
+# (gpg --armor --export). archci-publish verifies every signature the signer
+# returns with it before a package is indexed, and publishes it as
+# release.pub for clients.
+ARCHCI_RELEASE_PUBKEY=/etc/archci/release.pub
 # Signer: the release secret key's gpg home and uid (passphrase-protected), the
-# keyring of trusted builder pubkeys, and the signer's working directory.
+# keyring of trusted builder pubkeys, the signer's ssh key to the master
+# (archci-sign makes it on its first run; authorize it on the master with
+# `archci authorize --signer`; the master is ARCHCI_MASTER below) and the
+# signer's working directory.
 ARCHCI_RELEASE_GNUPGHOME=/etc/archci/release-gnupg
 ARCHCI_RELEASE_KEY=archci-release
 ARCHCI_BUILDER_KEYRING=/etc/archci/builder-keyring
+ARCHCI_SIGNER_KEY=/etc/archci/signer_key
 ARCHCI_SIGNER_HOME=/var/lib/archci-signer
-# archci-sign-health warns when at least this many packages sit unsigned in staging.
-ARCHCI_STAGING_WARN=20
-# Packages archci-sign signs per pass; passes run a minute apart. Small keeps
-# a freshly staged archci release from waiting behind a long pass.
+# archci-sign-health warns when at least this many files wait unsigned on the master.
+ARCHCI_UNSIGNED_WARN=20
+# Files archci-sign signs per pass; passes run a minute apart. Small keeps a
+# freshly built archci release from waiting behind a long pass.
 ARCHCI_SIGN_BATCH=20
-# How often archci-sign lists a release directory to prune files its database
-# no longer names. A superseded version is deleted the pass that replaces it;
-# the listing only catches leftovers of an interrupted pass.
-ARCHCI_SIGN_PRUNE_MINUTES=60
 
-## Worker ---------------------------------------------------------------------
-# ssh destination of the master. The master droplet is named "master"; workers resolve
+## Worker, sourcer, signer ----------------------------------------------------
+# ssh destination of the master. The master droplet is named "master"; hosts resolve
 # it via /etc/hosts (cloud-init writes it) or DO private DNS.
 ARCHCI_MASTER="archci@master"
 # Where systemd-journal-upload streams this host's archci journal (a worker,

@@ -1,13 +1,13 @@
 # The master role as one unit: systemctl enable --now archci-master.target
-# starts its timers (the PKGBUILD sync, the queue's housekeeping, staging,
-# the signer status) and the workers' journal receiver, and has them start
+# starts its timers (the PKGBUILD sync, the queue's housekeeping, the
+# publish) and the workers' journal receiver, and has them start
 # at boot; stop or disable the target and they follow (PartOf= in each).
 # sshd is wanted too: the workers come in over ssh. Each unit can still be
 # enabled on its own.
 [Unit]
-Description=archci master: the PKGBUILD sync, the queue, staging, the signer status and the workers' journals
-Wants=sshd.service archci-scan.timer archci-housekeeping.timer archci-stage.timer archci-signer-status.timer archci-journal-remote.service
-After=sshd.service archci-scan.timer archci-housekeeping.timer archci-stage.timer archci-signer-status.timer archci-journal-remote.service
+Description=archci master: the PKGBUILD sync, the queue, the publish and the workers' journals
+Wants=sshd.service archci-scan.timer archci-housekeeping.timer archci-publish.timer archci-journal-remote.service
+After=sshd.service archci-scan.timer archci-housekeeping.timer archci-publish.timer archci-journal-remote.service
 
 [Install]
 WantedBy=multi-user.target

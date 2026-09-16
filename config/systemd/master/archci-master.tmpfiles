@@ -10,6 +10,13 @@ d /var/lib/archci/logs 0755 archci archci -
 d /var/lib/archci/lock 0755 archci archci -
 d /var/lib/archci/incoming 0755 archci archci -
 d /var/lib/archci/repo 0755 archci archci -
+# the signer's returned signatures (rrsync, write-only), the databases the
+# master indexes and publishes, the released listings a claim reads, and the
+# master's keyring of the release PUBLIC key
+d /var/lib/archci/sigs 0755 archci archci -
+d /var/lib/archci/db 0755 archci archci -
+d /var/lib/archci/released 0755 archci archci -
+d /var/lib/archci/release-keyring 0700 archci archci -
 # what the master can rebuild: the package index cache (ARCHCI_CACHE_DIR)
 d /var/cache/archci 0755 archci archci -
 # worker keys sshd reads for the archci user (archci-authorize appends to it)

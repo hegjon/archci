@@ -1,0 +1,259 @@
+#!/bin/bash
+# archci-publish [--force] -- the pool to the release: the signer's
+# signatures accepted, the databases indexed, the release published to R2 and
+# pruned. Runs as the archci user on a timer (every minute) when the queue or
+# the signer flagged work (publish.needed) or a reconcile is due; --force
+# runs a full pass now.
+#
+# The pool (repo/<repo>/os/<arch>/, os/src/) holds what workers built and is
+# not published yet, each file with its builder signature. The signer fetches
+# what has no release signature (archci-shell signer: unsigned, rsync), puts
+# each <file>.sig into sigs/ and flags this (signed). A pass:
+#   1. sigs/: each returned signature is verified with the release PUBLIC key
+#      (ARCHCI_RELEASE_PUBKEY, imported into a keyring of the master's own,
+#      release-keyring/) and moved beside its package. An any package is
+#      pooled into every arch directory, so its one signature goes beside
+#      every copy. A signature that does not verify, or names no pooled file,
+#      is dropped and logged: the master holds no signing key, so this is the
+#      one check it can make, and it catches a wrong key and a corrupt
+#      transfer.
+#   2. index: every signed package not yet in its database is added with
+#      repo-add -R (one version of a name) to the master's persistent
+#      databases under db/<repo>/os/<arch>/ (<repo> is also <repo>-debug).
+#      The released/<repo>-<arch> listing, "name version" per database entry
+#      (what a claim reads to know a dependency is out), is rewritten from
+#      the database. Source packages have no database: released/<repo>-src
+#      names the signed ones.
+#   3. publish, with ARCHCI_R2_RELEASE: packages and signatures first (an any
+#      package uploaded once and copied server-side into the other arch
+#      directories), then the databases, then release.pub; what repo-add -R
+#      dropped and the older versions of a published source package are
+#      deleted from the release, and every ARCHCI_PUBLISH_RECONCILE_MINUTES
+#      the release directory is listed and what the database does not name
+#      goes (never when the database is empty or missing). Published files
+#      leave the pool with their .buildsig: the pool is what is not
+#      published yet. Without ARCHCI_R2_RELEASE the pass ends after the
+#      index (a farm without a release, the tests) and signed files stay.
+# Every object's name but the databases' and release.pub's carries a hash,
+# so those get a year of immutable caching; the rest no-cache (rclone
+# --header-upload).
+set -euo pipefail
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/archci-common.sh"
+
+force=0
+[[ ${1:-} == --force ]] && force=1
+pool=$ARCHCI_HOME/repo sigs=$ARCHCI_HOME/sigs dbs=$ARCHCI_HOME/db listings=$ARCHCI_HOME/released
+keyring=$ARCHCI_HOME/release-keyring
+flag=$ARCHCI_HOME/publish.needed
+stamp=$ARCHCI_HOME/publish.reconciled
+due=0
+[[ -n $ARCHCI_R2_RELEASE ]] && [[ -z $(find "$stamp" -mmin -"$ARCHCI_PUBLISH_RECONCILE_MINUTES" 2>/dev/null) ]] && due=1
+(( force || due )) || [[ -e $flag ]] || exit 0
+mkdir -p "$pool" "$sigs" "$dbs" "$listings" "$ARCHCI_HOME/lock"
+
+exec 9>"$ARCHCI_HOME/lock/publish.lock"
+flock -n 9 || { archci_log "another archci-publish is running"; exit 0; }
+rm -f "$flag"
+
+# rel PATH -> the path relative to the pool (<repo>/os/<arch>/<file>)
+rel() { printf '%s\n' "${1#"$pool"/}"; }
+# db_files DBFILE -> the package files the database names, one per line
+db_files() { bsdtar -xOf "$1" '*/desc' 2>/dev/null | grep '\.pkg\.tar\.zst$' || true; }
+# is_any FILE -> an arch-independent package (pooled into every arch dir)
+is_any() { [[ $(archci_unhashed_stem "$1") == *-any ]]; }
+immutable=(--header-upload "Cache-Control: public, max-age=31536000, immutable")
+nocache=(--header-upload "Cache-Control: no-cache")
+
+# --- 1. the signer's signatures --------------------------------------------
+# the release public key, into a keyring of the master's own (re-imported
+# when the file changes)
+have_key=0
+if [[ -f $ARCHCI_RELEASE_PUBKEY ]]; then
+	install -d -m 700 "$keyring"
+	if [[ ! -f $keyring/imported || $ARCHCI_RELEASE_PUBKEY -nt $keyring/imported ]]; then
+		gpg --homedir "$keyring" --batch --quiet --import "$ARCHCI_RELEASE_PUBKEY" 2>/dev/null && touch "$keyring/imported"
+	fi
+	[[ -f $keyring/imported ]] && have_key=1
+fi
+accepted=0
+shopt -s nullglob globstar
+for sig in "$sigs"/**/*.sig; do
+	r=$(rel "${sig#"$sigs"/}"); r=${r%.sig}
+	pkg=$pool/${sig#"$sigs"/}; pkg=${pkg%.sig}
+	if (( ! have_key )); then
+		archci_log "cannot verify ${r##*/}.sig: no release public key at $ARCHCI_RELEASE_PUBKEY"
+		break
+	fi
+	if [[ ! -f $pkg ]]; then
+		archci_log "dropping ${r##*/}.sig: no such file in the pool"
+		rm -f "$sig"; continue
+	fi
+	if ! gpg --homedir "$keyring" --batch --verify "$sig" "$pkg" 2>/dev/null; then
+		archci_log "REJECT ${r##*/}.sig: does not verify with the release key"
+		rm -f "$sig"; continue
+	fi
+	(
+		exec 8>"$ARCHCI_HOME/lock/repo.lock"; flock 8
+		if is_any "$pkg"; then
+			for copy in "$pool/${r%%/*}"/os/*/"${r##*/}"; do cp "$sig" "$copy.sig"; done
+			rm -f "$sig"
+		else
+			mv "$sig" "$pkg.sig"
+		fi
+	)
+	(( ++accepted ))
+done
+find "$sigs" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+(( accepted )) && archci_log "accepted $accepted release signature(s)"
+
+# --- 2. index ------------------------------------------------------------------
+declare -A before=() touched=()   # per <repo>/os/<arch>: the db's files before; touched this pass
+indexed=0
+for osdir in "$pool"/*/os/*/; do
+	osdir=${osdir%/}; arch=${osdir##*/}
+	[[ $arch == src ]] && continue
+	db=${osdir#"$pool"/}; db=${db%%/*}           # <repo> or <repo>-debug
+	dbdir=$dbs/${osdir#"$pool"/}; dbfile=$dbdir/$db.db.tar.gz
+	mkdir -p "$dbdir"
+	key=${osdir#"$pool"/}
+	before[$key]=$(db_files "$dbfile")
+	add=()
+	for pkg in "$osdir"/*.pkg.tar.zst; do
+		[[ -f $pkg.sig ]] || continue
+		grep -qxF "${pkg##*/}" <<<"${before[$key]}" && continue
+		add+=("$pkg")
+	done
+	(( ${#add[@]} )) || continue
+	repo-add -R -q "$dbfile" "${add[@]}" >/dev/null
+	touched[$key]=$db
+	indexed=$(( indexed + ${#add[@]} ))
+	archci_log "indexed ${#add[@]} package(s) into [$db] $arch"
+done
+# the listings a claim reads: "name version" per database entry; the source
+# packages by file name (signed, so on their way out or out)
+for dbfile in "$dbs"/*/os/*/*.db.tar.gz; do
+	d=${dbfile%/*}; arch=${d##*/}; repo=${d#"$dbs"/}; repo=${repo%%/*}
+	bsdtar -xOf "$dbfile" '*/desc' 2>/dev/null | awk '$0 == "%NAME%" { getline; n = $0 } $0 == "%VERSION%" { getline; print n, $0 }' >"$listings/$repo-$arch.tmp" &&
+		mv "$listings/$repo-$arch.tmp" "$listings/$repo-$arch"
+done
+for srcdir in "$pool"/*/os/src/; do
+	repo=${srcdir#"$pool"/}; repo=${repo%%/*}
+	{ cat "$listings/$repo-src" 2>/dev/null || true; for f in "$srcdir"*.src.tar.*; do [[ $f == *.sig || $f == *.buildsig || $f == *.rejected ]] && continue; [[ -f $f.sig ]] && printf '%s\n' "${f##*/}"; done; } | sort -u >"$listings/$repo-src.tmp"
+	mv "$listings/$repo-src.tmp" "$listings/$repo-src"
+done
+
+# --- 3. publish -----------------------------------------------------------------
+if [[ -z $ARCHCI_R2_RELEASE ]]; then
+	(( indexed || accepted )) && archci_log "ARCHCI_R2_RELEASE is empty: indexed, not published"
+	exit 0
+fi
+command -v rclone >/dev/null || archci_die "rclone is not installed"
+export RCLONE_CONFIG=$ARCHCI_RCLONE_CONFIG
+work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+upload=$work/upload.list copies=$work/copies.list gone=$work/gone.list
+: >"$upload"; : >"$copies"; : >"$gone"
+declare -A published=()   # pool files this pass publishes (with their arch copies), to leave the pool
+srcpublished=()
+for f in "$pool"/*/os/*/*.pkg.tar.zst "$pool"/*/os/src/*.src.tar.*; do
+	[[ $f == *.sig || $f == *.buildsig || $f == *.rejected ]] && continue
+	[[ -f $f.sig ]] || continue
+	# a package is published once it is in its database (the index above); a
+	# source package once signed
+	r=$(rel "$f"); repo=${r%%/*}; name=${r##*/}
+	if [[ $f != */os/src/* ]]; then
+		key=${r%/*}
+		grep -qxF "$name" < <(db_files "$dbs/$key/$repo.db.tar.gz") || continue
+	fi
+	[[ -n ${published[$f]:-} ]] && continue
+	if is_any "$f"; then
+		# once, from this arch directory; copied server-side into the others
+		first=1
+		for copy in "$pool/$repo"/os/*/"$name"; do
+			published[$copy]=1
+			c=$(rel "$copy")
+			if (( first )); then printf '%s\n%s.sig\n' "$c" "$c" >>"$upload"; first=0; src_rel=$c
+			else printf '%s %s\n' "$src_rel" "$c" >>"$copies"; fi
+		done
+	else
+		published[$f]=1
+		printf '%s\n%s.sig\n' "$r" "$r" >>"$upload"
+		[[ $f == */os/src/* ]] && srcpublished+=("$r")
+	fi
+done
+n=$(( $(wc -l <"$upload") / 2 ))
+if (( n )); then
+	rclone copy --files-from "$upload" --transfers 8 --checkers 16 --no-traverse "${immutable[@]}" "$pool" "$ARCHCI_R2_RELEASE"
+	while read -r from to; do
+		rclone copyto "${immutable[@]}" "$ARCHCI_R2_RELEASE/$from" "$ARCHCI_R2_RELEASE/$to"
+		rclone copyto "${immutable[@]}" "$ARCHCI_R2_RELEASE/$from.sig" "$ARCHCI_R2_RELEASE/$to.sig"
+	done <"$copies"
+	archci_log "published $n file(s) to $ARCHCI_R2_RELEASE"
+fi
+# the databases that changed, both names clients fetch, after the packages
+# they name
+for key in "${!touched[@]}"; do
+	db=${touched[$key]}
+	for pair in "db.tar.gz:db" "files.tar.gz:files"; do
+		src=$dbs/$key/$db.${pair%%:*}
+		[[ -f $src ]] || continue
+		rclone copyto "${nocache[@]}" "$src" "$ARCHCI_R2_RELEASE/$key/$db.${pair%%:*}"
+		rclone copyto "${nocache[@]}" "$src" "$ARCHCI_R2_RELEASE/$key/$db.${pair##*:}"
+	done
+	# what this pass replaced (named by the database before, not after) goes,
+	# with its signature, in one delete
+	comm -23 <(sort <<<"${before[$key]}") <(db_files "$dbs/$key/$db.db.tar.gz" | sort) |
+		while IFS= read -r f; do [[ -n $f ]] && printf '%s\n%s.sig\n' "$key/$f" "$key/$f"; done >>"$gone" || true
+done
+# a source package supersedes the older versions of its package: among the
+# release's files that start with the pkgbase, those whose rest is a version
+# vercmp puts before this one (another package whose name starts the same
+# way has no version there, and stays)
+for r in "${srcpublished[@]}"; do
+	dir=${r%/*}; name=${r##*/}
+	stem=$(archci_unhashed_stem "$name"); pkgbase=${stem%-*-*}; version=${stem#"$pkgbase-"}
+	while IFS= read -r f; do
+		[[ $f == "$pkgbase-"*.src.tar.* && $f != *.sig && $f != "$name" ]] || continue
+		v=$(archci_unhashed_stem "$f"); v=${v#"$pkgbase-"}
+		[[ $v =~ ^([0-9]+:)?[^-]+-[^-]+$ ]] || continue
+		(( $(vercmp "$v" "$version") < 0 )) || continue
+		printf '%s\n%s.sig\n' "$dir/$f" "$dir/$f" >>"$gone"
+	done < <(rclone lsf --files-only "$ARCHCI_R2_RELEASE/$dir" 2>/dev/null || true)
+done
+if [[ -s $gone ]]; then
+	archci_log "pruning $(( $(sort -u "$gone" | wc -l) / 2 )) superseded file(s) from the release"
+	sort -u "$gone" >"$gone.u"; rclone delete --files-from "$gone.u" "$ARCHCI_R2_RELEASE" 2>/dev/null || true
+fi
+# the reconcile: every ARCHCI_PUBLISH_RECONCILE_MINUTES, what a release
+# directory holds that its database does not name goes (leftovers of an
+# interrupted pass); never against an empty or missing database, which
+# would empty the release
+if (( due || force )); then
+	for dbfile in "$dbs"/*/os/*/*.db.tar.gz; do
+		key=${dbfile#"$dbs"/}; key=${key%/*}
+		mapfile -t indb < <(db_files "$dbfile")
+		(( ${#indb[@]} )) || { archci_log "skipping the reconcile of $key: the database is empty or unreadable"; continue; }
+		declare -A inset=(); for f in "${indb[@]}"; do inset[$f]=1; done
+		: >"$gone"
+		while IFS= read -r f; do
+			[[ $f == *.pkg.tar.zst ]] || continue
+			[[ -n ${inset[$f]:-} ]] && continue
+			printf '%s\n%s.sig\n' "$key/$f" "$key/$f" >>"$gone"
+		done < <(rclone lsf --files-only "$ARCHCI_R2_RELEASE/$key" 2>/dev/null || true)
+		[[ -s $gone ]] && { archci_log "reconcile: pruning $(( $(wc -l <"$gone") / 2 )) file(s) from $key the database does not name"; rclone delete --files-from "$gone" "$ARCHCI_R2_RELEASE" 2>/dev/null || true; }
+		unset inset
+	done
+	touch "$stamp"
+fi
+# the release public key, for clients, when it changed
+if [[ -f $ARCHCI_RELEASE_PUBKEY ]] && [[ ! -f $ARCHCI_HOME/release.pub.published || $ARCHCI_RELEASE_PUBKEY -nt $ARCHCI_HOME/release.pub.published ]]; then
+	rclone copyto "${nocache[@]}" "$ARCHCI_RELEASE_PUBKEY" "$ARCHCI_R2_RELEASE/release.pub" && touch "$ARCHCI_HOME/release.pub.published"
+fi
+# published files leave the pool: it is what is not published yet
+if (( ${#published[@]} )); then
+	(
+		exec 8>"$ARCHCI_HOME/lock/repo.lock"; flock 8
+		for f in "${!published[@]}"; do rm -f "$f" "$f.sig" "$f.buildsig"; done
+	)
+	find "$pool" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+fi
+exit 0

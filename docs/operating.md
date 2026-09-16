@@ -13,7 +13,7 @@ archci-top  21:09:10   pkgbuilds -> [hegjon-test]   arches: x86_64 aarch64 riscv
 queue: pending 9  running 4  failed 55  done 590 (3 in the last hour)    outstanding: 0 update(s), 850 unbuilt
 built: x86_64 428/569  aarch64 29/569  riscv64 16/569  any 85/119
 released: x86_64 366 pkg  aarch64 152 pkg  riscv64 139 pkg
-unsigned: 0 pkg in staging
+unsigned: 0 pkg in the pool
 
 HOST                   VENDOR        ARCH     LOAD %DISK  %MEM THREADS WORKERS ACTIVE  ARCHCI
 master                 DigitalOcean  x86_64   0.12  41.0  23.5       1       -      -  0.3.19-1
@@ -56,21 +56,22 @@ archci web log <jobid>              a job's log as JSON: the lines and the index
 archci web entries <jobid>          the same as journal entries, each line with its time and phase: what the web's log window is built from
 journalctl -t archci-job -f         every claim/report on the master
 journalctl -u archci-scan           scan results
-journalctl -u archci-stage          staging to R2
+journalctl -u archci-publish         the signatures accepted, the index, the publish to R2
 archci job enqueue extra firefox    build the current release now (priority 0)
 archci top                          live view: workers' load and memory, running
                                     jobs with phase and last output, failures
 archci job retry <jobid>            reset attempts of a failed job and requeue
 archci job retry --all              the same for every failed job (also -a)
 archci job requeue <jobid>          put a running/failed job back, keep attempts
-archci stage --force                move pooled packages to R2 staging now
+archci publish --force              accept, index and publish now (and reconcile the release)
+archci unsigned                     what waits for the signer (0: all)
 archci build job.file /tmp/out      reproduce a build by hand on a worker (root)
 
 # on the signer
 archci sign --unlock                cache the release passphrase for the session
-archci sign                         sign and publish staged packages now
+archci sign                         fetch, verify, sign and return what waits, now
 journalctl -u archci-sign -f        release-signing activity
-journalctl -u archci-sign-health    stall alerts (locked key, staging backlog)
+journalctl -u archci-sign-health    stall alerts (locked key, backlog on the master, master unreachable)
 archci authorize-builder key.pub    trust a worker's builder key
 ```
 
@@ -94,9 +95,10 @@ and pull request:
 - `test/access-test.sh` — archci-authorize and the forced ssh command with
   its rrsync upload. `test/cli-test.sh` — the `archci` entry point and its
   bash completion.
-- `test/signer-test.sh` — the two-stage signing gate with real gpg keys and
-  the R2 hand-off (master stage, signer verify, reject, release-sign, publish,
-  drain) against a local rclone stand-in.
+- `test/signer-test.sh` — the two-stage signing gate with real gpg keys: the
+  signer pulls from the master's pool over a fake ssh (real rsync + rrsync),
+  verifies, rejects, signs and returns; archci-publish verifies, indexes,
+  publishes to a local rclone stand-in, prunes and reconciles.
 - `test/worker-test.sh` — archci-worker end to end with ssh, systemctl and the
   build faked: a normal job, a master outage, self-reload. `pool-test.sh`,
   `watchdog-test.sh` and `config-test.sh` cover one function or file each.

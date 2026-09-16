@@ -23,7 +23,7 @@
 #                             (results are expected in incoming/ID/: the
 #                             packages and their .buildsig; for a src job the
 #                             source package and its .buildsig, pooled under
-#                             <repo>/os/src for archci-stage like a package,
+#                             <repo>/os/src for the signer like a package,
 #                             and the built record names it to the package's
 #                             build claims. The log is not among them: it is
 #                             the job's entries in the workers' journal on
@@ -66,7 +66,7 @@ record_poll() {
 
 # source_package_for REPO PKGBASE COMMIT -> the source package the sourcer
 # made for the package at this commit, once the signer has released it
-# (archci-signer-status' listing; without one, once it has been out
+# (archci-publish's listing; without one, once it has been out
 # ARCHCI_RELEASE_LAG_MINUTES); nothing otherwise
 source_package_for() {
 	local rec=$ARCHCI_HOME/built/$1-src/$2 listing=$ARCHCI_HOME/released/$1-src v c f
@@ -177,14 +177,14 @@ ingest() {
 	local pooled=''
 	[[ $job_arch == any ]] && pooled=" ${ARCHCI_ARCHES// /,}"
 	printf '%s %s%s\n' "$job_version" "$job_commit" "$pooled" >"$ARCHCI_HOME/built/$job_repo-$job_arch/$job_pkgbase"
-	touch "$ARCHCI_HOME/stage.needed"
+	touch "$ARCHCI_HOME/publish.needed"
 	archci_log "$id: pooled $n package(s) for [$job_repo]"
 }
 
 # A src job's results: the source package (<pkgbase>-<version>-<sha256>
 # .src.tar.zst, as the sourcer names it; an older sourcer's
 # <pkgbase>-<version>.src.tar.gz gets its hash here) and its builder
-# signature, pooled under <repo>/os/src for archci-stage as a package is;
+# signature, pooled under <repo>/os/src for the signer as a package is;
 # the built record names the file, which a build claim hands to the worker
 # once it is released.
 ingest_src() {
@@ -203,7 +203,7 @@ ingest_src() {
 	) || return 1
 	mkdir -p "$ARCHCI_HOME/built/$job_repo-src"
 	printf '%s %s %s\n' "$job_version" "$job_commit" "$f" >"$ARCHCI_HOME/built/$job_repo-src/$job_pkgbase"
-	touch "$ARCHCI_HOME/stage.needed"
+	touch "$ARCHCI_HOME/publish.needed"
 	archci_log "$id: pooled $f for [$job_repo]"
 }
 

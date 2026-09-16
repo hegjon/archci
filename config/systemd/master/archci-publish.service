@@ -1,0 +1,10 @@
+[Unit]
+Description=archci: accept the signer's signatures, index the pool, publish the release to R2
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/archci
+
+[Service]
+Type=oneshot
+User=archci
+ExecStart=/usr/lib/archci/master/archci-publish

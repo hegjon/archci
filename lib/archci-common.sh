@@ -65,10 +65,9 @@ archci_load_conf
 # worker claims builds, fetches every source the package's PKGBUILD names
 # into a source package (<pkgbase>-<version>-<sha256>.src.tar.zst), builder-signs it
 # and hands it in like a build's packages; it is pooled under
-# <repo>/os/src, staged, release-signed and published beside the arches,
-# and a build claim names it (sources=) once archci-signer-status has
-# listed it in the release (ARCHCI_RELEASE_LAG_MINUTES after the build
-# without a listing); a worker with ARCHCI_RELEASE_URL takes it from
+# <repo>/os/src, release-signed and published beside the arches, and a
+# build claim names it (sources=) once archci-publish has listed it as
+# released (ARCHCI_RELEASE_LAG_MINUTES after the build without a listing); a worker with ARCHCI_RELEASE_URL takes it from
 # there, checks the release signature, and fetches nothing upstream.
 # ARCHCI_SOURCES_REQUIRED=1 holds a build until that is so; 0 lets a build
 # fetch upstream meanwhile. The sourcer's state: ARCHCI_SOURCER_HOME (the
@@ -79,39 +78,46 @@ archci_load_conf
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 : "${ARCHCI_REMOTE_JOURNAL:=/var/lib/archci/journal}"
-# R2 (or any rclone remote). Master writes unsigned packages to STAGING; the
-# signer reads STAGING, signs, and writes the released repo to RELEASE. Both
-# empty = the R2 hand-off is idle. See README "Signing".
-: "${ARCHCI_R2_STAGING:=}"
+# The release: the master publishes the signed pool to this rclone remote
+# (e.g. "r2:archci-test2"), the repository clients use. Empty = index only,
+# nothing published (a farm without a release, the tests). See README
+# "Signing".
 : "${ARCHCI_R2_RELEASE:=}"
-: "${ARCHCI_R2_LOGS:=}"
 : "${ARCHCI_RCLONE_CONFIG:=/etc/archci/rclone.conf}"
-# Master: the released repo's public URL, as clients use it (the master's
-# rclone token need not read RELEASE). archci-signer-status reports the
-# released databases' age and size from it. Empty = not reported.
+# The released repo's public URL, as clients use it (workers' chroots install
+# from it and fetch source packages by it). Empty = the mirrors only.
 : "${ARCHCI_RELEASE_URL:=}"
+# Master: every ARCHCI_PUBLISH_RECONCILE_MINUTES archci-publish lists each
+# release directory and deletes what its database does not name (superseded
+# versions go the pass that replaces them; the listing catches leftovers of
+# an interrupted pass).
+: "${ARCHCI_PUBLISH_RECONCILE_MINUTES:=60}"
 # --- signing (see README "Signing") -------------------------------------------
-# Master holds NO key. Workers sign each package with a builder key (internal
-# provenance); the signer droplet verifies that, adds the client-facing release
-# signature, builds the database, and publishes the released repo.
+# Master holds NO signing key. Workers sign each package with a builder key
+# (internal provenance); the signer host fetches what waits from the master,
+# verifies that, adds the client-facing release signature and returns it; the
+# master verifies the returned signature with the release PUBLIC key, indexes
+# and publishes.
 # Worker: gpg home holding the builder secret key, and its key id/uid.
 : "${ARCHCI_BUILDER_GNUPGHOME:=/etc/archci/builder-gnupg}"
 : "${ARCHCI_BUILDER_KEY:=archci-builder}"
+# Master: the release public key (an armored export from the signer), which
+# it verifies returned signatures with and publishes as release.pub.
+: "${ARCHCI_RELEASE_PUBKEY:=/etc/archci/release.pub}"
 # Signer: gpg home with the release SECRET key (passphrase-protected, unlocked
-# through gpg-agent) plus the authorized builder PUBLIC keys, and the key id.
+# through gpg-agent) plus the authorized builder PUBLIC keys, and the key id;
+# its ssh key to the master (made on first run, authorized there with
+# `archci authorize --signer`) and its working directory.
 : "${ARCHCI_RELEASE_GNUPGHOME:=/etc/archci/release-gnupg}"
 : "${ARCHCI_RELEASE_KEY:=archci-release}"
 : "${ARCHCI_BUILDER_KEYRING:=/etc/archci/builder-keyring}"
+: "${ARCHCI_SIGNER_KEY:=/etc/archci/signer_key}"
 : "${ARCHCI_SIGNER_HOME:=/var/lib/archci-signer}"
-# archci-sign-health warns when at least this many packages sit unsigned in staging.
-: "${ARCHCI_STAGING_WARN:=20}"
-# Packages archci-sign takes per pass (a minute apart): small, so what the
-# farm stages next, its own release first, waits a pass and not a backlog.
+# archci-sign-health warns when at least this many files wait unsigned on the master.
+: "${ARCHCI_UNSIGNED_WARN:=${ARCHCI_STAGING_WARN:-20}}"
+# Files archci-sign takes per pass (a minute apart): small, so what the farm
+# pools next, its own release first, waits a pass and not a backlog.
 : "${ARCHCI_SIGN_BATCH:=20}"
-# How often archci-sign lists a release directory to prune what its database
-# no longer names (superseded versions are deleted as they are replaced; the
-# listing catches leftovers of interrupted passes).
-: "${ARCHCI_SIGN_PRUNE_MINUTES:=60}"
 : "${ARCHCI_MASTER:=archci@master}"
 # Empty (set to "" in the config) disables journal streaming; hence = not :=.
 # Journal streaming target: the master's journal-remote port through the ssh
@@ -471,10 +477,10 @@ archci_watchdog() {
 }
 
 # archci_pool DIR REPO JOBARCH VERSION -- pool the packages a worker uploaded
-# to DIR into the master's repo/<repo>/os/<arch>/ directories (the pool that
-# archci-stage moves to R2 staging), each with its builder signature
-# (<pkg>.buildsig) alongside for the signer to verify. The master holds no key
-# and builds no database. A package goes under the arch in its file name; a
+# to DIR into the master's repo/<repo>/os/<arch>/ directories (the pool the
+# signer fetches from and archci-publish releases), each with its builder
+# signature (<pkg>.buildsig) alongside for the signer to verify. The master
+# holds no signing key. A package goes under the arch in its file name; a
 # debug package under <repo>-debug; an arch-independent (-any) package into
 # every enabled arch, since pacman fetches every package from the client's own
 # $repo/os/$arch. Every file is checked before any is copied, so a package of

@@ -76,6 +76,37 @@ sid=$(sed -n 's/^id=//p' < <("$tmp/fakessh-sourcer" master claim srcr src))
 "$tmp/fakessh" master report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "report through shell"
 
+echo "--- the signer's role: lists and fetches what waits, returns signatures, parks a file, and nothing else"
+ssh-keygen -q -t ed25519 -N '' -C archci-signer@sgn -f "$tmp/sgkey"
+ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" --signer "$tmp/sgkey.pub"
+grep -q '^command="[^"]*/master/archci-shell signer",restrict' "$akf" || fail "--signer must set the signer role: $(cat "$akf")"
+cat >"$tmp/fakessh-signer" <<'SH'
+#!/bin/bash
+shift
+SSH_ORIGINAL_COMMAND="$*" exec "$ARCHCI_SHELL" signer
+SH
+chmod +x "$tmp/fakessh-signer"
+if command -v rrsync >/dev/null; then
+	mkdir -p "$ARCHCI_HOME/repo/omarchy/os/x86_64"; pooled=$(mkpkg "$ARCHCI_HOME/repo/omarchy/os/x86_64" acl 1:2.3.2-1)
+	: >"$pooled.buildsig"; prel=omarchy/os/x86_64/${pooled##*/}
+	"$tmp/fakessh-signer" master unsigned | grep -qxF "$prel" || fail "the signer key lists what waits: $("$tmp/fakessh-signer" master unsigned)"
+	! "$tmp/fakessh" master unsigned >/dev/null 2>&1 || fail "a worker key must not list what waits"
+	mkdir -p "$tmp/sin"; printf '%s\n%s.buildsig\n' "$prel" "$prel" >"$tmp/sfetch"
+	rsync -a --files-from="$tmp/sfetch" -e "$tmp/fakessh-signer" "master:." "$tmp/sin/" || fail "the signer key fetches from the pool"
+	[[ -f $tmp/sin/$prel && -f $tmp/sin/$prel.buildsig ]] || fail "the fetch brings the file and its buildsig: $(find "$tmp/sin" -type f)"
+	mkdir -p "$tmp/sout/omarchy/os/x86_64"; : >"$tmp/sout/$prel.sig"
+	rsync -a -e "$tmp/fakessh-signer" "$tmp/sout/" "master:." || fail "the signer key returns signatures"
+	[[ -f $ARCHCI_HOME/sigs/$prel.sig ]] || fail "a returned signature lands in sigs/, not the pool: $(find "$ARCHCI_HOME/sigs" "$ARCHCI_HOME/repo" -name '*.sig')"
+	[[ ! -e $pooled.sig ]] || fail "the signer cannot write into the pool"
+	"$tmp/fakessh-signer" master rejected "$prel" builder signature invalid || fail "the signer key parks a file"
+	grep -q "builder signature invalid" "$pooled.rejected" || fail "the mark carries the reason"
+	! "$tmp/fakessh-signer" master rejected ../etc/passwd nope >/dev/null 2>&1 || fail "a path outside the pool is refused"
+	"$tmp/fakessh-signer" master signed && [[ -e $ARCHCI_HOME/publish.needed ]] || fail "signed flags the publish"
+	rm -f "$pooled" "$pooled.buildsig" "$pooled.rejected" "$ARCHCI_HOME/sigs/$prel.sig" "$ARCHCI_HOME/publish.needed"
+fi
+! "$tmp/fakessh-signer" master claim sgn x86_64 >/dev/null 2>&1 || fail "a signer key must not claim"
+! "$tmp/fakessh-signer" master snapshot >/dev/null 2>&1 || fail "a signer key must not read the snapshot"
+
 echo "--- the web role: reads the farm, runs the queue commands, claims and uploads nothing"
 ssh-keygen -q -t ed25519 -N '' -C archci-web@site -f "$tmp/webkey"
 ARCHCI_AUTHORIZED_KEYS=$akf "$authorize" --web "$tmp/webkey.pub"
