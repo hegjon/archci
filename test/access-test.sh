@@ -123,6 +123,8 @@ snap=$("$tmp/fakessh-web" master snapshot) || fail "the web key reads the snapsh
 log=$("$tmp/fakessh-web" master log "$id") || fail "the web key reads a job's log"
 [[ $(jq -r '.state' <<<"$log") == 'done' && $(jq -r '.lines | type' <<<"$log") == array ]] || fail "log ID is JSON with the lines: $log"
 ent=$("$tmp/fakessh-web" master entries "$id") || fail "the web key reads a job's log as entries"
+sse=$("$tmp/fakessh-web" master sse "$id") || fail "the web key streams a job's log (the front end's live log)"
+[[ $sse == "event: job"* ]] || fail "sse starts with the job event: ${sse:0:80}"
 [[ $(jq -r '.state' <<<"$ent") == 'done' && $(jq -r '.entries | type' <<<"$ent") == array ]] || fail "entries ID is JSON with the entries: $ent"
 ! "$tmp/fakessh-web" master summary "$id" >/dev/null 2>&1 || fail "summary is the report's, not the web key's"
 one=$("$tmp/fakessh-web" master job "$id") || fail "the web key reads one job"
