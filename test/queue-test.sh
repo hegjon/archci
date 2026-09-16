@@ -269,7 +269,7 @@ srcjob=$(jq -r '.sources_job' <<<"$onejob")
 [[ $srcjob == *,libsigc++,2.12.2-1,src ]] || fail "archci web job must link the src job for a build with sources: $srcjob"
 [[ -f $ARCHCI_HOME/queue/done/$srcjob.job || -f $ARCHCI_HOME/queue/running/$srcjob.job || -f $ARCHCI_HOME/queue/failed/$srcjob.job ]] || fail "the linked src job must exist: $srcjob"
 ! "$master/archci-web" job "9-1-x,nope,1-1,x86_64" 2>/dev/null || fail "archci web job of an unknown id must fail"
-[[ $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap") == "failed "*" on worker-2, attempt 1 of 2; sources $lsf" ]] || fail "each job tells its story: $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap")"
+[[ $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap") == "failed "*" on worker-2, attempt 1 of 2" ]] || fail "each job tells its story (the source package is a fact of its own): $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap")"
 [[ $(jq -r '.queue.failed' <<<"$snap") == $(find "$ARCHCI_HOME/queue/failed" -name "*.job" | wc -l) && $(jq -r '.generated' <<<"$snap") == 20*Z ]] || fail "the snapshot is archci top's plus jobs and generated: $(jq -c '[.queue, .generated]' <<<"$snap")"
 log=$("$master/archci-web" log "$id")
 [[ $(jq -r '.error_at' <<<"$log") == 1 && $(jq -r '.lines[1]' <<<"$log") == "==> ERROR: A failure occurred in build()." ]] || fail "archci web log gives the lines and the first error: $log"

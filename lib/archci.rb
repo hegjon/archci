@@ -923,8 +923,7 @@ module Archci
         when 'done' then "done #{j['finished']} on #{j['worker']}, attempt #{j['attempt']}"
         when 'failed' then "failed #{j['finished']} on #{j['worker']}, attempt #{j['attempt']} of #{max}#{j['final'] ? ': gave up' : ''}"
         end
-    had = []
-    had << "sources #{j['sources']}" if j['sources']
+    had = []   # the source package is a fact of its own on the job page, not the story's
     had << "network #{j['network']}" if j['network']
     had << "#{j['rss']}M rss, #{j['peak']}M peak" if j['rss']
     had.empty? ? s : "#{s}; #{had.join(', ')}"
