@@ -223,6 +223,15 @@ nid=$(claim_id worker-9 x86_64)
 grep -q '^network=full$' "$ARCHCI_HOME/queue/running/$nid.job" || fail "the job must carry network=full: $(cat "$ARCHCI_HOME/queue/running/$nid.job")"
 "$job" report "$nid" failure "$(owner "$nid")" >/dev/null
 grep -q '^network=full$' "$ARCHCI_HOME/queue/failed/$nid.job" || fail "a failure keeps the flag"
+# a retry follows the package's current package.json: the flag taken away, then loopback given, reach the retried job
+mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch"}'; commit_pkgs "netpkg offline"; "$scan" >/dev/null 2>&1
+"$job" retry "$nid" >/dev/null 2>&1
+! grep -q '^network=' "$ARCHCI_HOME/queue/pending/$nid.job" || fail "the retry drops the flag the package no longer has: $(cat "$ARCHCI_HOME/queue/pending/$nid.job")"
+mkpkgbuild netpkg 1-1 x86_64 '{"source": "arch", "network": "loopback"}'; commit_pkgs "netpkg loopback"; "$scan" >/dev/null 2>&1
+nid2=$(claim_id worker-9 x86_64); [[ $nid2 == "$nid" ]] || fail "the retried job is claimed: $nid2"
+"$job" requeue "$nid" >/dev/null 2>&1
+grep -q '^network=loopback$' "$ARCHCI_HOME/queue/pending/$nid.job" || fail "a requeue gives the job the flag the package has now: $(cat "$ARCHCI_HOME/queue/pending/$nid.job")"
+rm -f "$ARCHCI_HOME"/queue/*/"$nid.job"   # it is pending again; out of the way of what follows
 mkpkgbuild loopy 1-1 x86_64 '{"source": "arch", "network": "loopback"}'
 commit_pkgs loopy; "$scan" >/dev/null 2>&1
 [[ $("$master/archci-pkgindex" loopy | awk '{print $7}') == loopback ]] || fail "the index must know the loopback state: $("$master/archci-pkgindex" loopy)"

@@ -258,11 +258,31 @@ cmd_report() {
 	rm -rf "$inc"
 }
 
+# refresh_flags FILE: the job's network line follows the package's current
+# package.json (the index), not the one it was enqueued with: a flag given
+# to a package after its build failed (guile's loopback for its test
+# suite) reaches the retry, which is otherwise the same job file again
+refresh_flags() {
+	local file=$1 pkgbase flag tmp=$1.tmp
+	pkgbase=$(sed -n 's/^pkgbase=//p' "$file")
+	flag=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase" 2>/dev/null | awk -v p="$pkgbase" '$1 == p { print $7; exit }')
+	case $flag in
+		network)  flag=full ;;
+		loopback) ;;
+		*)        flag='' ;;
+	esac
+	[[ $(sed -n 's/^network=//p' "$file") == "$flag" ]] && return 0
+	{ grep -v '^network=' "$file"; [[ -n $flag ]] && printf 'network=%s\n' "$flag"; } >"$tmp"
+	mv "$tmp" "$file"
+	archci_log "${file##*/}: network is now ${flag:-off}, as the package's package.json says"
+}
+
 cmd_requeue() {
 	local id=$1 file
 	archci_valid_id "$id" || archci_die "invalid job id"
 	lock_queue
 	file=$(find_job "$id" "$Q_RUNNING" "$Q_FAILED") || archci_die "job $id is not running or failed"
+	refresh_flags "$file"
 	requeue_file "$file"
 	archci_log "$id requeued"
 }
@@ -275,6 +295,7 @@ cmd_retry() {
 		for file in "$Q_FAILED"/*.job; do
 			[[ -f $file ]] || continue
 			set_attempt "$file" 0
+			refresh_flags "$file"
 			requeue_file "$file"
 			(( ++n ))
 		done
@@ -285,6 +306,7 @@ cmd_retry() {
 	lock_queue
 	file=$(find_job "$id" "$Q_RUNNING" "$Q_FAILED") || archci_die "job $id is not running or failed"
 	set_attempt "$file" 0
+	refresh_flags "$file"
 	requeue_file "$file"
 	archci_log "$id retried from scratch"
 }
