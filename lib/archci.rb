@@ -641,22 +641,19 @@ module Archci
   end
 
   # the journalctl that reads a job's log (read_log, read_entries): the
-  # job's matches from its window's start or, resuming a running job, after
-  # the cursor (journalctl takes one or the other), as OUTPUT: 'cat' for the
+  # job's matches within its window or, resuming a running job, after the
+  # cursor (journalctl takes one or the other), as OUTPUT: 'cat' for the
   # lines (with the cursor to resume from while the job runs), 'json' for
-  # the entries. nil for a pending job, or without the journal. The window's
-  # end is not journalctl's business: --until with matches made it walk the
-  # whole multi-gigabyte remote journal (7 s for a log --since alone finds in
-  # 0.07 s); own_lines ends the log at the next job's header, and
-  # read_entries drops what is stamped after the end.
+  # the entries. nil for a pending job, or without the journal.
   def self.journal_cmd(j, after: nil, output: 'cat')
     journal = config['ARCHCI_REMOTE_JOURNAL']
     return nil unless %w[running done failed].include?(j['state']) && journal && File.directory?(journal)
 
-    since, = journal_window(j)
+    since, till = journal_window(j)
     cmd = ['journalctl', '-D', journal, '--no-pager', '-a', '-q', '-o', output]
     resume = after && !after.empty? && j['state'] == 'running'
     cmd += resume ? ['--after-cursor', after] : ["--since=@#{since}"]
+    cmd << "--until=@#{till}" if till
     cmd << '--show-cursor' if output == 'cat' && j['state'] == 'running'
     # plus the cursor and the __ timestamps, always printed; the ARCHCI_ fields
     # are on archci's own records (archci_record), the invocation id on every
@@ -680,8 +677,6 @@ module Archci
   RECORD_FIELDS = %w[ARCHCI_JOB ARCHCI_ATTEMPT ARCHCI_EVENT ARCHCI_RC ARCHCI_SLICE ARCHCI_NETWORK ARCHCI_PACKAGE ARCHCI_PACKAGES ARCHCI_VERSION ARCHCI_COMMIT ARCHCI_PROFILE ARCHCI_HOST].freeze
   def self.read_entries(j, after: nil)
     cmd = journal_cmd(j, after: after, output: 'json') or return [[], nil, nil]
-    _, till = journal_window(j)
-    till_us = till && till * 1_000_000
     out, = Open3.capture2(*cmd, err: File::NULL)
     entries = []
     cursor = nil
@@ -691,8 +686,6 @@ module Archci
       rescue JSON::ParserError
         next
       end
-      break if till_us && e['__REALTIME_TIMESTAMP'].to_i > till_us   # past the window's end (a later run of the unit)
-
       m = e['MESSAGE']
       m = m.pack('C*').scrub if m.is_a?(Array)   # not UTF-8: journalctl gives the bytes
       next unless m.is_a?(String)
