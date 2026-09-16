@@ -75,6 +75,11 @@ ARCHCI_SOURCER_TIMEOUT_MINUTES=30
 # Where systemd-journal-remote keeps the workers' journals: every job's log is
 # read from here (archci jobs, archci failed, archci web log, archci top).
 ARCHCI_REMOTE_JOURNAL=/var/lib/archci/journal
+# The most lines of a job's log the master reads, exports or streams: the
+# first three quarters of this and the last quarter, a marker line for what
+# is between. A test suite that dumps its files can write hundreds of
+# thousands of lines, and the export must fit the master's memory.
+ARCHCI_LOG_MAX_LINES=20000
 # Finished job records are pruned from queue/done after this many days.
 ARCHCI_DONE_KEEP_DAYS=30
 # The release (see README "Signing"): the rclone remote archci-publish on the

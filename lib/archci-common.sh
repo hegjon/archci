@@ -78,6 +78,7 @@ archci_load_conf
 : "${ARCHCI_DONE_KEEP_DAYS:=30}"
 # Where systemd-journal-remote keeps the workers' journals (archci-top reads them).
 : "${ARCHCI_REMOTE_JOURNAL:=/var/lib/archci/journal}"
+: "${ARCHCI_LOG_MAX_LINES:=20000}"
 # The release: the master publishes the signed pool to this rclone remote
 # (e.g. "r2:archci-test2"), the repository clients use. Empty = index only,
 # nothing published (a farm without a release, the tests). See README

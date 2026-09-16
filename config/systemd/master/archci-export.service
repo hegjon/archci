@@ -14,3 +14,9 @@ ExecStart=/usr/lib/archci/master/archci-web export /var/lib/archci/logs
 # in between: the pass the master feels most, so it yields to the rest
 Nice=10
 IOSchedulingClass=idle
+# ruby with a log's entries (at most ARCHCI_LOG_MAX_LINES of them) and
+# journalctl: well under this on a 512 MB master; over it, this pass dies
+# alone (the timer runs the next) instead of the box swapping
+MemoryHigh=192M
+MemoryMax=256M
+MemorySwapMax=64M

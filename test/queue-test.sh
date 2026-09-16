@@ -116,6 +116,16 @@ xf=$(find "$tmp/logs" -name '*.sse.zst'); [[ $xf == "$tmp/logs/omarchy/acl/1:2.3
 [[ $(zstd -dc "$xf") == "$sse" ]] || fail "the export is the same bytes as the live stream: $(diff <(echo "$sse") <(zstd -dc "$xf") | head -6)"
 grep -q "^exported=${xf##*/}$" "$ARCHCI_HOME/queue/done/$id.job" || fail "the job file names its export: $(grep exported "$ARCHCI_HOME/queue/done/$id.job")"
 [[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "not exported again"
+# a log over ARCHCI_LOG_MAX_LINES keeps its first three quarters and its last quarter, a marker between
+capped=$(ARCHCI_LOG_MAX_LINES=8 "$master/archci-web" sse "$id")
+[[ $(grep -c '^id: s=' <<<"$capped") == 8 ]] || fail "8 entries fit the cap of 8 uncut: $(grep -c '^id: s=' <<<"$capped")"
+capped=$(ARCHCI_LOG_MAX_LINES=7 "$master/archci-web" sse "$id")   # wait: the minimum is 8
+[[ $(grep -c '^id: s=' <<<"$capped") == 8 ]] || fail "the cap is at least 8: $(grep -c '^id: s=' <<<"$capped")"
+journal_add worker "$(build_unit acl 1:2.3.2-1 x86_64 1)" "extra line 1" "extra line 2" "extra line 3" "extra line 4"   # 12 entries now
+capped=$(ARCHCI_LOG_MAX_LINES=8 "$master/archci-web" sse "$id")
+[[ $(grep -c '^id: s=' <<<"$capped") == 8 && $(grep -c '^data: {"time":"2026-' <<<"$capped") == 9 ]] || fail "8 entries kept (6 + 2) and one marker without a cursor: $capped"
+grep -q '"priority":"4","message":"... 4 line(s) not shown: the log has more than 8 lines (ARCHCI_LOG_MAX_LINES); the first 6 and the last 2 are"' <<<"$capped" || fail "the marker says what was cut: $(grep 'not shown' <<<"$capped")"
+[[ $(grep -o '"message":"extra line [0-9]"' <<<"$capped" | tr '\n' ' ') == '"message":"extra line 3" "message":"extra line 4" ' ]] || fail "the tail is the last quarter: $(grep -o '"message":"extra line [0-9]"' <<<"$capped")"
 onejob=$("$master/archci-web" job "$id")
 [[ $(jq -r '.started' <<<"$onejob") == 2026-09-15T10:00:00Z && $(jq -r '.stopped' <<<"$onejob") == 2026-09-15T10:01:43Z && $(jq -r '.online_at' <<<"$onejob") == 2026-09-15T10:00:05Z && $(jq -r '.build_at' <<<"$onejob") == 2026-09-15T10:00:20Z ]] || fail "the build's span and phases come from its journal entries: $onejob"
 [[ $(jq -r '.log' <<<"$onejob") == "journalctl -D $ARCHCI_REMOTE_JOURNAL --no-pager -a -q -o json --since=@"*" --until=@"*" --output-fields=MESSAGE,PRIORITY,_PID,_SOURCE_REALTIME_TIMESTAMP,_SYSTEMD_INVOCATION_ID,ARCHCI_"*" _SYSTEMD_UNIT=$(build_unit acl 1:2.3.2-1 x86_64 1) _HOSTNAME=worker" ]] || fail "a job names its log as the journalctl the master runs for its entries: $(jq -r '.log' <<<"$onejob")"

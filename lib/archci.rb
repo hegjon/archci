@@ -31,7 +31,8 @@ module Archci
     'ARCHCI_MAX_ATTEMPTS' => '3',
     'ARCHCI_RELEASE_LAG_MINUTES' => '20',
     'ARCHCI_SOURCES_REQUIRED' => '0',
-    'ARCHCI_REMOTE_JOURNAL' => '/var/lib/archci/journal'
+    'ARCHCI_REMOTE_JOURNAL' => '/var/lib/archci/journal',
+    'ARCHCI_LOG_MAX_LINES' => '20000'
   }.freeze
 
   ROOT = File.expand_path('..', __dir__)
@@ -675,27 +676,56 @@ module Archci
   # otherwise. error_at and cursor as read_log; the cursor is the last
   # entry's.
   RECORD_FIELDS = %w[ARCHCI_JOB ARCHCI_ATTEMPT ARCHCI_EVENT ARCHCI_RC ARCHCI_SLICE ARCHCI_NETWORK ARCHCI_PACKAGE ARCHCI_PACKAGES ARCHCI_VERSION ARCHCI_COMMIT ARCHCI_PROFILE ARCHCI_HOST].freeze
+  # At most ARCHCI_LOG_MAX_LINES entries are kept: the first three quarters
+  # of that and the last quarter, with one marker entry (no cursor,
+  # priority 4) in place of what is between. journalctl's output is read
+  # as it comes, never whole: a test suite that dumps its files can write
+  # hundreds of thousands of lines, and reading them all into memory killed
+  # the master's export (its OOM, 2026-09-16).
   def self.read_entries(j, after: nil)
     cmd = journal_cmd(j, after: after, output: 'json') or return [[], nil, nil]
-    out, = Open3.capture2(*cmd, err: File::NULL)
-    entries = []
+    limit = [config['ARCHCI_LOG_MAX_LINES'].to_i, 8].max
+    tail_n = limit / 4
+    head_n = limit - tail_n
+    head = []
+    tail = []       # the last tail_n entries once the head is full
+    dropped = 0
+    first_dropped = nil
     cursor = nil
-    out.each_line do |line|
-      e = begin
-        JSON.parse(line.scrub)
-      rescue JSON::ParserError
-        next
-      end
-      m = e['MESSAGE']
-      m = m.pack('C*').scrub if m.is_a?(Array)   # not UTF-8: journalctl gives the bytes
-      next unless m.is_a?(String)
+    Open3.popen2(*cmd, err: File::NULL) do |stdin, stdout, _thread|
+      stdin.close
+      stdout.each_line do |line|
+        e = begin
+          JSON.parse(line.scrub)
+        rescue JSON::ParserError
+          next
+        end
+        m = e['MESSAGE']
+        m = m.pack('C*').scrub if m.is_a?(Array)   # not UTF-8: journalctl gives the bytes
+        next unless m.is_a?(String)
 
-      entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY', '_PID', '_SYSTEMD_INVOCATION_ID', *RECORD_FIELDS).merge('MESSAGE' => m)
-      phase = log_phase(m)
-      entry['phase'] = phase if phase
-      entries << entry
-      cursor = e['__CURSOR']
+        entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY', '_PID', '_SYSTEMD_INVOCATION_ID', *RECORD_FIELDS).merge('MESSAGE' => m)
+        phase = log_phase(m)
+        entry['phase'] = phase if phase
+        if head.size < head_n
+          head << entry
+        else
+          tail << entry
+          if tail.size > tail_n
+            first_dropped ||= tail.first
+            tail.shift
+            dropped += 1
+          end
+        end
+        cursor = e['__CURSOR']
+      end
     end
+    entries = head
+    if dropped.positive?
+      entries << { '__REALTIME_TIMESTAMP' => first_dropped['__REALTIME_TIMESTAMP'], 'PRIORITY' => '4',
+                   'MESSAGE' => "... #{dropped} line(s) not shown: the log has more than #{limit} lines (ARCHCI_LOG_MAX_LINES); the first #{head_n} and the last #{tail_n} are" }
+    end
+    entries.concat(tail)
     cursor = j['state'] == 'running' ? (cursor || after) : nil
     entries = own_lines(entries, j['id'], text: ->(e) { e['MESSAGE'] }) unless after && !after.empty?
     [entries, j['state'] == 'done' ? nil : entries.index { |e| error_line?(e['MESSAGE']) }, cursor]
