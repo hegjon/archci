@@ -121,6 +121,20 @@ find "$sigs" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 # --- 2. index ------------------------------------------------------------------
 declare -A before=() touched=()   # per <repo>/os/<arch>: the db's files before; touched this pass
 indexed=0
+# A database for every arch the farm builds, from the start: a worker's
+# chroot syncs [ARCHCI_REPO] at ARCHCI_RELEASE_URL before its first build,
+# and pacman fails on a repository whose database is missing (an empty one
+# is fine: it lists nothing and the mirrors serve everything). So a fresh
+# farm gets empty databases made and published before any package exists.
+for arch in $ARCHCI_ARCHES; do
+	key=$ARCHCI_REPO/os/$arch; dbfile=$dbs/$key/$ARCHCI_REPO.db.tar.gz
+	[[ -f $dbfile ]] && continue
+	mkdir -p "$dbs/$key"
+	bsdtar -czf "$dbfile" -T /dev/null
+	ln -sf "$ARCHCI_REPO.db.tar.gz" "$dbs/$key/$ARCHCI_REPO.db"
+	touched[$key]=$ARCHCI_REPO
+	archci_log "made an empty database for [$ARCHCI_REPO] $arch"
+done
 for osdir in "$pool"/*/os/*/; do
 	osdir=${osdir%/}; arch=${osdir##*/}
 	[[ $arch == src ]] && continue
@@ -167,7 +181,9 @@ done
 # packages by file name (signed, so on their way out or out)
 for dbfile in "$dbs"/*/os/*/*.db.tar.gz; do
 	d=${dbfile%/*}; arch=${d##*/}; repo=${d#"$dbs"/}; repo=${repo%%/*}
-	bsdtar -xOf "$dbfile" '*/desc' 2>/dev/null | awk '$0 == "%NAME%" { getline; n = $0 } $0 == "%VERSION%" { getline; print n, $0 }' >"$listings/$repo-$arch.tmp" &&
+	bsdtar -tf "$dbfile" >/dev/null 2>&1 || { archci_log "not listing $repo/os/$arch: its database is unreadable"; continue; }
+	# an empty database (a fresh farm) has no desc to extract, so bsdtar exits 1: still an empty listing
+	{ bsdtar -xOf "$dbfile" '*/desc' 2>/dev/null || true; } | awk '$0 == "%NAME%" { getline; n = $0 } $0 == "%VERSION%" { getline; print n, $0 }' >"$listings/$repo-$arch.tmp" &&
 		mv "$listings/$repo-$arch.tmp" "$listings/$repo-$arch"
 done
 for srcdir in "$pool"/*/os/src/; do

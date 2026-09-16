@@ -84,6 +84,18 @@ cp "$ap" "$ap.buildsig" "$pool/omarchy/os/aarch64/"
 echo "sources 1-1" | zstd -q >"$tmp/s"; sp=$pool/omarchy/os/src/hello-1-1-$(sha256sum "$tmp/s" | cut -c1-64).src.tar.zst; mv "$tmp/s" "$sp"; sn=${sp##*/}; bsig "$gpgb" archci-builder "$sp"
 touch -d '-1 hour' "$hp"   # the oldest
 
+echo "--- a fresh farm: the first pass makes and publishes an empty database per arch, so workers' chroots can sync the repo"
+out=$(ARCHCI_REPO=omarchy ARCHCI_ARCHES="x86_64 aarch64" "$publish" --force 2>&1)
+[[ $out == *"made an empty database for [omarchy] x86_64"* && $out == *"[omarchy] aarch64"* ]] || fail "empty databases made: $out"
+for a in x86_64 aarch64; do
+	[[ -f $ARCHCI_HOME/db/omarchy/os/$a/omarchy.db.tar.gz && -L $ARCHCI_HOME/db/omarchy/os/$a/omarchy.db ]] || fail "the database and its .db name for $a"
+	[[ -f $release/omarchy/os/$a/omarchy.db.tar.gz && -f $release/omarchy/os/$a/omarchy.db ]] || fail "published for $a: $(find "$release" -name '*.db*')"
+	[[ -z $(bsdtar -tf "$release/omarchy/os/$a/omarchy.db.tar.gz") ]] || fail "empty"
+done
+[[ -f $ARCHCI_HOME/released/omarchy-x86_64 && ! -s $ARCHCI_HOME/released/omarchy-x86_64 ]] || fail "an empty listing, so a claim does not fall back to the lag rule"
+out=$(ARCHCI_REPO=omarchy ARCHCI_ARCHES="x86_64 aarch64" "$publish" --force 2>&1)
+[[ $out != *"made an empty database"* ]] || fail "made once"
+
 echo "--- archci unsigned: what waits, the oldest first, an any package once, a limit"
 mapfile -t u < <("$unsigned" 0)
 [[ ${#u[@]} == 4 && ${u[0]} == omarchy/os/x86_64/$hn ]] || fail "unsigned must list the 4 files, hello (oldest) first: ${u[*]}"
