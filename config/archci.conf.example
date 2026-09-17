@@ -36,7 +36,9 @@ ARCHCI_PKG_ALSO=""
 # Architectures workers may claim jobs for; a worker sends its ARCHCI_ARCH with
 # each claim. Upstream releases only x86_64, so a port arch (e.g. aarch64)
 # builds the same released commits with --ignorearch, needs its own native
-# workers, and takes its chroot configs from arch/<arch>/ (see README "arm64").
+# workers, and takes its chroot configs from arch/<arch>/ (docs/ports.md).
+# x86_64_v4 is the x86-64-v4 feature level (AVX-512), built natively by
+# archci-worker-x86_64_v4@N instances on machines that have it.
 ARCHCI_ARCHES="x86_64"
 # Whose workers build the arch-independent ("any") packages; they are pooled
 # for every arch in ARCHCI_ARCHES. Default: the first arch above.
@@ -163,6 +165,7 @@ ARCHCI_KEYSERVERS="hkps://keys.openpgp.org hkps://keyserver.ubuntu.com"
 # Skip check() when a worker builds another arch than the machine's, i.e.
 # under qemu user-mode emulation, where test suites trip over the emulation
 # (timing, signals, missing syscalls) more than over the package. 0 runs them.
+# A feature level of the machine's arch (x86_64_v4) is native: check() runs.
 ARCHCI_EMULATED_NOCHECK=1
 # Environment every build runs with: VAR=value pairs separated by spaces (no
 # spaces inside a value), exported from a makepkg.conf drop-in archci-build

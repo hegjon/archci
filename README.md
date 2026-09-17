@@ -111,9 +111,10 @@ changes a package without changing its version does not rebuild it.
 **Architectures.** `ARCHCI_ARCHES` lists the arches the farm builds. Each
 worker builds one arch and only claims jobs for it. An `arch=(any)` package
 is built once and pooled into every arch. Arch's own PKGBUILDs list x86_64
-only, so a port arch builds them under emulation with `--ignorearch`; AUR
-and local packages build only where their arch array says (see
-[docs/ports.md](docs/ports.md)).
+only, so a port arch builds them with `--ignorearch`, under emulation
+(aarch64, riscv64) or natively for an x86_64 feature level (x86_64_v4);
+AUR and local packages build only where their arch array says, an x86_64
+listing counting for x86_64_v4 (see [docs/ports.md](docs/ports.md)).
 
 **Workers.** A worker polls the master for a job over ssh, builds it, and
 hands back the result. For each job it:
@@ -252,7 +253,7 @@ signer/   archci-sign, archci-sign-health, archci-authorize-builder
 sourcer/  archci-sourcer: the outstanding packages' sources fetched into source packages on R2 for the workers
 remote-logging/  archci-logging-setup: the journal streaming configuration from ARCHCI_JOURNAL_URL
 test/     the test suite (test/run.sh), run by the PKGBUILD's check() and by GitHub Actions (.github/workflows/test.yml) on every push
-arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf (and .d/) and qemu/ for aarch64 and riscv64
+arch/     chroot configs for arches devtools ships none for: <arch>/makepkg.conf (and .d/), qemu/ for aarch64 and riscv64, extra.conf and the setarch alias for x86_64_v4
 config/   what the packages install outside /usr/lib/archci:
   archci.conf  the stub installed as /etc/archci/archci.conf (only what differs from the defaults)
   archci.conf.example  every setting, annotated, installed under /usr/share/doc/archci
@@ -349,7 +350,10 @@ role on top of a shared one:
   `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies;
   each also installs its `archci <name>` command line as `/usr/bin/archci`,
   the master's and the signer's with bash completion. A worker has no
-  commands to run by hand, so it knows `archci version` only
+  commands to run by hand, so it knows `archci version` only. The worker
+  package also carries `archci-worker-x86_64_v4@.service` and the
+  `arch/x86_64_v4/` chroot configs: an x86-64-v4 instance on a machine
+  whose CPU has the level (see [docs/ports.md](docs/ports.md))
 - `archci-worker-qemu-aarch64`, `archci-worker-qemu-riscv64`: add-ons
   for an x86_64 worker: aarch64 or riscv64 worker
   instances under qemu user-mode emulation (see [docs/ports.md](docs/ports.md))
@@ -624,7 +628,7 @@ download, not from that field.
 
 - [docs/operating.md](docs/operating.md): the day-to-day commands, tests
 - [docs/monitoring.md](docs/monitoring.md): worker journals on the master
-- [docs/ports.md](docs/ports.md): building for aarch64 and riscv64, native or emulated
+- [docs/ports.md](docs/ports.md): building for aarch64 and riscv64, native or emulated, and the x86_64_v4 feature level
 - [docs/test-instance.md](docs/test-instance.md): the live test instance
 
 ## Notes and limits

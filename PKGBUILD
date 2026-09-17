@@ -98,16 +98,20 @@ package_archci-worker() {
   depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg btrfs-progs nftables)
   conflicts=(archci-sourcer)   # one role's /usr/bin/archci per host
 
-  _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service
+  _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service archci-worker-x86_64_v4@.service
   _install_cli worker
   cd "$srcdir/$_src"
-  # chroot makepkg.conf per port arch (arch/<arch>/, kept in step with devtools' x86_64 one by hand)
+  # chroot makepkg.conf per port arch (arch/<arch>/, kept in step with devtools' x86_64 one by hand);
+  # a native port (x86_64_v4) also brings its chroot pacman.conf and the setarch alias arch-nspawn needs
   local a
   for a in arch/*/; do
     a=${a%/}; a=${a#arch/}
     install -Dm644 "arch/$a/makepkg.conf" "$pkgdir$_libdir/arch/$a/makepkg.conf"
     install -Dm644 arch/"$a"/makepkg.conf.d/*.conf -t "$pkgdir$_libdir/arch/$a/makepkg.conf.d"
+    [[ -f arch/$a/extra.conf ]] && install -Dm644 "arch/$a/extra.conf" "$pkgdir$_libdir/arch/$a/extra.conf"
+    [[ -f arch/$a/setarch-aliases.d/$a ]] && install -Dm644 "arch/$a/setarch-aliases.d/$a" "$pkgdir/usr/share/devtools/setarch-aliases.d/$a"
   done
+  :
 }
 
 # _package_qemu_arch ARCH -> archci-worker-ARCH@.service, binfmt, setarch alias,

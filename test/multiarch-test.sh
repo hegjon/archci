@@ -41,6 +41,13 @@ commit_pkgs bun-bin
 "$scan" >/dev/null
 [[ $(ARCHCI_PKG_SOURCES=aur "$next" x86_64) == "5 omarchy x86_64 bun-bin "* ]] || fail "an AUR package listing x86_64 is offered to it: $(ARCHCI_PKG_SOURCES=aur "$next" x86_64)"
 [[ -z $(ARCHCI_PKG_SOURCES=aur "$next" aarch64) ]] || fail "an AUR package not listing aarch64 must not be offered to it: $(ARCHCI_PKG_SOURCES=aur "$next" aarch64)"
+# x86_64_v4, the x86-64-v4 feature level, is a port with the same binaries: Arch's packages are offered to it
+# as to any port, a package listing x86_64 counts as listing it (AUR or local, --ignorearch or not), a
+# multilib package still does not, and one listing aarch64 alone does not either
+v4=$(ARCHCI_ARCHES="x86_64 aarch64 x86_64_v4" "$next" x86_64_v4)
+[[ $v4 == *" x86_64_v4 acl "* && $v4 != *lib32-zlib* && $v4 != *armonly* ]] || fail "x86_64_v4 is offered Arch's packages, not multilib, not an aarch64-only one: $v4"
+[[ $(ARCHCI_ARCHES="x86_64 aarch64 x86_64_v4" ARCHCI_PKG_SOURCES=aur "$next" x86_64_v4) == "5 omarchy x86_64_v4 bun-bin "* ]] || fail "an AUR package listing x86_64 is offered to x86_64_v4: $(ARCHCI_ARCHES="x86_64 aarch64 x86_64_v4" ARCHCI_PKG_SOURCES=aur "$next" x86_64_v4)"
+[[ $(ARCHCI_ARCHES="x86_64 aarch64 x86_64_v4" ARCHCI_IGNOREARCH=0 "$next" x86_64_v4) == *" x86_64_v4 acl "* ]] || fail "with ARCHCI_IGNOREARCH=0 a package listing x86_64 is still x86_64_v4's: $(ARCHCI_ARCHES="x86_64 aarch64 x86_64_v4" ARCHCI_IGNOREARCH=0 "$next" x86_64_v4)"
 rm -rf "$pkgs/pkgbuilds/lib32-zlib" "$pkgs/pkgbuilds/armonly" "$pkgs/pkgbuilds/bun-bin"; commit_pkgs "no lib32, no armonly, no bun-bin"; "$scan" >/dev/null   # the rest of the test expects the original set
 [[ $("$next" aarch64) == "5 omarchy aarch64 acl "* ]] || fail "aarch64 backlog should start at acl: $("$next" aarch64)"
 [[ $(ARCHCI_IGNOREARCH=0 "$next" aarch64) == "" ]] || fail "with ARCHCI_IGNOREARCH=0 only packages listing aarch64 are offered"

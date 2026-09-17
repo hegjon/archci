@@ -38,4 +38,22 @@ cmp -s "$tmp/own.conf" "$tmp/out/own.conf" || fail "must not touch a config that
 echo "--- rewritten in place on a second run"
 archci_chroot_pacconf "$tmp/extra.conf" "$out" hegjon-test x86_64
 [[ $(grep -c '^\[hegjon-test\]' "$out") == 1 ]] || fail "still once"
+
+echo "--- the shipped x86_64_v4 chroot config: the farm's level directory first, Arch's x86_64 behind it"
+archci_chroot_pacconf "$here/../arch/x86_64_v4/extra.conf" "$tmp/out/v4.conf" hegjon-test x86_64_v4
+[[ $(pacman-conf --config "$tmp/out/v4.conf" Architecture | tr '\n' ' ') == "x86_64_v4 x86_64 " ]] || fail "both architectures: $(pacman-conf --config "$tmp/out/v4.conf" Architecture | tr '\n' ' ')"
+[[ $(pacman-conf --config "$tmp/out/v4.conf" --repo hegjon-test Server) == 'https://pub-x.r2.dev/hegjon-test/os/x86_64_v4' ]] || fail "\$arch is the first architecture, the level: $(pacman-conf --config "$tmp/out/v4.conf" --repo hegjon-test Server)"
+[[ $(pacman-conf --config "$tmp/out/v4.conf" --repo core Server) == */core/os/x86_64 ]] || fail "Arch's repositories stay on os/x86_64: $(pacman-conf --config "$tmp/out/v4.conf" --repo core Server)"
+[[ $(pacman-conf --config "$tmp/out/v4.conf" --repo-list | head -1) == hegjon-test ]] || fail "the farm's repository first"
+[[ $(pacman-conf --config "$tmp/out/v4.conf" CacheDir) == /var/cache/archci/pkg/hegjon-test-x86_64_v4/ ]] || fail "a cache of the level's own: $(pacman-conf --config "$tmp/out/v4.conf" CacheDir)"
+{ grep -q '^CARCH="x86_64_v4"$' "$here/../arch/x86_64_v4/makepkg.conf" && grep -q -- '-march=x86-64-v4' "$here/../arch/x86_64_v4/makepkg.conf"; } || fail "the level's makepkg.conf"
+[[ $(<"$here/../arch/x86_64_v4/setarch-aliases.d/x86_64_v4") == x86_64 ]] || fail "arch-nspawn's setarch alias for the level is the machine's arch"
+[[ $(readlink -f "$(archci_arch_conf x86_64_v4 extra.conf /dev/null)") == $(readlink -f "$here/../arch/x86_64_v4/extra.conf") ]] || fail "archci_arch_conf finds the shipped config: $(archci_arch_conf x86_64_v4 extra.conf /dev/null)"
+
+echo "--- native or emulated: a feature level of the machine's arch is native"
+m=$(uname -m)
+archci_native_arch "$m" || fail "the machine's own arch is native"
+archci_native_arch "${m}_v4" || fail "a feature level of it is native"
+! archci_native_arch "${m}_other" || fail "another arch is not"
+! archci_native_arch "not-$m" || fail "another arch is not"
 echo "ALL OK"

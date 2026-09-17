@@ -357,12 +357,15 @@ extra_makepkg_args=()
 # PKGBUILDs carried from Arch declare arch=(x86_64) unless a patch in the
 # repository adds the port arch; a port arch builds them anyway (the Arch
 # Linux Ports RFC keeps the arch array as is and has the tooling ignore it).
+# A feature level (x86_64_v4) is the same: makepkg wants its CARCH in the
+# array, and no PKGBUILD lists it.
 if [[ $job_arch != any && $job_arch != x86_64 && $ARCHCI_IGNOREARCH == 1 ]]; then
 	extra_makepkg_args+=(--ignorearch)
 fi
 # Another arch than the machine's means qemu user-mode emulation, where test
-# suites fail on the emulation more than on the package.
-if [[ $arch != "$(uname -m)" && $ARCHCI_EMULATED_NOCHECK == 1 ]]; then
+# suites fail on the emulation more than on the package (a feature level of
+# the machine's own arch runs natively and keeps check()).
+if ! archci_native_arch "$arch" && [[ $ARCHCI_EMULATED_NOCHECK == 1 ]]; then
 	extra_makepkg_args+=(--nocheck)
 	say "Building %s under emulation: check() skipped (ARCHCI_EMULATED_NOCHECK)" "$arch"
 fi

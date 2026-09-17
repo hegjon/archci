@@ -1,4 +1,4 @@
-# Building for other architectures: aarch64, riscv64
+# Building for other architectures: aarch64, riscv64, x86_64_v4
 
 Arch Linux itself releases only x86_64: PKGBUILDs carried from it say
 `arch=(x86_64)`, devtools ships no `makepkg.conf` for anything else, and the
@@ -99,3 +99,48 @@ extra key is needed on the worker.
   (a Milk-V Pioneer, or a rented RISC-V server) is where volume belongs.
 - **Flags:** `arch/riscv64/makepkg.conf` sets `-march=rv64gc -mabi=lp64d`,
   what Arch Linux RISC-V builds for, and drops the x86-only flags.
+
+## x86_64_v4
+
+Not another machine but a feature level of x86_64: x86-64-v4 is the
+baseline plus AVX-512 (and v2's and v3's SSE4, AVX2, BMI, FMA), which Zen 4
+and Sapphire Rapids up have. Arch builds its own repositories for
+x86-64-v3 the same way (devtools ships `x86_64_v3.conf`), and pacman since
+6.1 takes several architectures at once. To archci it is a port like the
+others, minus the emulation: the same released commits, built with
+`--ignorearch` since no PKGBUILD lists `x86_64_v4`, into their own
+`<repo>/os/x86_64_v4/` directory and database, by workers whose CPU has the
+level. The `any` packages are pooled into it as into every arch.
+
+- **Master:** add `x86_64_v4` to `ARCHCI_ARCHES`. Packages that list
+  `x86_64` (AUR and local ones too) are offered to it, since the level runs
+  the same binaries; multilib packages stay x86_64's.
+- **Worker:** on an x86_64 machine whose `/proc/cpuinfo` has `avx512f`
+  (Zen 4, Sapphire Rapids), the plain worker package and one more instance:
+
+  ```
+  systemctl enable --now archci-worker-x86_64_v4@1
+  ```
+
+  It runs next to the machine's `archci-worker@N` instances and is known to
+  the master as `<host>-x86_64_v4-N`. The chroot is
+  `/var/lib/archbuild/extra-x86_64_v4`, from `arch/x86_64_v4/makepkg.conf`
+  (devtools' x86_64 one with `CARCH=x86_64_v4` and `-march=x86-64-v4`, plus
+  `-C target-cpu=x86-64-v4` for Rust) and `arch/x86_64_v4/extra.conf`
+  (devtools' extra.conf with `Architecture = x86_64_v4 x86_64`: the farm's
+  own level directory first, Arch's x86_64 mirrors for the rest, spelled
+  `os/x86_64` since `$arch` expands to the first architecture). Copy either
+  to `/etc/archci/x86_64_v4/` to change it. The setarch alias arch-nspawn
+  needs is shipped (`x86_64`), as devtools ships one for `x86_64_v3`.
+  check() runs: the build is native, so `ARCHCI_EMULATED_NOCHECK` does not
+  apply.
+- **Clients:** in `/etc/pacman.conf`, `Architecture = x86_64_v4 x86_64` and
+  the farm's repository with `Server = <url>/$repo/os/x86_64_v4`, above the
+  Arch repositories. That directory holds the level's builds and the `any`
+  packages; what the farm has not built for the level comes from Arch's
+  x86_64 mirrors as before. There is no second section for the farm's
+  x86_64 builds: the database is named after the repository, so a client
+  takes one level of it.
+- **Expect** a few packages whose build system fights the flags (assembly
+  with its own dispatch, tests that compare against baseline output) and
+  the x86_64 load again: every core package once more.

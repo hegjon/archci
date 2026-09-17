@@ -1,0 +1,25 @@
+# A worker instance building x86_64_v4 (x86-64-v4: AVX-512), natively on an
+# x86_64 machine whose CPU has the level (docs/ports.md). Runs alongside
+# archci-worker@ instances building baseline x86_64; known to the master as
+# <host>-x86_64_v4-N. Kept in step with archci-worker@.service by hand.
+[Unit]
+Description=archci build worker %i (x86_64_v4)
+After=network-online.target archci-worker-setup.service
+Wants=network-online.target archci-worker-setup.service
+# Journal streaming to the master, when configured (archci-remote-logging).
+Wants=archci-logging-tunnel.service systemd-journal-upload.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/lib/archci/worker/archci-worker %i x86_64_v4
+# Log to the archci journal namespace (journalctl --namespace=archci), which
+# is what systemd-journal-upload streams to the master.
+LogNamespace=archci
+Restart=always
+RestartSec=30
+# Builds run as archci-build@<name>.service. On stop the loop stops the running
+# build unit and reports the job as abandoned, so the master requeues it at once.
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -355,7 +355,10 @@ module Archci
       list.each do |p|
         any = p['arches'] == ['any']
         job_arch = any ? 'any' : a
-        next if !any && !p['arches'].include?(a) && (a == 'x86_64' || !ignorearch || p['source'] != 'arch')
+        # a package lists the arches it builds for; an x86_64 feature level
+        # (x86_64_v4) counts x86_64 as its own, since it runs the same binaries
+        listed = p['arches'].include?(a) || (a.start_with?('x86_64_v') && p['arches'].include?('x86_64'))
+        next if !any && !listed && (a == 'x86_64' || !ignorearch || p['source'] != 'arch')
         next if p['profile'] == 'multilib' && a != 'x86_64'   # 32-bit x86 libraries: x86_64 only, whatever --ignorearch says
 
         # built record: "version commit" and, for an any package, the arches it

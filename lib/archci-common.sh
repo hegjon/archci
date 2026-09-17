@@ -28,8 +28,10 @@ archci_load_conf
 # Master: architectures workers may claim jobs for (worker claims carry their
 # arch). Upstream releases only x86_64 (plus "any"), so every arch here builds
 # the x86_64 release list; a port arch needs its own workers and an
-# arch/<arch>/makepkg.conf on them. ARCHCI_ANY_ARCH is the arch whose workers
-# build the arch-independent ("any") packages, pooled for every arch.
+# arch/<arch>/makepkg.conf on them (aarch64, riscv64, and x86_64_v4, the
+# x86-64-v4 feature level built natively on a machine that has it).
+# ARCHCI_ANY_ARCH is the arch whose workers build the arch-independent
+# ("any") packages, pooled for every arch.
 : "${ARCHCI_ARCHES:=$ARCHCI_ARCH}"
 : "${ARCHCI_ANY_ARCH:=${ARCHCI_ARCHES%% *}}"
 # The PKGBUILD repository: one git repository holding every package the farm
@@ -134,6 +136,7 @@ archci_load_conf
 : "${ARCHCI_KEYSERVERS:=hkps://keys.openpgp.org hkps://keyserver.ubuntu.com}"
 # Skip check() when building another arch than the machine's (qemu user-mode
 # emulation), where test suites fail on the emulation more than on the package.
+# A feature level of the machine's arch (x86_64_v4) is native and keeps check().
 : "${ARCHCI_EMULATED_NOCHECK:=1}"
 # Environment every build sees (VAR=value pairs, no spaces in a value),
 # written as a makepkg.conf drop-in into the clean chroot.
@@ -216,6 +219,10 @@ archci_valid_worker() { [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; }
 archci_valid_arch()   { [[ $1 =~ ^[a-z0-9_]{1,32}$ ]]; }
 # Is ARCH one of ARCHCI_ARCHES, or src (source packages, the sourcer's jobs)?
 archci_enabled_arch() { [[ " $ARCHCI_ARCHES " == *" $1 "* || $1 == src ]]; }
+# Does this machine run ARCH natively? Its own, or a feature level of it
+# (x86_64_v4 on an x86_64 machine: the same binaries, more instructions);
+# anything else is qemu user-mode emulation.
+archci_native_arch()  { [[ ${1%%_v[0-9]*} == "$(uname -m)" ]]; }
 # May a worker of arch WORKER_ARCH build a job of arch JOB_ARCH?
 archci_can_build()    { [[ $2 == "$1" || ( $2 == any && $1 == "$ARCHCI_ANY_ARCH" ) ]]; }
 
