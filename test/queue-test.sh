@@ -110,7 +110,7 @@ log=$("$master/archci-web" log "$id")
 echo "--- the log as server-sent events, live (archci web sse) and exported for R2 (archci web export), one framing"
 sse=$("$master/archci-web" sse "$id")
 [[ $sse == "event: job"$'\n'"data: {"* ]] || fail "the stream opens with the job event: ${sse:0:200}"
-[[ $(grep -c '^id: s=' <<<"$sse") == 8 && $(grep -c '^data: {"time":"2026-' <<<"$sse") == 8 ]] || fail "one event per entry, its cursor as the id, its time in the data: $sse"
+[[ $(grep -c '^id: s=' <<<"$sse") == 8 && $(grep -c '^data: {"time":"2026-[0-9-]*T[0-9:]*\.[0-9][0-9][0-9]Z"' <<<"$sse") == 8 ]] || fail "one event per entry, its cursor as the id, its time in the data to the millisecond: $sse"
 { grep -q '"phase":"build"' <<<"$sse" && grep -q '"event":"finish"' <<<"$sse"; } || fail "the entries carry the phase and archci's event: $sse"
 [[ $sse == *$'\n'"event: end"$'\n'"data: {\"state\":\"done\","*'"rc":0'* ]] || fail "a finished job's stream ends with the end event, its rc from the finish record: ${sse: -200}"
 grep -q '"invocation":"feedfacefeedfacefeedfacefeedface"' <<<"$sse" || fail "the job event names the unit's invocation: ${sse:0:400}"
