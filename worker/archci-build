@@ -508,6 +508,23 @@ if (( rc == 0 && ${#pkgs[@]} )); then
 	pkgs=("${hashed[@]}")
 fi
 
+# What each package holds, into the log: its files as a tree, three levels
+# deep with crowded directories folded (the package's own .PKGINFO, .MTREE
+# and friends left out), at most a few hundred lines a package
+if (( rc == 0 && ${#pkgs[@]} )); then
+	for pkg in "${pkgs[@]}"; do
+		say "Contents of %s (%s files, %s):" "$(archci_unhashed_stem "$pkg")" "$(bsdtar -tf "$pkg" | grep -vc '^\.')" "$(stat -c %s "$pkg" | numfmt --to=iec)"
+		listing=$(bsdtar -tf "$pkg" | grep -v '^\.' | tree --fromfile -a -L 3 --filelimit 30 --noreport . 2>/dev/null | tail -n +2 | sed 's/^/    /')
+		lines=$(wc -l <<<"$listing")
+		if (( lines > 400 )); then
+			head -n 400 <<<"$listing"
+			echo "    ... $(( lines - 400 )) more line(s) not shown"
+		else
+			printf '%s\n' "$listing"
+		fi
+	done
+fi
+
 # Builder signature: internal provenance the signer verifies before it adds the
 # client-facing release signature. Each package gets a detached <pkg>.buildsig.
 # A package with no valid builder signature is rejected by the signer, so a
