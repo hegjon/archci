@@ -255,16 +255,18 @@ archci_journal_open() {
 	# records on stdin, one field per line, a blank line ends a record; each
 	# one datagram on the journal's native socket
 	# shellcheck disable=SC2016  # $stdin is ruby's
-	coproc ARCHCI_JOURNAL { ruby -e '
+	# (--disable-gems: nothing here needs a gem, and a worker's system ruby
+	# has none to offer: base64 is a gem since ruby 3.4, and requiring it
+	# killed the coprocess on every worker, 0.7.1)
+	coproc ARCHCI_JOURNAL { ruby --disable-gems -e '
 		require "socket"
 		s = Socket.new(:UNIX, :DGRAM)
 		s.connect(Socket.pack_sockaddr_un("/run/systemd/journal/socket"))
-		require "base64"
 		rec = +""
 		$stdin.each_line do |l|
 		  if l == "\n" then s.send(rec, 0) unless rec.empty?; rec = +""
 		  elsif (m = l.match(/\A([A-Z0-9_]+)@=(.*)\n\z/))   # a value with newlines, base64 from archci_record: the binary form
-		    v = Base64.strict_decode64(m[2]); rec << m[1] << "\n" << [v.bytesize].pack("Q<") << v << "\n"
+		    v = m[2].unpack1("m0"); rec << m[1] << "\n" << [v.bytesize].pack("Q<") << v << "\n"
 		  else rec << l end
 		end
 		s.send(rec, 0) unless rec.empty?' 2>/dev/null; }
@@ -291,14 +293,28 @@ archci_journal_close() {
 archci_record() {
 	local msg=$1 f; shift
 	if [[ -n ${ARCHCI_JOURNAL_FD:-} ]]; then
-		{
-			printf 'MESSAGE=%s\nPRIORITY=6\nSYSLOG_IDENTIFIER=%s\n' "$msg" "${0##*/}"
-			for f in "$@"; do
-				if [[ ${f#*=} == *$'\n'* ]]; then printf '%s@=%s\n' "${f%%=*}" "$(printf '%s' "${f#*=}" | base64 -w0)"
-				else printf '%s\n' "$f"; fi
-			done
-			printf '\n'
-		} >&"$ARCHCI_JOURNAL_FD"
+		# a coprocess that died (its stderr is closed: it said nothing) makes
+		# the write fail; then this line and the next go to stdout like every
+		# other and the build goes on, instead of set -e ending it with
+		# "printf: write error: Broken pipe" as its last word (0.7.1)
+		# (a subshell with SIGPIPE ignored: the write then fails with EPIPE
+		# instead of the signal ending the script, under systemd or not)
+		if ! (
+			trap '' PIPE
+			# shellcheck disable=SC2261  # the fd is the coprocess's stdin, never 2
+			{
+				printf 'MESSAGE=%s\nPRIORITY=6\nSYSLOG_IDENTIFIER=%s\n' "$msg" "${0##*/}"
+				for f in "$@"; do
+					if [[ ${f#*=} == *$'\n'* ]]; then printf '%s@=%s\n' "${f%%=*}" "$(printf '%s' "${f#*=}" | base64 -w0)"
+					else printf '%s\n' "$f"; fi
+				done
+				printf '\n'
+			} >&"$ARCHCI_JOURNAL_FD" 2>/dev/null
+		); then
+			archci_journal_close
+			echo "archci_record: the journal sender is gone; records go to stdout from here" >&2
+			printf '%s\n' "$msg"
+		fi
 	else
 		printf '%s\n' "$msg"
 	fi
