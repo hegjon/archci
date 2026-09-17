@@ -57,7 +57,8 @@ flag=$ARCHCI_HOME/publish.needed
 stamp=$ARCHCI_HOME/publish.reconciled
 due=0
 [[ -n $ARCHCI_R2_RELEASE ]] && [[ -z $(find "$stamp" -mmin -"$ARCHCI_PUBLISH_RECONCILE_MINUTES" 2>/dev/null) ]] && due=1
-(( force || due )) || [[ -e $flag ]] || exit 0
+# an export waiting under logs/ is a reason of its own: the export unit raises no flag
+(( force || due )) || [[ -e $flag ]] || [[ -n $(find "$logs" -type f \( -name '*.sse.gz' -o -name '*.sse.zst' \) -print -quit 2>/dev/null) ]] || exit 0
 mkdir -p "$pool" "$sigs" "$dbs" "$listings" "$ARCHCI_HOME/lock"
 
 exec 9>"$ARCHCI_HOME/lock/publish.lock"
