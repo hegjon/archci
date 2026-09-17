@@ -41,8 +41,9 @@
 #      then) is moved to the release as <repo>/log/..., served with
 #      Content-Encoding gzip, which the release passes through to a browser
 #      (a zstd one it decoded for every client). An export in
-#      progress is a .tmp until whole, so the move never takes a partial
-#      file. Without ARCHCI_R2_RELEASE the exports stay under logs/.
+#      progress is a .sse.gz.tmp until renamed whole, so the move never
+#      takes a partial file. Without ARCHCI_R2_RELEASE the exports stay
+#      under logs/.
 # Every object's name but the databases' and release.pub's carries a hash or
 # a timestamp, so those get a year of immutable caching; the rest no-cache
 # (rclone --header-upload).
@@ -58,7 +59,7 @@ stamp=$ARCHCI_HOME/publish.reconciled
 due=0
 [[ -n $ARCHCI_R2_RELEASE ]] && [[ -z $(find "$stamp" -mmin -"$ARCHCI_PUBLISH_RECONCILE_MINUTES" 2>/dev/null) ]] && due=1
 # an export waiting under logs/ is a reason of its own: the export unit raises no flag
-(( force || due )) || [[ -e $flag ]] || [[ -n $(find "$logs" -type f \( -name '*.sse.gz' -o -name '*.sse.zst' \) -print -quit 2>/dev/null) ]] || exit 0
+(( force || due )) || [[ -e $flag ]] || [[ -n $(find "$logs" -type f -name '*.sse.gz' -print -quit 2>/dev/null) ]] || exit 0
 mkdir -p "$pool" "$sigs" "$dbs" "$listings" "$ARCHCI_HOME/lock"
 
 exec 9>"$ARCHCI_HOME/lock/publish.lock"
@@ -313,14 +314,11 @@ fi
 # the release has (a file left by an interrupted move) without a check
 for repodir in "$logs"/*/; do
 	repodir=${repodir%/}; repo=${repodir##*/}
-	n=$(find "$repodir" -type f \( -name '*.sse.gz' -o -name '*.sse.zst' \) | wc -l)
+	n=$(find "$repodir" -type f -name '*.sse.gz' | wc -l)
 	(( n )) || continue
 	rclone move "$repodir" "$ARCHCI_R2_RELEASE/$repo/log" --include '*.sse.gz' --ignore-existing --transfers 8 --checkers 16 --no-traverse \
 		"${immutable[@]}" --header-upload "Content-Type: text/event-stream" --header-upload "Content-Encoding: gzip"
-	# an export from before 0.6.10, left in logs/ at the upgrade
-	rclone move "$repodir" "$ARCHCI_R2_RELEASE/$repo/log" --include '*.sse.zst' --ignore-existing --transfers 8 --checkers 16 --no-traverse \
-		"${immutable[@]}" --header-upload "Content-Type: text/event-stream" --header-upload "Content-Encoding: zstd"
-	find "$repodir" -type f \( -name '*.sse.gz' -o -name '*.sse.zst' \) -delete 2>/dev/null || true   # a file the release already had
+	find "$repodir" -type f -name '*.sse.gz' -delete 2>/dev/null || true   # a file the release already had
 	archci_log "published $n build log(s) to $ARCHCI_R2_RELEASE/$repo/log"
 done
 find "$logs" -mindepth 1 -type d -empty -delete 2>/dev/null || true

@@ -646,7 +646,7 @@ module Archci
     lines[start...stop]
   end
 
-  # the journalctl that reads a job's log (read_log, read_entries): the
+  # the journalctl that reads a job's log (read_log, stream_entries): the
   # job's matches within its window or, resuming a running job, after the
   # cursor (journalctl takes one or the other), as OUTPUT: 'cat' for the
   # lines (with the cursor to resume from while the job runs), 'json' for
@@ -963,7 +963,7 @@ module Archci
   # client (13.6 MB on the wire for an 806 KB log, 2026-09-17);
   # archci-publish moves that tree to R2 as <repo>/log/. Each job
   # once (exported=<file> in its file, under the queue lock), as soon as its
-  # log is whole in the journal (log_complete?); a log that never completes
+  # log is whole in the journal (the stream's 'complete'); a log that never completes
   # (a build killed hard) is exported as it stands settle_after seconds
   # after the report, and a job whose journal holds nothing by then is
   # marked exported=none and not asked again. Returns the count exported.
