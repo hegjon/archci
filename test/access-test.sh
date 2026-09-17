@@ -127,6 +127,8 @@ sse=$("$tmp/fakessh-web" master sse "$id") || fail "the web key streams a job's 
 [[ $sse == "event: job"* ]] || fail "sse starts with the job event: ${sse:0:80}"
 [[ $(jq -r '.state' <<<"$ent") == 'done' && $(jq -r '.entries | type' <<<"$ent") == array ]] || fail "entries ID is JSON with the entries: $ent"
 ! "$tmp/fakessh-web" master summary "$id" >/dev/null 2>&1 || fail "summary is the report's, not the web key's"
+pb=$("$tmp/fakessh-web" master pkgbuild "$id") || fail "the web key reads the job's PKGBUILD"
+[[ $pb == "pkgname=acl"* ]] || fail "pkgbuild ID is the PKGBUILD at the job's commit: ${pb:0:80}"
 one=$("$tmp/fakessh-web" master job "$id") || fail "the web key reads one job"
 [[ $(jq -r '.id' <<<"$one") == "$id" ]] || fail "job ID returns that job: $one"
 ! "$tmp/fakessh-web" master log "9-1-omarchy,nope,1-1,x86_64" >/dev/null 2>&1 || fail "log of an unknown job must fail"

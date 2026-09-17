@@ -54,6 +54,7 @@ archci web snapshot | jq .          the farm and every job as JSON, what the web
 archci web job <jobid>              one job as JSON (no snapshot): its fields, story and the src job that built it
 archci web log <jobid>              a job's log as JSON: the lines and the index of the first error (a running job's tail)
 archci web entries <jobid>          the same as journal entries, each line with its time and phase
+archci web pkgbuild <jobid>         the PKGBUILD the job was built from, as it was at its commit
 archci web sse <jobid>              the log as server-sent events: the job, one event per line with its cursor, the end; what the web streams and what is exported to R2
 archci web export DIR               export the logs of the jobs finished since the last export (archci-export.timer does this every minute)
 journalctl -t archci-job -f         every claim/report on the master

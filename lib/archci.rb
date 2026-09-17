@@ -552,6 +552,17 @@ module Archci
     nil
   end
 
+  # the PKGBUILD a job was built from: the file at the job's commit in the
+  # master's clone of the PKGBUILD repository (archci-scan keeps the
+  # history, so a commit the index once named is there). nil if git cannot
+  # show it (a pruned or force-pushed history, a job from another
+  # repository).
+  def self.pkgbuild(j)
+    out, status = Open3.capture2('git', '-C', File.join(home, 'pkgbuilds'), 'show',
+                                 "#{j['commit']}:#{config['ARCHCI_PKGBUILDS_DIR']}/#{j['pkgbase']}/PKGBUILD", err: File::NULL)
+    status.success? ? out : nil
+  end
+
   # the id of the src job that produced a build's source package: same pkgbase
   # and version, arch src (one repo per master). Prefer the one that succeeded
   # (done), then running, failed, pending; newest first. nil if pruned.

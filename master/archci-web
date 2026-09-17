@@ -12,7 +12,9 @@
 #              the whole snapshot. "started" is a running build's claim time;
 #              a finished build's times come from its log, in the browser.
 #              For a build that used a source package, "sources_job" is the id
-#              of the src job that produced it.
+#              of the src job that produced it. "pkgbuilds" and
+#              "pkgbuilds_dir" name the PKGBUILD repository and the directory
+#              in it (ARCHCI_PKGBUILDS_URL, _DIR), for a link to the commit.
 #   log ID [CURSOR]
 #              one job's log: {"id", "state", "lines": [...], "error_at": N
 #              (null without an error), "cursor"}. The job's entries in the
@@ -40,6 +42,10 @@
 #              front end pipes to a browser's EventSource for a running job,
 #              and byte for byte what archci-publish exports to R2 for a
 #              finished one (a client reads either with one parser).
+#   pkgbuild ID
+#              the PKGBUILD the job was built from, as it was at the job's
+#              commit in the master's clone (Archci.pkgbuild); exits 1 when
+#              git cannot show it
 #   export DIR [SETTLE]
 #              the logs of the jobs finished since the last export, as
 #              <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.gz under
@@ -77,7 +83,8 @@ in ['job', id]
   # browser's to work out from the log stream it shows (each entry's time,
   # the slice markers, the finish record); a running one counts from its claim
   extra = { 'mtime' => j['mtime'].utc.iso8601, 'story' => Archci.story(j), 'repo' => j['repo'], 'generated' => Time.now.utc.iso8601,
-            'started' => (j['claimed'] if j['state'] == 'running') }
+            'started' => (j['claimed'] if j['state'] == 'running'),
+            'pkgbuilds' => Archci.config['ARCHCI_PKGBUILDS_URL'], 'pkgbuilds_dir' => Archci.config['ARCHCI_PKGBUILDS_DIR'] }
   # the src job that built this build's source package, so the front end can link it
   extra['sources_job'] = Archci.find_src_job(j['repo'], j['pkgbase'], j['version']) if j['sources'] && j['arch'] != 'src'
   puts JSON.generate(j.merge(extra))
@@ -92,6 +99,10 @@ in ['entries', id, *rest]
 in ['sse', id, *rest]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   Archci.write_sse(j, $stdout, after: rest.first)
+in ['pkgbuild', id]
+  j = Archci.find_job(id) or abort "archci-web: no job #{id}"
+  text = Archci.pkgbuild(j) or abort "archci-web: no PKGBUILD for #{j['pkgbase']} at #{j['commit']}"
+  $stdout.write(text)
 in ['export', dir, *settle]
   puts Archci.export_logs(dir, settle_after: (settle.first || 600).to_i)
 in ['summary', id]
@@ -100,5 +111,5 @@ in ['summary', id]
   # one line each, the job file's format (a key=value line): no newlines, cut short
   { 'error' => err && lines[err], 'last' => lines.last }.each { |k, v| puts "#{k}=#{v.strip[0, 200]}" if v && !v.strip.empty? }
 else
-  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | entries ID [CURSOR] | sse ID [CURSOR] | export DIR | summary ID'
+  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | entries ID [CURSOR] | sse ID [CURSOR] | pkgbuild ID | export DIR | summary ID'
 end

@@ -48,7 +48,7 @@ case ${argv[0]:-} in
 		[[ $role == signer ]] || refuse
 		touch "$ARCHCI_HOME/publish.needed" ;;
 	# the web key: what a front end reads, and the operator's queue commands
-	snapshot|job|log|entries|sse)
+	snapshot|job|log|entries|sse|pkgbuild)
 		[[ $role == web ]] || refuse
 		exec "$ARCHCI_MASTER_DIR/archci-web" "${argv[@]}" ;;
 	retry|requeue|enqueue)
