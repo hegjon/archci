@@ -91,10 +91,7 @@ in ['entries', id, *rest]
   puts JSON.generate('id' => j['id'], 'state' => j['state'], 'entries' => entries, 'error_at' => err, 'cursor' => cursor)
 in ['sse', id, *rest]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
-  entries, err, = Archci.read_entries(j, after: rest.first)
-  $stdout.write(Archci.sse_job_event(j, entries)) if rest.first.nil? || rest.first.empty?
-  entries.each { |e| $stdout.write(Archci.sse_entry(e)) }
-  $stdout.write(Archci.sse_end_event(j, entries, err)) if %w[done failed].include?(j['state'])
+  Archci.write_sse(j, $stdout, after: rest.first)
 in ['export', dir, *settle]
   puts Archci.export_logs(dir, settle_after: (settle.first || 600).to_i)
 in ['summary', id]

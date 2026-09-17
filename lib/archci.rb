@@ -6,6 +6,7 @@ require 'etc'
 require 'fileutils'
 require 'set'
 require 'socket'
+require 'tempfile'
 require 'json'
 require 'open3'
 require 'time'
@@ -685,19 +686,96 @@ module Archci
   # At most ARCHCI_LOG_MAX_LINES entries are kept: the first three quarters
   # of that and the last quarter, with one marker entry (no cursor,
   # priority 4) in place of what is between. journalctl's output is read
-  # as it comes, never whole: a test suite that dumps its files can write
-  # hundreds of thousands of lines, and reading them all into memory killed
-  # the master's export (its OOM, 2026-09-16).
-  def self.read_entries(j, after: nil)
-    cmd = journal_cmd(j, after: after, output: 'json') or return [[], nil, nil]
+  # as it comes and each entry leaves as it is placed: however long the log,
+  # what stays in memory is the tail (a quarter of the cap) and a few facts.
+  # (A test suite that dumps its files writes hundreds of thousands of
+  # lines: reading them all in killed the master's export, 2026-09-16, and
+  # holding even the capped list cost about 3.5 KB an entry, 2026-09-17.)
+  #
+  # stream_entries is the one reader. It runs journalctl for the job
+  # (journal_cmd) and gives each entry of the log, capped, to sink.call(e)
+  # in order; sink.reset is called when the log starts over at a later
+  # header naming the job (the cut own_lines makes on a list, made here as
+  # the entries pass: the window's slack lets in an earlier run of a
+  # requeued attempt's unit, or the sourcer's previous fetch, so the log is
+  # what follows the last header naming the job, up to the next header,
+  # another job's; a header is judged with the three lines after it, where
+  # an older worker put the id). Returns the facts the job and end events
+  # need: 'first' and 'last' (entries), 'start' and 'finish' (archci's
+  # records), 'signed' (the builder-signed package names), 'error_at' (the
+  # first error's index among the entries given; nil for a done job, whose
+  # point of interest is its last line), 'complete' (the finish record, or
+  # an older worker's last line, is among the last 20 entries the journal
+  # holds: the record goes through the journal's native socket and can be
+  # logged a line or two before a stdout line still in the pipe), 'cursor'
+  # (a running job's, to resume the next poll from; nil once it finished).
+  def self.stream_entries(j, sink, after: nil)
+    facts = { 'first' => nil, 'last' => nil, 'start' => nil, 'finish' => nil, 'signed' => [], 'error_at' => nil, 'complete' => false, 'cursor' => nil }
+    cmd = journal_cmd(j, after: after, output: 'json') or return facts
     limit = [config['ARCHCI_LOG_MAX_LINES'].to_i, 8].max
     tail_n = limit / 4
     head_n = limit - tail_n
-    head = []
-    tail = []       # the last tail_n entries once the head is full
+    cut = !(after && !after.empty?)   # the cut at the job's own header: only when reading from the start
+    given = 0           # entries given to the sink
+    tail = []           # the last tail_n entries once the head is given
     dropped = 0
     first_dropped = nil
+    err = nil
+    since_finish = nil  # entries since the last finish record or line
+    pending = []        # read, not placed yet: a header is judged with the three lines after it
+    started = false     # a header naming the job was seen
+    stopped = false     # and another job's header after it
     cursor = nil
+    restart = lambda do
+      sink.reset
+      given = 0
+      tail = []
+      dropped = 0
+      first_dropped = nil
+      err = nil
+      since_finish = nil
+      facts.merge!('first' => nil, 'last' => nil, 'start' => nil, 'finish' => nil, 'signed' => [])
+    end
+    place = lambda do |e|
+      m = e['MESSAGE']
+      facts['first'] ||= e
+      facts['last'] = e
+      case e['ARCHCI_EVENT']
+      when 'start' then facts['start'] = e
+      when 'finish' then facts['finish'] = e
+      when 'signed' then facts['signed'] << e['ARCHCI_PACKAGE'] if e['ARCHCI_PACKAGE']
+      end
+      since_finish = e['ARCHCI_EVENT'] == 'finish' || m.start_with?(*BUILD_END) ? 0 : since_finish && since_finish + 1
+      if given < head_n
+        err ||= given if error_line?(m)
+        sink.call(e)
+        given += 1
+      else
+        tail << e
+        if tail.size > tail_n
+          first_dropped ||= tail.first
+          tail.shift
+          dropped += 1
+        end
+      end
+    end
+    settle = lambda do |final|
+      while !pending.empty? && (final || pending.size >= 4)
+        e = pending.first
+        m = e['MESSAGE']
+        if m.start_with?(*LOG_HEADER) && !m.start_with?(*BUILD_END)
+          if pending.first(4).any? { |x| x['MESSAGE'].include?(j['id']) }
+            restart.call
+            started = true
+            stopped = false
+          elsif started
+            stopped = true
+          end
+        end
+        pending.shift
+        place.call(e) unless stopped
+      end
+    end
     Open3.popen2(*cmd, err: File::NULL) do |stdin, stdout, _thread|
       stdin.close
       stdout.each_line do |line|
@@ -716,28 +794,64 @@ module Archci
         entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY', '_PID', '_SYSTEMD_INVOCATION_ID', *RECORD_FIELDS).merge('MESSAGE' => m)
         phase = log_phase(m)
         entry['phase'] = phase if phase
-        if head.size < head_n
-          head << entry
-        else
-          tail << entry
-          if tail.size > tail_n
-            first_dropped ||= tail.first
-            tail.shift
-            dropped += 1
-          end
-        end
         cursor = e['__CURSOR']
+        if cut
+          pending << entry
+          settle.call(false)
+        else
+          place.call(entry)
+        end
       end
     end
-    entries = head
+    settle.call(true) if cut
     if dropped.positive?
-      entries << { '__REALTIME_TIMESTAMP' => first_dropped['__REALTIME_TIMESTAMP'], 'PRIORITY' => '4',
-                   'MESSAGE' => "... #{dropped} line(s) not shown: the log has more than #{limit} lines (ARCHCI_LOG_MAX_LINES); the first #{head_n} and the last #{tail_n} are" }
+      sink.call({ '__REALTIME_TIMESTAMP' => first_dropped['__REALTIME_TIMESTAMP'], 'PRIORITY' => '4',
+                  'MESSAGE' => "... #{dropped} line(s) not shown: the log has more than #{limit} lines (ARCHCI_LOG_MAX_LINES); the first #{head_n} and the last #{tail_n} are" })
+      given += 1
     end
-    entries.concat(tail)
-    cursor = j['state'] == 'running' ? (cursor || after) : nil
-    entries = own_lines(entries, j['id'], text: ->(e) { e['MESSAGE'] }) unless after && !after.empty?
-    [entries, j['state'] == 'done' ? nil : entries.index { |e| error_line?(e['MESSAGE']) }, cursor]
+    tail.each do |e|
+      err ||= given if error_line?(e['MESSAGE'])
+      sink.call(e)
+      given += 1
+    end
+    facts['error_at'] = err unless j['state'] == 'done'
+    facts['complete'] = !since_finish.nil? && since_finish < 20
+    facts['cursor'] = j['state'] == 'running' ? (cursor || after) : nil
+    facts
+  end
+
+  # sinks for stream_entries: the entries as a list, or as SSE events
+  # written to a file as they come (EventFile: cursor as sse_entry)
+  class EntryList
+    attr_reader :entries
+
+    def initialize = @entries = []
+    def call(e) = @entries << e
+    def reset = @entries.clear
+  end
+
+  class EventFile
+    def initialize(io, cursor: true)
+      @io = io
+      @cursor = cursor
+    end
+
+    def call(e) = @io.write(Archci.sse_entry(e, cursor: @cursor))
+
+    def reset
+      @io.rewind
+      @io.truncate(0)
+    end
+  end
+
+  # the job's log as journal entries, [entries, error_at, cursor], for a
+  # browser to build the log window from without reading the log itself
+  # (the whole capped list in memory: archci web entries; the stream and
+  # the export never hold it)
+  def self.read_entries(j, after: nil)
+    list = EntryList.new
+    facts = stream_entries(j, list, after: after)
+    [list.entries, facts['error_at'], facts['cursor']]
   end
 
   # a build's marker lines and the phase each opens: archci-build's slice
@@ -774,15 +888,15 @@ module Archci
   # job that made its source package (the page links it), the package
   # files the build produced (their hashed names in the release), and,
   # for an export, the file's own name (exported:).
-  def self.sse_job_event(j, entries, exported: nil)
-    start = entries.find { |e| e['ARCHCI_EVENT'] == 'start' } || {}
-    finish = entries.reverse_each.find { |e| e['ARCHCI_EVENT'] == 'finish' } || {}
+  def self.sse_job_event(j, facts, exported: nil)
+    start = facts['start'] || {}
+    finish = facts['finish'] || {}
     pkg = packages.find { |p| p['pkgbase'] == j['pkgbase'] }
     src_job = find_src_job(j['repo'], j['pkgbase'], j['version']) if j['sources'] && j['arch'] != 'src'
     # ('log', the journalctl find_job adds, and the report's summary lines are not the log's business)
     job = j.except('path', 'mtime', 'error', 'last', 'log', 'origin', 'exported').merge(
       'mtime' => j['mtime']&.utc&.iso8601, 'story' => story(j), 'origin' => origin(pkg) || '-',
-      'host' => start['ARCHCI_HOST'], 'archci' => start['ARCHCI_VERSION'], 'invocation' => entries.first&.dig('_SYSTEMD_INVOCATION_ID'),
+      'host' => start['ARCHCI_HOST'], 'archci' => start['ARCHCI_VERSION'], 'invocation' => facts['first']&.dig('_SYSTEMD_INVOCATION_ID'),
       'sources_job' => src_job, 'packages' => finish['ARCHCI_PACKAGES']&.split, 'exported' => exported
     ).compact
     "event: job\ndata: #{JSON.generate(job)}\n\n"
@@ -801,22 +915,40 @@ module Archci
     cursor && e['__CURSOR'] ? "data: #{JSON.generate(data)}\nid: #{e['__CURSOR']}\n\n" : "data: #{JSON.generate(data)}\n\n"
   end
 
-  def self.sse_end_event(j, entries, error_at)
-    fin = entries.reverse_each.find { |e| e['ARCHCI_EVENT'] == 'finish' } || {}
-    rc = fin['ARCHCI_RC'] || entries.last&.dig('MESSAGE')&.[](/finished with (\d+)/, 1)
-    signed = entries.filter_map { |e| e['ARCHCI_PACKAGE'] if e['ARCHCI_EVENT'] == 'signed' }
-    data = { 'state' => j['state'], 'error_at' => error_at, 'finished' => j['finished'], 'rc' => rc&.to_i,
+  def self.sse_end_event(j, facts)
+    fin = facts['finish'] || {}
+    rc = fin['ARCHCI_RC'] || facts['last']&.dig('MESSAGE')&.[](/finished with (\d+)/, 1)
+    signed = facts['signed']
+    data = { 'state' => j['state'], 'error_at' => facts['error_at'], 'finished' => j['finished'], 'rc' => rc&.to_i,
              'packages' => (signed.empty? ? nil : signed) }.compact
     "event: end\ndata: #{JSON.generate(data)}\n\n"
   end
 
-  # a finished job's log: is it whole in the journal? By the finish record
-  # (ARCHCI_EVENT=finish), or an older worker's last line
-  # (the record goes through the journal's native socket and can be logged
-  # a line or two before a stdout line still in the pipe, so it need not be
-  # the last entry)
-  def self.log_complete?(entries)
-    entries.last(20).any? { |e| e['ARCHCI_EVENT'] == 'finish' || e['MESSAGE'].start_with?(*BUILD_END) }
+  # the job's entries as SSE events in a file under ARCHCI_HOME/tmp, written
+  # as they stream (stream_entries with an EventFile; the log can start over
+  # at a later header of the job's, which a pipe cannot), given to the block
+  # rewound, with the facts; the file goes with the block. The job's memory
+  # is the tail of the cap, its disk the log once, whatever its length.
+  def self.with_log_body(j, after: nil, cursor: true)
+    dir = File.join(home, 'tmp')
+    FileUtils.mkdir_p(dir)
+    Tempfile.create(['sse-', '.body'], dir) do |body|
+      facts = stream_entries(j, EventFile.new(body, cursor: cursor), after: after)
+      body.flush
+      body.rewind
+      yield facts, body
+    end
+  end
+
+  # the job's log as the stream OUT gets: the job event (only from the
+  # start: a resumed poll has it), the entries, and the end event once
+  # the job has finished
+  def self.write_sse(j, out, after: nil)
+    with_log_body(j, after: after) do |facts, body|
+      out.write(sse_job_event(j, facts)) unless after && !after.empty?
+      IO.copy_stream(body, out)
+      out.write(sse_end_event(j, facts)) if %w[done failed].include?(j['state'])
+    end
   end
 
   # Export the logs of finished jobs as SSE files under DIR/<repo>/<pkgbase>/
@@ -840,32 +972,43 @@ module Archci
 
         age = now - Time.iso8601(j['finished'])
         j = j.merge('state' => q)
-        entries, err, = read_entries(j)
-        if entries.empty?
-          mark_exported(j, 'none') if age >= settle_after
-          next
+        case export_log(j, dir, settle: age >= settle_after)
+        when :exported then n += 1
+        when :none then mark_exported(j, 'none') if age >= settle_after
         end
-        next unless log_complete?(entries) || age >= settle_after
-
-        first = entries.first
-        name = "#{j['pkgbase']}-#{j['version']}-#{j['arch']}-#{first['__REALTIME_TIMESTAMP'].to_i / 1_000_000}-#{first['_SYSTEMD_INVOCATION_ID'] || 'none'}.sse"
-        path = File.join(dir, j['repo'], j['pkgbase'], j['version'], j['arch'], name)
-        FileUtils.mkdir_p(File.dirname(path))
-        File.open("#{path}.tmp", 'w') do |f|
-          f.write(sse_job_event(j, entries, exported: "#{name}.gz"))
-          entries.each { |e| f.write(sse_entry(e, cursor: false)) }
-          f.write(sse_end_event(j, entries, err))
-        end
-        # (-f: a file of that name is the same attempt's log, from a job that was retried into a new one)
-        system('gzip', '-f', '-c', "#{path}.tmp", out: "#{path}.gz", exception: true)
-        File.delete("#{path}.tmp")
-        mark_exported(j, "#{name}.gz")
-        n += 1
       rescue ArgumentError
         next   # a finished= that is not a time
       end
     end
     n
+  end
+
+  # one job's log to DIR (export_logs): :none without entries, :wait for a
+  # log the journal has not finished (unless settle), else :exported. The
+  # body streams to a file, then job event, body and end event go through
+  # gzip into <name>.sse.gz.tmp, renamed whole (archci-publish moves every
+  # *.sse.gz it finds, so a file is never half one).
+  def self.export_log(j, dir, settle: false)
+    with_log_body(j, cursor: false) do |facts, body|
+      first = facts['first'] or return :none
+      return :wait unless facts['complete'] || settle
+
+      name = "#{j['pkgbase']}-#{j['version']}-#{j['arch']}-#{first['__REALTIME_TIMESTAMP'].to_i / 1_000_000}-#{first['_SYSTEMD_INVOCATION_ID'] || 'none'}.sse"
+      path = File.join(dir, j['repo'], j['pkgbase'], j['version'], j['arch'], name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.open("#{path}.gz.tmp", 'w') do |gz|
+        IO.popen(['gzip', '-c', { out: gz }], 'w') do |pipe|
+          pipe.write(sse_job_event(j, facts, exported: "#{name}.gz"))
+          IO.copy_stream(body, pipe)
+          pipe.write(sse_end_event(j, facts))
+        end
+        raise "gzip failed on #{path}" unless $?.success?
+      end
+      # (a file of that name is the same attempt's log, from a job that was retried into a new one)
+      File.rename("#{path}.gz.tmp", "#{path}.gz")
+      mark_exported(j, "#{name}.gz")
+      :exported
+    end
   end
 
   # append exported=VALUE to a job file, under the queue lock (a move by a
