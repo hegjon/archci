@@ -168,7 +168,12 @@ cmd_heartbeat() {
 	# keeps only the latest beat, does not retain)
 	(( $# )) && command -v logger >/dev/null && logger -t archci-heartbeat -- "$id worker=$sender $*" 2>/dev/null || true
 	if (( $# )); then
-		{ grep -Ev "^($(archci_stats_re))=" "$file"; printf '%s\n' "$@"; } >"$file.tmp"
+		# a beat replaces the stats it carries and leaves the rest: the last
+		# beats of a build (the upload, the container gone) come without the
+		# job's rss/peak/build, and a finished job keeps the last ones seen
+		local keys=() key
+		for stat in "$@"; do key=${stat%%=*}; keys+=("$key"); done
+		{ grep -Ev "^($(IFS='|'; printf '%s' "${keys[*]}"))=" "$file"; printf '%s\n' "$@"; } >"$file.tmp"
 		mv "$file.tmp" "$file"   # the new mtime is the heartbeat
 	else
 		touch "$file"

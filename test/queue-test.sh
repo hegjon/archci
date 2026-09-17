@@ -50,9 +50,13 @@ rm -f "$w1" "$w2" "$w2.rejected"; rm -r "$ARCHCI_HOME/released"
 "$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=104858 peak=204800 build=134217728
 COLUMNS=200 "$top" | grep "  3.70  128G  102G  200G  -        arch     acl" >/dev/null || fail "memory from 100G up must keep five characters: $(COLUMNS=200 "$top" | grep worker-1)"
 "$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880 phase=check
+# a beat without the job's numbers (the upload, the container gone) leaves the last ones: a finished job keeps its peak
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=0.20 mem=41 disk=61 cpus=4 phase=upload
+{ grep -q '^peak=2100$' "$ARCHCI_HOME/queue/running/$id.job" && grep -q '^rss=1840$' "$ARCHCI_HOME/queue/running/$id.job" && grep -q '^phase=upload$' "$ARCHCI_HOME/queue/running/$id.job" && grep -q '^load=0.20$' "$ARCHCI_HOME/queue/running/$id.job"; } || fail "a beat replaces the stats it carries and keeps the rest: $(grep -E '^(peak|rss|phase|load)=' "$ARCHCI_HOME/queue/running/$id.job")"
+"$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 phase=check   # back to the check phase the next lines expect
 COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  check    arch     acl 1:2.3.2-1 | -" >/dev/null || fail "the phase the worker sent must show: $(COLUMNS=200 "$top" | grep worker-1)"
 "$job" heartbeat "$id" "worker=$(owner "$id")" load=0.10 mem=40 disk=61 cpus=4 vendor=DigitalOcean cpu_us=3700000 cpu_dt=1000000 rss=1840 peak=2100 build=5242880
-COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  -        arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" | grep worker-1)"
+COLUMNS=200 "$top" | grep "  3.70  5.0G  1.8G  2.1G  check    arch     acl 1:2.3.2-1 | -" >/dev/null || fail "archci-top must show the job's cpu, memory and build size: $(COLUMNS=200 "$top" | grep worker-1)"
 
 echo "--- a job's log is its entries in the workers' journal: a running job's so far, with a cursor to poll from"
 # what the build's unit logged on the worker's host (worker-1: host "worker"), streamed to the master
