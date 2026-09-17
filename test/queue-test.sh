@@ -120,9 +120,9 @@ rest=$("$master/archci-web" sse "$id" "$mid")
 [[ $(grep -c '^id: s=' <<<"$rest") == 4 && $rest != "event: job"* && $rest == *$'\n'"event: end"$'\n'* ]] || fail "from a cursor, a finished job's stream is the entries after it and the end: $rest"
 mkdir -p "$tmp/logs"
 [[ $("$master/archci-web" export "$tmp/logs") == 1 ]] || fail "the finished job's log is exported once"
-xf=$(find "$tmp/logs" -name '*.sse.zst'); [[ $xf == "$tmp/logs/omarchy/acl/1:2.3.2-1/x86_64/acl-1:2.3.2-1-x86_64-"[0-9]*"-feedfacefeedfacefeedfacefeedface.sse.zst" ]] || fail "the export is named by pkgbase, version, arch, the start and the invocation: $xf"
-[[ $(zstd -dc "$xf" | sed '2s/,"exported":"[^"]*"//') == "$sse" ]] || fail "the export is the live stream's bytes plus its own name in the job event: $(diff <(echo "$sse") <(zstd -dc "$xf") | head -6)"
-zstd -dc "$xf" | sed -n 2p | grep -q "\"exported\":\"${xf##*/}\"" || fail "the export's job event names the file: $(zstd -dc "$xf" | sed -n 2p | cut -c1-300)"
+xf=$(find "$tmp/logs" -name '*.sse.gz'); [[ $xf == "$tmp/logs/omarchy/acl/1:2.3.2-1/x86_64/acl-1:2.3.2-1-x86_64-"[0-9]*"-feedfacefeedfacefeedfacefeedface.sse.gz" ]] || fail "the export is named by pkgbase, version, arch, the start and the invocation: $xf"
+[[ $(gzip -dc "$xf" | sed '2s/,"exported":"[^"]*"//') == "$sse" ]] || fail "the export is the live stream's bytes plus its own name in the job event: $(diff <(echo "$sse") <(gzip -dc "$xf") | head -6)"
+gzip -dc "$xf" | sed -n 2p | grep -q "\"exported\":\"${xf##*/}\"" || fail "the export's job event names the file: $(gzip -dc "$xf" | sed -n 2p | cut -c1-300)"
 grep -q "^exported=${xf##*/}$" "$ARCHCI_HOME/queue/done/$id.job" || fail "the job file names its export: $(grep exported "$ARCHCI_HOME/queue/done/$id.job")"
 [[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "not exported again"
 # reexport drops the mark, and the next pass exports the log again (the same bytes, the same name)
@@ -266,7 +266,7 @@ journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "$(pri
 # its log has no finish record (killed hard): not exported until the settle time, then as it stands, the end event with the error
 [[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "a log without its finish record waits"
 [[ $("$master/archci-web" export "$tmp/logs" 0) == 1 ]] || fail "settled, it is exported as it stands"
-xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.zst'); [[ $(zstd -dc "$xf" | tail -2 | head -1) == 'data: {"state":"failed","error_at":2,"finished":"20'* ]] || fail "the end event of a failed job: $(zstd -dc "$xf" 2>/dev/null | tail -2) / exported: $(find "$tmp/logs" -name "*.sse.zst")"
+xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.gz'); [[ $(gzip -dc "$xf" | tail -2 | head -1) == 'data: {"state":"failed","error_at":2,"finished":"20'* ]] || fail "the end event of a failed job: $(gzip -dc "$xf" 2>/dev/null | tail -2) / exported: $(find "$tmp/logs" -name "*.sse.zst")"
 # what counts as the first error: not a test suite's summary counts, not a warning flag; a build killed for silence does
 [[ $(ARCHCI_CONF=/dev/null ruby -e 'require "'"$master"'/../lib/archci"; puts ["# ERROR: 0", "# FAIL:  3", "-Werror=format", "ERROR: real", "==> build killed after 90 min without output", "Container archci-build-x86-64-2-guile terminated by signal KILL."].map { |l| Archci.error_line?(l) ? 1 : 0 }.join') == 000111 ]] || fail "error_line?: summary counts and -Werror are not errors, a real one and a killed build are"
 # a retry of an exported job: the new job carries no export mark (its own log is exported afresh), the failed one is gone (its log stays on the release under its id)

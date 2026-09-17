@@ -2,8 +2,8 @@
 Description=archci: export the finished jobs' logs from the journal as SSE files
 RequiresMountsFor=/var/lib/archci
 # not while a publish pass moves logs/ to the release: an export writes
-# <name>.sse.tmp and renames it to .sse.zst when whole, and the move takes
-# only *.sse.zst, so the two could overlap; this keeps them apart anyway
+# <name>.sse.tmp and writes .sse.gz when whole, and the move takes only
+# *.sse.gz, so the two could overlap; this keeps them apart anyway
 After=archci-publish.service
 
 [Service]

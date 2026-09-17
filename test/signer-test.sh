@@ -199,10 +199,10 @@ rm -f "$tmp/master-down"
 
 echo "--- the exported logs go to the release as <repo>/log/..., and leave logs/"
 lg=$ARCHCI_HOME/logs/omarchy/hello/1-2/x86_64; mkdir -p "$lg"
-printf 'event: job\ndata: {}\n\n' | zstd -q >"$lg/hello-1-2-x86_64-1789000000-feedfacefeedfacefeedfacefeedface.sse.zst"
+printf 'event: job\ndata: {}\n\n' | gzip >"$lg/hello-1-2-x86_64-1789000000-feedfacefeedfacefeedfacefeedface.sse.gz"
 out=$("$publish" --force 2>&1)
 [[ $out == *"published 1 build log(s)"* ]] || fail "the log is published: $out"
-[[ -f $release/omarchy/log/hello/1-2/x86_64/hello-1-2-x86_64-1789000000-feedfacefeedfacefeedfacefeedface.sse.zst && ! -e $lg ]] || fail "the log sits beside the packages under log/, and is gone from logs/: $(find "$release/omarchy/log" "$ARCHCI_HOME/logs" 2>/dev/null)"
+[[ -f $release/omarchy/log/hello/1-2/x86_64/hello-1-2-x86_64-1789000000-feedfacefeedfacefeedfacefeedface.sse.gz && ! -e $lg ]] || fail "the log sits beside the packages under log/, and is gone from logs/: $(find "$release/omarchy/log" "$ARCHCI_HOME/logs" 2>/dev/null)"
 
 echo "--- the reconcile: a stray file in the release goes, never against an empty database"
 : >"$rel/stray-1-1-x86_64-$(printf 'a%.0s' {1..64}).pkg.tar.zst"

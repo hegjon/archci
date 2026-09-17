@@ -69,7 +69,7 @@ flowchart LR
     SRCR["archci-sourcer: makepkg --allsource"]
   end
   subgraph R2["Cloudflare R2"]
-    REL[("the release: signed pkgs + db, os/src: signed src.tar.zst, log/: the build logs as SSE, zstd")]
+    REL[("the release: signed pkgs + db, os/src: signed src.tar.zst, log/: the build logs as SSE, gzip")]
   end
   PK -->|git pull| SCAN
   WL -->|ssh claim / report| JOB
@@ -288,7 +288,7 @@ repo/<repo>/os/<arch>/      the pool: what is built and not published yet (btrfs
                             a published file never changes under its name; the db's SHA256SUM is the same hash. (pacman and repo-add
                             take any file name; paccache, which parses names, mis-groups these.)
 journal/                    the workers' journals (systemd-journal-remote): every job's log is read from here
-logs/<repo>/<pkgbase>/<version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst
+logs/<repo>/<pkgbase>/<version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.gz
                             a finished attempt's log, exported from the journal as server-sent events once the
                             journal has its finish record (archci-export.timer, every minute), on its way to the release as
                             <repo>/log/...; the job file names it (exported=). start: the attempt's first entry,

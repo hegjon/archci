@@ -816,12 +816,13 @@ module Archci
   end
 
   # Export the logs of finished jobs as SSE files under DIR/<repo>/<pkgbase>/
-  # <version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst
+  # <version>/<arch>/<pkgbase>-<version>-<arch>-<start>-<invocation>.sse.gz
   # (start: the attempt's first entry, seconds since the epoch; invocation:
-  # the build unit's _SYSTEMD_INVOCATION_ID, fresh per unit start), zstd at
-  # its default level (3: a log is small, and the master is; -19 took ten
-  # times the CPU for a sixth off); archci-publish moves that tree to R2
-  # as <repo>/log/. Each job
+  # the build unit's _SYSTEMD_INVOCATION_ID, fresh per unit start), gzip:
+  # the release passes an object with Content-Encoding gzip through to a
+  # browser (they all accept gzip), while a zstd one it decoded for every
+  # client (13.6 MB on the wire for an 806 KB log, 2026-09-17);
+  # archci-publish moves that tree to R2 as <repo>/log/. Each job
   # once (exported=<file> in its file, under the queue lock), as soon as its
   # log is whole in the journal (log_complete?); a log that never completes
   # (a build killed hard) is exported as it stands settle_after seconds
@@ -847,13 +848,14 @@ module Archci
         path = File.join(dir, j['repo'], j['pkgbase'], j['version'], j['arch'], name)
         FileUtils.mkdir_p(File.dirname(path))
         File.open("#{path}.tmp", 'w') do |f|
-          f.write(sse_job_event(j, entries, exported: "#{name}.zst"))
+          f.write(sse_job_event(j, entries, exported: "#{name}.gz"))
           entries.each { |e| f.write(sse_entry(e)) }
           f.write(sse_end_event(j, entries, err))
         end
         # (-f: a file of that name is the same attempt's log, from a job that was retried into a new one)
-        system('zstd', '-q', '-f', '--rm', '-o', "#{path}.zst", "#{path}.tmp", exception: true)
-        mark_exported(j, "#{name}.zst")
+        system('gzip', '-f', '-c', "#{path}.tmp", out: "#{path}.gz", exception: true)
+        File.delete("#{path}.tmp")
+        mark_exported(j, "#{name}.gz")
         n += 1
       rescue ArgumentError
         next   # a finished= that is not a time

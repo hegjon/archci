@@ -42,7 +42,7 @@
 #              finished one (a client reads either with one parser).
 #   export DIR [SETTLE]
 #              the logs of the jobs finished since the last export, as
-#              <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst under
+#              <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.gz under
 #              DIR/<repo>/<pkgbase>/<version>/<arch>/ (Archci.export_logs;
 #              archci-publish runs it on logs/ and moves that to R2 as
 #              <repo>/log/); prints how many. A log the journal has not

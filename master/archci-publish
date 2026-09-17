@@ -36,10 +36,11 @@
 #      index (a farm without a release, the tests) and signed files stay.
 #   4. logs: what archci-export.service (its own timer, every minute) has
 #      exported under logs/<repo>/<pkgbase>/<version>/<arch>/ as
-#      <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.zst (archci-web
+#      <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.gz (archci-web
 #      export: one journalctl per finished job, whole in the journal by
 #      then) is moved to the release as <repo>/log/..., served with
-#      Content-Encoding zstd so a browser decodes it itself. An export in
+#      Content-Encoding gzip, which the release passes through to a browser
+#      (a zstd one it decoded for every client). An export in
 #      progress is a .tmp until whole, so the move never takes a partial
 #      file. Without ARCHCI_R2_RELEASE the exports stay under logs/.
 # Every object's name but the databases' and release.pub's carries a hash or
@@ -311,11 +312,14 @@ fi
 # the release has (a file left by an interrupted move) without a check
 for repodir in "$logs"/*/; do
 	repodir=${repodir%/}; repo=${repodir##*/}
-	n=$(find "$repodir" -type f -name '*.sse.zst' | wc -l)
+	n=$(find "$repodir" -type f \( -name '*.sse.gz' -o -name '*.sse.zst' \) | wc -l)
 	(( n )) || continue
+	rclone move "$repodir" "$ARCHCI_R2_RELEASE/$repo/log" --include '*.sse.gz' --ignore-existing --transfers 8 --checkers 16 --no-traverse \
+		"${immutable[@]}" --header-upload "Content-Type: text/event-stream" --header-upload "Content-Encoding: gzip"
+	# an export from before 0.6.10, left in logs/ at the upgrade
 	rclone move "$repodir" "$ARCHCI_R2_RELEASE/$repo/log" --include '*.sse.zst' --ignore-existing --transfers 8 --checkers 16 --no-traverse \
 		"${immutable[@]}" --header-upload "Content-Type: text/event-stream" --header-upload "Content-Encoding: zstd"
-	find "$repodir" -type f -name '*.sse.zst' -delete 2>/dev/null || true   # a file the release already had
+	find "$repodir" -type f \( -name '*.sse.gz' -o -name '*.sse.zst' \) -delete 2>/dev/null || true   # a file the release already had
 	archci_log "published $n build log(s) to $ARCHCI_R2_RELEASE/$repo/log"
 done
 find "$logs" -mindepth 1 -type d -empty -delete 2>/dev/null || true
