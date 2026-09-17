@@ -788,13 +788,17 @@ module Archci
     "event: job\ndata: #{JSON.generate(job)}\n\n"
   end
 
-  def self.sse_entry(e)
+  # cursor: false leaves the id line out: an exported file is read once,
+  # start to end, and never resumed (the cursors were 2.6 MB of a 13.6 MB
+  # export, half of it after gzip); the live stream keeps them, since a
+  # dropped connection resumes from the last one (Last-Event-ID)
+  def self.sse_entry(e, cursor: true)
     data = { 'time' => Time.at(e['__REALTIME_TIMESTAMP'].to_i / 1_000_000, e['__REALTIME_TIMESTAMP'].to_i % 1_000_000).utc.iso8601(6),
              'priority' => e['PRIORITY'], 'pid' => e['_PID'], 'message' => e['MESSAGE'], 'phase' => e['phase'],
              'event' => e['ARCHCI_EVENT'], 'package' => e['ARCHCI_PACKAGE'], 'slice' => e['ARCHCI_SLICE'] }.compact
     # the cap's marker has no cursor: no id line, rather than an empty one
     # (which would reset the browser's Last-Event-ID to "")
-    e['__CURSOR'] ? "data: #{JSON.generate(data)}\nid: #{e['__CURSOR']}\n\n" : "data: #{JSON.generate(data)}\n\n"
+    cursor && e['__CURSOR'] ? "data: #{JSON.generate(data)}\nid: #{e['__CURSOR']}\n\n" : "data: #{JSON.generate(data)}\n\n"
   end
 
   def self.sse_end_event(j, entries, error_at)
@@ -849,7 +853,7 @@ module Archci
         FileUtils.mkdir_p(File.dirname(path))
         File.open("#{path}.tmp", 'w') do |f|
           f.write(sse_job_event(j, entries, exported: "#{name}.gz"))
-          entries.each { |e| f.write(sse_entry(e)) }
+          entries.each { |e| f.write(sse_entry(e, cursor: false)) }
           f.write(sse_end_event(j, entries, err))
         end
         # (-f: a file of that name is the same attempt's log, from a job that was retried into a new one)
