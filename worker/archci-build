@@ -513,12 +513,17 @@ fi
 # and friends left out), at most a few hundred lines a package
 if (( rc == 0 && ${#pkgs[@]} )); then
 	for pkg in "${pkgs[@]}"; do
-		say "Contents of %s (%s files, %s):" "$(archci_unhashed_stem "$pkg")" "$(bsdtar -tf "$pkg" | grep -vc '^\.')" "$(stat -c %s "$pkg" | numfmt --to=iec)"
-		listing=$(bsdtar -tf "$pkg" | grep -v '^\.' | tree --fromfile -a -L 3 --filelimit 30 --noreport . 2>/dev/null | tail -n +2 | sed 's/^/    /')
-		lines=$(wc -l <<<"$listing")
-		if (( lines > 400 )); then
+		# (|| true: a package with no files, a meta package such as
+		# ca-certificates, makes grep find nothing and exit 1, which pipefail
+		# and set -e turned into a failed build, 0.7.2)
+		count=$(bsdtar -tf "$pkg" | { grep -vc '^\.' || true; })
+		say "Contents of %s (%s files, %s):" "$(archci_unhashed_stem "$pkg")" "$count" "$(stat -c %s "$pkg" | numfmt --to=iec)"
+		listing=$(bsdtar -tf "$pkg" | { grep -v '^\.' || true; } | tree --fromfile -a -L 3 --filelimit 30 --noreport . 2>/dev/null | tail -n +2 | sed 's/^/    /') || listing=''
+		if [[ -z $listing ]]; then
+			echo "    (no files)"
+		elif (( $(wc -l <<<"$listing") > 400 )); then
 			head -n 400 <<<"$listing"
-			echo "    ... $(( lines - 400 )) more line(s) not shown"
+			echo "    ... $(( $(wc -l <<<"$listing") - 400 )) more line(s) not shown"
 		else
 			printf '%s\n' "$listing"
 		fi
