@@ -707,7 +707,10 @@ module Archci
           next
         end
         m = e['MESSAGE']
-        m = m.pack('C*').scrub if m.is_a?(Array)   # not UTF-8: journalctl gives the bytes
+        # not UTF-8: journalctl gives the bytes; as UTF-8 with the bad ones
+        # replaced, or JSON.generate would refuse the entry later (a test
+        # suite printing Latin-1 stopped every export for a night)
+        m = m.pack('C*').force_encoding('UTF-8').scrub if m.is_a?(Array)
         next unless m.is_a?(String)
 
         entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY', '_PID', '_SYSTEMD_INVOCATION_ID', *RECORD_FIELDS).merge('MESSAGE' => m)

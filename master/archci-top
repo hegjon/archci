@@ -71,7 +71,7 @@ def journal_entry(e)
   return nil unless key
 
   m = e['MESSAGE']
-  [key, (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8') : m.to_s).strip]
+  [key, (m.is_a?(Array) ? m.pack('C*').force_encoding('UTF-8').scrub : m.to_s).strip]
 end
 
 # -a with -o json: a field over 4 KB (a compiler's command line) is null without it

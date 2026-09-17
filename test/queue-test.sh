@@ -256,13 +256,13 @@ echo "--- report failure, retry, give up"
 id=$(claim_id worker-2 x86_64)
 [[ $id == *omarchy,libsigc++,* ]] || fail "expected libsigc++ next, got $id"
 grep -qxF "sources=$lsf" "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim must name the source package: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
-journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "stderr:==> ERROR: A failure occurred in build()."
+journal_add worker "$(build_unit libsigc++ 2.12.2-1 x86_64 1)" "building" "$(printf 'price \xa3 5 (not UTF-8: journalctl hands the bytes over)')" "stderr:==> ERROR: A failure occurred in build()."
 "$job" report "$id" failure "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/failed/$id.job ]] || fail "not in failed/"
 # its log has no finish record (killed hard): not exported until the settle time, then as it stands, the end event with the error
 [[ $("$master/archci-web" export "$tmp/logs") == 0 ]] || fail "a log without its finish record waits"
 [[ $("$master/archci-web" export "$tmp/logs" 0) == 1 ]] || fail "settled, it is exported as it stands"
-xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.zst'); [[ $(zstd -dc "$xf" | tail -2 | head -1) == 'data: {"state":"failed","error_at":1,"finished":"20'* ]] || fail "the end event of a failed job: $(zstd -dc "$xf" 2>/dev/null | tail -2) / exported: $(find "$tmp/logs" -name "*.sse.zst")"
+xf=$(find "$tmp/logs" -path '*libsigc++*/x86_64/*' -name '*.sse.zst'); [[ $(zstd -dc "$xf" | tail -2 | head -1) == 'data: {"state":"failed","error_at":2,"finished":"20'* ]] || fail "the end event of a failed job: $(zstd -dc "$xf" 2>/dev/null | tail -2) / exported: $(find "$tmp/logs" -name "*.sse.zst")"
 # what counts as the first error: not a test suite's summary counts, not a warning flag; a build killed for silence does
 [[ $(ARCHCI_CONF=/dev/null ruby -e 'require "'"$master"'/../lib/archci"; puts ["# ERROR: 0", "# FAIL:  3", "-Werror=format", "ERROR: real", "==> build killed after 90 min without output", "Container archci-build-x86-64-2-guile terminated by signal KILL."].map { |l| Archci.error_line?(l) ? 1 : 0 }.join') == 000111 ]] || fail "error_line?: summary counts and -Werror are not errors, a real one and a killed build are"
 # a retry of an exported job: the new job carries no export mark (its own log is exported afresh), the failed one is gone (its log stays on the release under its id)
@@ -293,8 +293,8 @@ srcjob=$(jq -r '.sources_job' <<<"$onejob")
 [[ $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap") == "failed "*" on worker-2, attempt 1 of 2" ]] || fail "each job tells its story (the source package is a fact of its own): $(jq -r --arg id "$id" '.jobs[] | select(.id == $id) | .story' <<<"$snap")"
 [[ $(jq -r '.queue.failed' <<<"$snap") == $(find "$ARCHCI_HOME/queue/failed" -name "*.job" | wc -l) && $(jq -r '.generated' <<<"$snap") == 20*Z ]] || fail "the snapshot is archci top's plus jobs and generated: $(jq -c '[.queue, .generated]' <<<"$snap")"
 log=$("$master/archci-web" log "$id")
-[[ $(jq -r '.error_at' <<<"$log") == 1 && $(jq -r '.lines[1]' <<<"$log") == "==> ERROR: A failure occurred in build()." ]] || fail "archci web log gives the lines and the first error: $log"
-[[ $(jq -c '[.entries[].PRIORITY]' <<<"$("$master/archci-web" entries "$id")") == '["6","3"]' ]] || fail "entries carry the journal priority (stdout 6, stderr 3): $("$master/archci-web" entries "$id")"
+[[ $(jq -r '.error_at' <<<"$log") == 2 && $(jq -r '.lines[2]' <<<"$log") == "==> ERROR: A failure occurred in build()." ]] || fail "archci web log gives the lines and the first error: $log"
+[[ $(jq -c '[.entries[].PRIORITY]' <<<"$("$master/archci-web" entries "$id")") == '["6","6","3"]' ]] || fail "entries carry the journal priority (stdout 6, stderr 3): $("$master/archci-web" entries "$id")"
 # the slice marker rule the entries' phase comes from: archci-build's transitions and nothing else
 phases=$(ruby -e "require %q{$here/../lib/archci}; puts [
   '==> Installing the pacman dependencies in the archci-online slice (with network)', '==> Building in the archci-offline slice', '==> Building in the archci-online slice',
