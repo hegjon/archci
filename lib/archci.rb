@@ -32,7 +32,7 @@ module Archci
     'ARCHCI_RELEASE_LAG_MINUTES' => '20',
     'ARCHCI_SOURCES_REQUIRED' => '0',
     'ARCHCI_REMOTE_JOURNAL' => '/var/lib/archci/journal',
-    'ARCHCI_LOG_MAX_LINES' => '20000'
+    'ARCHCI_LOG_MAX_LINES' => '50000'
   }.freeze
 
   ROOT = File.expand_path('..', __dir__)
