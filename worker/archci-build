@@ -271,6 +271,19 @@ if (( ! from_srcpkg )); then
 	[[ -f $srcdir/PKGBUILD ]] || archci_die "no PKGBUILD in $subdir at $job_commit"
 	chmod -R a+rX "$srcdir"
 fi
+# The PKGBUILD as built goes into the log on a record of its own, as a
+# field (ARCHCI_PKGBUILD: the line stays one line; the job page shows the
+# file from it), and the package directory as it is about to be built:
+# the patches and keys beside the PKGBUILD, a source package's fetched
+# sources (two levels, crowded directories folded).
+pkgbuild_size=$(stat -c %s "$srcdir/PKGBUILD")
+if (( pkgbuild_size <= 200000 )); then
+	archci_record "==> PKGBUILD as built ($pkgbuild_size bytes)" "${fields[@]}" ARCHCI_EVENT=pkgbuild "ARCHCI_PKGBUILD=$(<"$srcdir/PKGBUILD")"
+else
+	archci_record "==> PKGBUILD as built ($pkgbuild_size bytes: too large to log)" "${fields[@]}" ARCHCI_EVENT=pkgbuild
+fi
+say "Package directory (%s):" "$( (( from_srcpkg )) && echo "from $job_sources" || echo "$subdir at $job_commit")"
+tree -a -L 2 --filelimit 100 --noreport "$srcdir" 2>/dev/null | tail -n +2 | sed 's/^/    /' || true
 
 # --- build
 mkdir -p "$outdir" "$ARCHCI_WORKER_HOME/srcdest"

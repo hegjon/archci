@@ -66,7 +66,7 @@ mkpkg "$inc" acl 1:2.3.2-1 x86_64
 "$job" retry "$id"
 id=$(claim_id arm-1 aarch64)
 [[ $id == *,acl,*,aarch64 ]] || fail "retry should be claimed first: $id"
-journal_add arm "$(build_unit acl 1:2.3.2-1 aarch64 1)" "built on arm"
+journal_add arm "$(build_unit acl 1:2.3.2-1 aarch64 1)" "built on arm" "fields:ARCHCI_EVENT=pkgbuild|ARCHCI_JOB=$id|ARCHCI_PKGBUILD=pkgname=acl||==> PKGBUILD as built (11 bytes)"
 upload_ok "$id" acl 1:2.3.2-1 aarch64
 "$job" report "$id" success "$(owner "$id")"
 [[ -f $ARCHCI_HOME/queue/done/$id.job ]] || fail "aarch64 job not done"
@@ -74,6 +74,8 @@ upload_ok "$id" acl 1:2.3.2-1 aarch64
 [[ -f $(pkgfile "$ARCHCI_HOME/repo/omarchy/os/aarch64" acl 1:2.3.2-1 aarch64).buildsig ]] || fail "aarch64 package not pooled with its buildsig"
 ! compgen -G "$ARCHCI_HOME/repo/omarchy/os/x86_64/acl-1:2.3.2-1-aarch64-*" >/dev/null || fail "aarch64 package must not land in x86_64"
 [[ $(jq -r '.lines[0]' <<<"$("$master/archci-web" log "$id")") == "built on arm" ]] || fail "the aarch64 job's log is its unit's entries on its host: $("$master/archci-web" log "$id")"
+# the PKGBUILD record: its file rides the entry as "pkgbuild" in the stream (the job page's panel), the line stays one line
+grep -q '^data: {"time":"[^"]*","priority":"6","pid":"4242","message":"==> PKGBUILD as built (11 bytes)","event":"pkgbuild","pkgbuild":"pkgname=acl"}$' <<<"$("$master/archci-web" sse "$id")" || fail "the PKGBUILD record in the stream: $("$master/archci-web" sse "$id" | grep PKGBUILD)"
 
 echo "--- an any package: offered to ARCHCI_ANY_ARCH workers only, pooled into every arch"
 ! "$job" enqueue archlinux-keyring 0 2>/dev/null || fail "an any package must be enqueued with ARCH=any"

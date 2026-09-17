@@ -107,13 +107,7 @@ grep -q '^error=' "$ARCHCI_HOME/queue/done/$id.job" && fail "no error line in a 
 log=$("$master/archci-web" log "$id")
 [[ $(jq -r '.lines | length' <<<"$log") == 8 && $(jq -r '.cursor' <<<"$log") == null && $(jq -r '.error_at' <<<"$log") == null ]] || fail "a done job's log is read whole from the journal, no cursor: $log"
 [[ $(jq -c '[(.entries | length), .cursor, .error_at, .state]' <<<"$("$master/archci-web" entries "$id")") == '[8,null,null,"done"]' ]] || fail "a done job's entries, whole, no cursor: $("$master/archci-web" entries "$id")"
-echo "--- the PKGBUILD a job was built from: at its commit, from the master's clone"
-pb=$("$master/archci-web" pkgbuild "$id") || fail "archci web pkgbuild"
-[[ $pb == "pkgname=acl"$'\n'"pkgver=2.3.2"$'\n'* ]] || fail "the PKGBUILD as committed: ${pb:0:80}"
-# a later commit to the package (a comment, no version change: nothing new to build): the job's PKGBUILD stays the one it was built from
-printf '# touched after the job\n' >>"$pkgs/pkgbuilds/acl/PKGBUILD"; commit_pkgs "acl touched after the job"; "$scan" >/dev/null 2>&1
-[[ $("$master/archci-web" pkgbuild "$id") == "$pb" ]] || fail "the PKGBUILD is the job's commit's, not HEAD's: $("$master/archci-web" pkgbuild "$id" | tail -1)"
-! "$master/archci-web" pkgbuild "9-1-omarchy,nope,1-1,x86_64" >/dev/null 2>&1 || fail "no job, no PKGBUILD"
+echo "--- the job names its PKGBUILD repository (the page links the commit)"
 [[ $(jq -r '.pkgbuilds + " " + .pkgbuilds_dir' <<<"$("$master/archci-web" job "$id")") == "file://$pkgs pkgbuilds" ]] || fail "the job names its PKGBUILD repository: $("$master/archci-web" job "$id" | jq -c '{pkgbuilds, pkgbuilds_dir}')"
 
 echo "--- the log as server-sent events, live (archci web sse) and exported for R2 (archci web export), one framing"

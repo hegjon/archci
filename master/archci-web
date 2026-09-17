@@ -42,10 +42,6 @@
 #              front end pipes to a browser's EventSource for a running job,
 #              and byte for byte what archci-publish exports to R2 for a
 #              finished one (a client reads either with one parser).
-#   pkgbuild ID
-#              the PKGBUILD the job was built from, as it was at the job's
-#              commit in the master's clone (Archci.pkgbuild); exits 1 when
-#              git cannot show it
 #   export DIR [SETTLE]
 #              the logs of the jobs finished since the last export, as
 #              <pkgbase>-<version>-<arch>-<start>-<invocation>.sse.gz under
@@ -99,10 +95,6 @@ in ['entries', id, *rest]
 in ['sse', id, *rest]
   j = Archci.find_job(id) or abort "archci-web: no job #{id}"
   Archci.write_sse(j, $stdout, after: rest.first)
-in ['pkgbuild', id]
-  j = Archci.find_job(id) or abort "archci-web: no job #{id}"
-  text = Archci.pkgbuild(j) or abort "archci-web: no PKGBUILD for #{j['pkgbase']} at #{j['commit']}"
-  $stdout.write(text)
 in ['export', dir, *settle]
   puts Archci.export_logs(dir, settle_after: (settle.first || 600).to_i)
 in ['summary', id]
@@ -111,5 +103,5 @@ in ['summary', id]
   # one line each, the job file's format (a key=value line): no newlines, cut short
   { 'error' => err && lines[err], 'last' => lines.last }.each { |k, v| puts "#{k}=#{v.strip[0, 200]}" if v && !v.strip.empty? }
 else
-  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | entries ID [CURSOR] | sse ID [CURSOR] | pkgbuild ID | export DIR | summary ID'
+  abort 'usage: archci-web snapshot | job ID | log ID [CURSOR] | entries ID [CURSOR] | sse ID [CURSOR] | export DIR | summary ID'
 end

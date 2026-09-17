@@ -21,17 +21,19 @@ tag=archci-record-test-$$-$RANDOM
 	export JOURNAL_STREAM=1:1
 	archci_journal_open || fail "could not open the coprocess"
 	archci_record "==> record test $tag" "ARCHCI_TEST=$tag" ARCHCI_EVENT=start ARCHCI_RC=0
+	archci_record "==> record test $tag file" "ARCHCI_TEST=$tag" ARCHCI_EVENT=pkgbuild "ARCHCI_PKGBUILD=$(printf 'pkgname=x\n\npkgver=1 # ünïcode\n')"   # a value with newlines: the binary field form
 	archci_record "==> record test $tag end" "ARCHCI_TEST=$tag" ARCHCI_EVENT=finish
 	archci_journal_close   # EOF: the coprocess sends what it has and exits
 )
 found=''
 for _ in $(seq 50); do
 	found=$(journalctl -q -o json "ARCHCI_TEST=$tag" 2>/dev/null || true)
-	[[ -n $found ]] && (( $(grep -c . <<<"$found") == 2 )) && break
+	[[ -n $found ]] && (( $(grep -c . <<<"$found") == 3 )) && break
 	sleep 0.1
 done
 if [[ -z $found ]]; then echo "(the journal cannot be read here: the lookup skipped)"; echo "ALL OK"; exit 0; fi
-(( $(grep -c . <<<"$found") == 2 )) || fail "two records expected: $found"
+(( $(grep -c . <<<"$found") == 3 )) || fail "three records expected: $found"
+[[ $(sed -n 2p <<<"$found" | jq -r '.ARCHCI_PKGBUILD') == $'pkgname=x\n\npkgver=1 # ünïcode' ]] || fail "a field with newlines comes back whole: $(sed -n 2p <<<"$found" | jq -c .ARCHCI_PKGBUILD)"
 echo "--- archci_log off a unit, with ARCHCI_LOG_JOB: the entry carries the job as a field"
 (unset JOURNAL_STREAM; ARCHCI_LOG_JOB="9-1-omarchy,rec,1-1,x86_64:$tag" archci_log "logged for a job" 2>/dev/null)
 for _ in $(seq 50); do lfound=$(journalctl -q -o json "ARCHCI_JOB=9-1-omarchy,rec,1-1,x86_64:$tag" 2>/dev/null || true); [[ -n $lfound ]] && break; sleep 0.1; done

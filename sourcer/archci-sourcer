@@ -211,6 +211,12 @@ fetch_one() {
 		return 1
 	fi
 	chown -R "$uid:$gid" "$w"
+	# the PKGBUILD on a record of its own (ARCHCI_PKGBUILD, for the job page) and the package directory, as the worker logs them
+	if (( $(stat -c %s "$w/pkg/PKGBUILD") <= 200000 )); then
+		archci_record "==> PKGBUILD ($(stat -c %s "$w/pkg/PKGBUILD") bytes)" "ARCHCI_JOB=$job_id" "ARCHCI_ATTEMPT=$job_attempt" ARCHCI_EVENT=pkgbuild "ARCHCI_PKGBUILD=$(<"$w/pkg/PKGBUILD")"
+	fi
+	say "==> Package directory ($ARCHCI_PKGBUILDS_DIR/$job_pkgbase at $job_commit):"
+	tree -a -L 2 --filelimit 100 --noreport "$w/pkg" 2>/dev/null | tail -n +2 | sed 's/^/    /' | tee -a "$log" || true
 	lock 9 "$chroot/root.lock" "Waiting for the clean chroot"
 	if ! prepare_root; then
 		lock_close 9

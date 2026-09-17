@@ -552,17 +552,6 @@ module Archci
     nil
   end
 
-  # the PKGBUILD a job was built from: the file at the job's commit in the
-  # master's clone of the PKGBUILD repository (archci-scan keeps the
-  # history, so a commit the index once named is there). nil if git cannot
-  # show it (a pruned or force-pushed history, a job from another
-  # repository).
-  def self.pkgbuild(j)
-    out, status = Open3.capture2('git', '-C', File.join(home, 'pkgbuilds'), 'show',
-                                 "#{j['commit']}:#{config['ARCHCI_PKGBUILDS_DIR']}/#{j['pkgbase']}/PKGBUILD", err: File::NULL)
-    status.success? ? out : nil
-  end
-
   # the id of the src job that produced a build's source package: same pkgbase
   # and version, arch src (one repo per master). Prefer the one that succeeded
   # (done), then running, failed, pending; newest first. nil if pruned.
@@ -696,7 +685,7 @@ module Archci
   # 'offline' | 'loopback' on a slice marker line (log_phase), absent
   # otherwise. error_at and cursor as read_log; the cursor is the last
   # entry's.
-  RECORD_FIELDS = %w[ARCHCI_JOB ARCHCI_ATTEMPT ARCHCI_EVENT ARCHCI_RC ARCHCI_SLICE ARCHCI_NETWORK ARCHCI_PACKAGE ARCHCI_PACKAGES ARCHCI_VERSION ARCHCI_COMMIT ARCHCI_PROFILE ARCHCI_HOST].freeze
+  RECORD_FIELDS = %w[ARCHCI_JOB ARCHCI_ATTEMPT ARCHCI_EVENT ARCHCI_RC ARCHCI_SLICE ARCHCI_NETWORK ARCHCI_PACKAGE ARCHCI_PACKAGES ARCHCI_VERSION ARCHCI_COMMIT ARCHCI_PROFILE ARCHCI_HOST ARCHCI_PKGBUILD].freeze
   # At most ARCHCI_LOG_MAX_LINES entries are kept: the first three quarters
   # of that and the last quarter, with one marker entry (no cursor,
   # priority 4) in place of what is between. journalctl's output is read
@@ -806,6 +795,9 @@ module Archci
         next unless m.is_a?(String)
 
         entry = e.slice('__CURSOR', '__REALTIME_TIMESTAMP', '__MONOTONIC_TIMESTAMP', '_SOURCE_REALTIME_TIMESTAMP', 'PRIORITY', '_PID', '_SYSTEMD_INVOCATION_ID', *RECORD_FIELDS).merge('MESSAGE' => m)
+        # the PKGBUILD record's file (a field with newlines, bytes to journalctl as MESSAGE above)
+        pb = entry['ARCHCI_PKGBUILD']
+        entry['ARCHCI_PKGBUILD'] = pb.pack('C*').force_encoding('UTF-8').scrub if pb.is_a?(Array)
         phase = log_phase(m)
         entry['phase'] = phase if phase
         cursor = e['__CURSOR']
@@ -926,7 +918,8 @@ module Archci
     # 341 with milliseconds), and the page shows nothing finer
     data = { 'time' => Time.at(e['__REALTIME_TIMESTAMP'].to_i / 1_000_000, e['__REALTIME_TIMESTAMP'].to_i % 1_000_000).utc.iso8601(3),
              'priority' => e['PRIORITY'], 'pid' => e['_PID'], 'message' => e['MESSAGE'], 'phase' => e['phase'],
-             'event' => e['ARCHCI_EVENT'], 'package' => e['ARCHCI_PACKAGE'], 'slice' => e['ARCHCI_SLICE'] }.compact
+             'event' => e['ARCHCI_EVENT'], 'package' => e['ARCHCI_PACKAGE'], 'slice' => e['ARCHCI_SLICE'],
+             'pkgbuild' => e['ARCHCI_PKGBUILD'] }.compact
     # the cap's marker has no cursor: no id line, rather than an empty one
     # (which would reset the browser's Last-Event-ID to "")
     cursor && e['__CURSOR'] ? "data: #{JSON.generate(data)}\nid: #{e['__CURSOR']}\n\n" : "data: #{JSON.generate(data)}\n\n"

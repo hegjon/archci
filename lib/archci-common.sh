@@ -259,9 +259,13 @@ archci_journal_open() {
 		require "socket"
 		s = Socket.new(:UNIX, :DGRAM)
 		s.connect(Socket.pack_sockaddr_un("/run/systemd/journal/socket"))
+		require "base64"
 		rec = +""
 		$stdin.each_line do |l|
-		  if l == "\n" then s.send(rec, 0) unless rec.empty?; rec = +"" else rec << l end
+		  if l == "\n" then s.send(rec, 0) unless rec.empty?; rec = +""
+		  elsif (m = l.match(/\A([A-Z0-9_]+)@=(.*)\n\z/))   # a value with newlines, base64 from archci_record: the binary form
+		    v = Base64.strict_decode64(m[2]); rec << m[1] << "\n" << [v.bytesize].pack("Q<") << v << "\n"
+		  else rec << l end
 		end
 		s.send(rec, 0) unless rec.empty?' 2>/dev/null; }
 	# one fd of our own to the coprocess's stdin; the coproc's array fd is
@@ -279,13 +283,22 @@ archci_journal_close() {
 	unset ARCHCI_JOURNAL_FD
 	wait "${ARCHCI_JOURNAL_PID:-}" 2>/dev/null || true
 }
-# archci_record MESSAGE [FIELD=VALUE...] -- one record (a single line, no
-# newlines in a value) with its fields, through the coprocess when open,
-# else as a line on stdout
+# archci_record MESSAGE [FIELD=VALUE...] -- one record (the message a single
+# line) with its fields, through the coprocess when open, else as a line on
+# stdout. A field value may hold newlines (ARCHCI_PKGBUILD carries a file):
+# it goes to the coprocess base64-encoded on one line, FIELD@=..., and is
+# sent in the journal's binary field form.
 archci_record() {
-	local msg=$1; shift
+	local msg=$1 f; shift
 	if [[ -n ${ARCHCI_JOURNAL_FD:-} ]]; then
-		{ printf 'MESSAGE=%s\nPRIORITY=6\nSYSLOG_IDENTIFIER=%s\n' "$msg" "${0##*/}"; (( $# )) && printf '%s\n' "$@"; printf '\n'; } >&"$ARCHCI_JOURNAL_FD"
+		{
+			printf 'MESSAGE=%s\nPRIORITY=6\nSYSLOG_IDENTIFIER=%s\n' "$msg" "${0##*/}"
+			for f in "$@"; do
+				if [[ ${f#*=} == *$'\n'* ]]; then printf '%s@=%s\n' "${f%%=*}" "$(printf '%s' "${f#*=}" | base64 -w0)"
+				else printf '%s\n' "$f"; fi
+			done
+			printf '\n'
+		} >&"$ARCHCI_JOURNAL_FD"
 	else
 		printf '%s\n' "$msg"
 	fi

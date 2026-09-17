@@ -132,9 +132,11 @@ hands back the result. For each job it:
 4. signs each package with its own builder key, uploads the packages and
    signatures to the master, and reports success or failure. The build's
    log is its unit's journal, streamed to the master; archci's own lines
-   in it (the header, the slice changes, each package signed, the end)
-   carry journal fields (`ARCHCI_JOB`, `ARCHCI_EVENT`, ...), so nothing
-   reads them out of the text.
+   in it (the header, the PKGBUILD as built, the slice changes, each
+   package signed, the end) carry journal fields (`ARCHCI_JOB`,
+   `ARCHCI_EVENT`, ...), so nothing reads them out of the text. The
+   PKGBUILD rides its record as a field, and the log lists the package
+   directory as it was built (`tree`, two levels).
 
 Results are held and retried while the master is unreachable, so a worker
 can be destroyed at any time. While building, a worker heartbeats its own and
@@ -532,11 +534,10 @@ archci authorize --web web_key.pub        # on the master
 ssh archci@master snapshot | jq .         # from the web host: the farm and every job, as JSON
 ssh archci@master log <jobid>             # one job's log from the workers' journal (a running build's so far)
 ssh archci@master entries <jobid>         # the same as journal entries, each line with its time, for a browser's log window
-ssh archci@master pkgbuild <jobid>        # the PKGBUILD the job was built from, at its commit
 ssh archci@master retry <jobid>           # and requeue, enqueue: the operator's queue commands, logged as the web key's
 ```
 
-`archci web snapshot`, `archci web job ID`, `archci web log ID`, `archci web entries ID` and `archci web pkgbuild ID` are the
+`archci web snapshot`, `archci web job ID`, `archci web log ID` and `archci web entries ID` are the
 same commands on the master itself. The snapshot is what `archci top` shows (queue, hosts, running
 and failed jobs, the signer) plus every job the master holds with its state,
 origin and story, so a front end polls one command and filters in the
