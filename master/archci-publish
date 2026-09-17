@@ -310,13 +310,17 @@ if (( due || force )); then
 	touch "$stamp"
 fi
 # the logs, beside the packages as <repo>/log/<pkgbase>/<version>/<arch>/...:
-# a finished attempt's log never changes, so --ignore-existing skips what
-# the release has (a file left by an interrupted move) without a check
+# rclone's own check (size and time) decides what to send: a re-export of
+# a log (archci job reexport, after a change to the format or the cap) is
+# a new file under the old name and must replace the release's copy;
+# --ignore-existing would drop it on the floor (2026-09-17: 524 of 624
+# re-exports lost that way) and only a file left by an interrupted move,
+# the same bytes, is sent again
 for repodir in "$logs"/*/; do
 	repodir=${repodir%/}; repo=${repodir##*/}
 	n=$(find "$repodir" -type f -name '*.sse.gz' | wc -l)
 	(( n )) || continue
-	rclone move "$repodir" "$ARCHCI_R2_RELEASE/$repo/log" --include '*.sse.gz' --ignore-existing --transfers 8 --checkers 16 --no-traverse \
+	rclone move "$repodir" "$ARCHCI_R2_RELEASE/$repo/log" --include '*.sse.gz' --transfers 8 --checkers 16 --no-traverse \
 		"${immutable[@]}" --header-upload "Content-Type: text/event-stream" --header-upload "Content-Encoding: gzip"
 	find "$repodir" -type f -name '*.sse.gz' -delete 2>/dev/null || true   # a file the release already had
 	archci_log "published $n build log(s) to $ARCHCI_R2_RELEASE/$repo/log"
