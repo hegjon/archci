@@ -12,6 +12,9 @@
 #   commit   the last commit that touched the directory; a job pins it
 #   arch     "any", or the PKGBUILD's arch array joined with commas
 #   profile  devtools build profile: multilib for multilib packages, else extra
+#   build    skip | network | loopback | build (package.json skip_build, network),
+#            with "+nocheck" appended when package.json says "nocheck": true
+#            (the build passes --nocheck: a test suite that cannot run here)
 #   source   .omarchy/package.json "source" (aur, arch, local)
 #   build    "skip" when package.json sets skip_build, else "build"
 #   arch_repo .omarchy/package.json "arch_repo" (core, extra, multilib) for a
@@ -156,7 +159,7 @@ calculate() {
 	fi
 	commit=$(git -C "$clone" log -1 --format=%H -- "$ARCHCI_PKGBUILDS_DIR/$name")
 	read -r source build repo < <(jq -r '
-		[(.source // "local"), (if .skip_build == true then "skip" elif (.network == true or .network == "full") then "network" elif .network == "loopback" then "loopback" else "build" end), (.arch_repo // "-")]
+		[(.source // "local"), ((if .skip_build == true then "skip" elif (.network == true or .network == "full") then "network" elif .network == "loopback" then "loopback" else "build" end) + (if .nocheck == true then "+nocheck" else "" end)), (.arch_repo // "-")]
 		| join(" ")' "$dir/.omarchy/package.json") || { archci_log "skipping $name: unreadable package.json"; return 1; }
 	if [[ $repo == multilib || $name == lib32-* ]]; then profile=multilib; else profile=extra; fi
 	printf '%s %s %s %s %s %s %s %s %s\n' "$version" "$commit" "${arches:-x86_64}" "$profile" "$source" "$build" "$repo" "${pkgnames:-$name}" "${deps:--}"

@@ -381,6 +381,11 @@ fi
 if ! archci_native_arch "$arch" && [[ $ARCHCI_EMULATED_NOCHECK == 1 ]]; then
 	extra_makepkg_args+=(--nocheck)
 	say "Building %s under emulation: check() skipped (ARCHCI_EMULATED_NOCHECK)" "$arch"
+elif [[ ${job_nocheck:-} == 1 ]]; then
+	# package.json "nocheck": a test suite that cannot run in a clean chroot
+	# (kmod builds test modules against the running kernel's headers)
+	extra_makepkg_args+=(--nocheck)
+	say "check() skipped: the package says so (package.json nocheck)"
 fi
 verify_args=()
 for a in "${extra_makepkg_args[@]}"; do [[ $a == --holdver || $a == --ignorearch || $a == --skip* ]] && verify_args+=("$a"); done

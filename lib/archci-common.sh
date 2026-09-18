@@ -56,6 +56,10 @@ archci_load_conf
 : "${ARCHCI_MAX_ATTEMPTS:=3}"
 : "${ARCHCI_STALE_MINUTES:=30}"
 : "${ARCHCI_RETRY_MINUTES:=180}"
+# A build killed for silence (a test suite waiting on the network it cannot
+# have) is given up at once rather than retried ARCHCI_MAX_ATTEMPTS times:
+# it would go silent again; the fix is the package's network flag.
+: "${ARCHCI_SILENT_BUILD_FINAL:=1}"
 : "${ARCHCI_RETRY_HOLD_MINUTES:=720}"
 : "${ARCHCI_RELEASE_LAG_MINUTES:=20}"
 # where the master keeps what it can rebuild (the index cache)
@@ -472,9 +476,9 @@ archci_chroot_pacconf() {
 # repository commit the build is pinned to. (tag is accepted from old files.)
 archci_read_job() {
 	local line
-	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker='' job_created='' job_sources='' job_network='' job_lane=''
+	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker='' job_created='' job_sources='' job_network='' job_lane='' job_nocheck=''
 	while IFS= read -r line || [[ -n $line ]]; do
-		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker|created|sources|network|lane)=(.*)$ ]] || continue
+		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker|created|sources|network|lane|nocheck)=(.*)$ ]] || continue
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 	done <"$1"
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]

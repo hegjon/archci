@@ -24,6 +24,9 @@ repository, and reads these keys of that file:
 - `skip_build`: `true` leaves the package out
 - `network`: archci's own, `"loopback"` or `"full"`, for the few builds that
   cannot run without the network (see "How it works"); absent otherwise
+- `nocheck`: archci's own, `true` for a package whose test suite cannot
+  run in a clean chroot (kmod builds test modules against the running
+  kernel's headers); the build passes `--nocheck`
 
 The repository is the manifest: what gets built is exactly what is merged
 there, at the commit the master saw, and a package's version is what its

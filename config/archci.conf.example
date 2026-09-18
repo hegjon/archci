@@ -61,6 +61,11 @@ ARCHCI_STALE_MINUTES=30
 # a dependency this repository has yet to build is held until it is, at most
 # this much longer.
 ARCHCI_RETRY_MINUTES=180
+# A build killed for silence (ARCHCI_BUILD_MAX_IDLE_MINUTES on the worker: a
+# test suite waiting on a socket it cannot have) is given up at once instead
+# of retried: it would go silent again, and the fix is the package's
+# "network" flag. 0 retries it like any failure.
+ARCHCI_SILENT_BUILD_FINAL=1
 ARCHCI_RETRY_HOLD_MINUTES=720
 # Whether a build's packages, or a source package, have been released (a
 # dependent's chroot installs from the release; a build claim names the

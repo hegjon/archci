@@ -241,7 +241,7 @@ rid=$("$job" retry "$nid" 2>/dev/null)
 [[ -f $ARCHCI_HOME/queue/pending/$rid.job && -f $ARCHCI_HOME/queue/failed/$nid.job ]] || fail "the new job is pending, the failed one stays as history: $(ls "$ARCHCI_HOME"/queue/*/ | grep netpkg)"
 { grep -q '^final=1$' "$ARCHCI_HOME/queue/failed/$nid.job" && grep -q "^retried_as=$rid$" "$ARCHCI_HOME/queue/failed/$nid.job"; } || fail "the failed job is given up and names its retry: $(cat "$ARCHCI_HOME/queue/failed/$nid.job")"
 ! "$job" retry "$nid" >/dev/null 2>&1 || fail "a job already retried is not retried again"
-"$failed" | grep -q "^netpkg 1-1 .* 1/2 retried " || fail "archci failed says it was retried: $("$failed" | grep netpkg)"
+flist=$("$failed"); grep -q "^netpkg 1-1 .* 1/2 retried " <<<"$flist" || fail "archci failed says it was retried: $(grep netpkg <<<"$flist")"
 ! grep -q '^network=' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "the new job has the flag the package has now, none: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
 grep -q '^attempt=0$' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "a new job starts at attempt 0: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
 ! "$job" retry "$rid" >/dev/null 2>&1 || fail "only a failed job is retried (a pending one is not)"
@@ -251,6 +251,27 @@ nid2=$(claim_id worker-9 x86_64); [[ $nid2 == "$rid" ]] || fail "the new job is 
 "$job" requeue "$rid" >/dev/null 2>&1
 grep -q '^network=loopback$' "$ARCHCI_HOME/queue/pending/$rid.job" || fail "a requeue gives the job the flag the package has now: $(cat "$ARCHCI_HOME/queue/pending/$rid.job")"
 rm -f "$ARCHCI_HOME"/queue/*/"$rid.job"   # it is pending again; out of the way of what follows
+# package.json "nocheck": the index carries it beside the network mode, the job says nocheck=1, a requeue follows the package
+mkpkgbuild nochk 1-1 x86_64 '{"source": "arch", "network": "loopback", "nocheck": true}'
+commit_pkgs nochk; "$scan" >/dev/null 2>&1
+[[ $("$master/archci-pkgindex" nochk | awk '{print $7}') == loopback+nocheck ]] || fail "the index word carries both: $("$master/archci-pkgindex" nochk)"
+"$job" enqueue nochk 0 x86_64 >/dev/null
+cid=$(claim_id worker-9 x86_64); [[ $cid == *,nochk,* ]] || fail "nochk claimed: $cid"
+{ grep -qx 'network=loopback' "$ARCHCI_HOME/queue/running/$cid.job" && grep -qx 'nocheck=1' "$ARCHCI_HOME/queue/running/$cid.job"; } || fail "the job carries both flags: $(cat "$ARCHCI_HOME/queue/running/$cid.job")"
+mkpkgbuild nochk 1-1 x86_64 '{"source": "arch"}'; commit_pkgs "nochk checks again"; "$scan" >/dev/null 2>&1
+"$job" requeue "$cid" >/dev/null 2>&1
+! grep -q '^nocheck=\|^network=' "$ARCHCI_HOME/queue/pending/$cid.job" || fail "a requeue drops the flags the package no longer has: $(cat "$ARCHCI_HOME/queue/pending/$cid.job")"
+rm -f "$ARCHCI_HOME"/queue/*/"$cid.job"; rm -r "$pkgs/pkgbuilds/nochk"; commit_pkgs "nochk gone"; "$scan" >/dev/null 2>&1
+# a build killed for silence is given up at once (ARCHCI_SILENT_BUILD_FINAL): it would go silent again
+mkpkgbuild quiet 1-1 x86_64 '{"source": "arch"}'; commit_pkgs quiet; "$scan" >/dev/null 2>&1
+"$job" enqueue quiet 0 x86_64 >/dev/null
+qid=$(claim_id worker-9 x86_64); [[ $qid == *,quiet,* ]] || fail "quiet claimed: $qid"
+journal_add worker "$(build_unit quiet 1-1 x86_64 1)" "==> Starting check()..." "waiting on a socket" "stderr:==> build killed after 90 min without output" "==> archci-build finished with 4 at 2026-09-18T00:00:00Z:"
+"$job" report "$qid" failure "$(owner "$qid")" >/dev/null 2>&1
+grep -qx 'final=1' "$ARCHCI_HOME/queue/failed/$qid.job" || fail "a silent build is final after one attempt: $(cat "$ARCHCI_HOME/queue/failed/$qid.job")"
+# (captured first: grep -q quits at the match, and pipefail would count the writer's EPIPE as a failure)
+flist=$("$failed"); grep -q "^quiet 1-1 .* 1/2 gave up " <<<"$flist" || fail "archci failed says it gave up: $(grep quiet <<<"$flist")"
+rm -f "$ARCHCI_HOME/queue/failed/$qid.job"; rm -r "$pkgs/pkgbuilds/quiet"; commit_pkgs "quiet gone"; "$scan" >/dev/null 2>&1
 mkpkgbuild loopy 1-1 x86_64 '{"source": "arch", "network": "loopback"}'
 commit_pkgs loopy; "$scan" >/dev/null 2>&1
 [[ $("$master/archci-pkgindex" loopy | awk '{print $7}') == loopback ]] || fail "the index must know the loopback state: $("$master/archci-pkgindex" loopy)"

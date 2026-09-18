@@ -42,4 +42,6 @@ entry = if ARGV[0] == 'src'
         end
 exit 0 unless entry
 
-puts [*entry.values_at('prio', 'repo', 'arch', 'pkgbase', 'version', 'commit', 'profile'), entry['network'] || '-'].join(' ')
+# <flags>: the network mode (network, loopback or -) with "+nocheck" when the package says so
+flags = [entry['network'] || '-', ('nocheck' if entry['nocheck'])].compact.join('+')
+puts [*entry.values_at('prio', 'repo', 'arch', 'pkgbase', 'version', 'commit', 'profile'), flags].join(' ')

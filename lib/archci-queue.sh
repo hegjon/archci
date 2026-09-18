@@ -63,7 +63,9 @@ write_job() {
 		attempt=0
 		created=$(archci_now)
 	JOB
-	case $flags in network) echo 'network=full' >>"$dest/$id.job.tmp" ;; loopback) echo 'network=loopback' >>"$dest/$id.job.tmp" ;; esac
+	# FLAGS: the network mode (network, loopback, else none), "+nocheck" appended when the package skips its tests
+	case ${flags%%+*} in network) echo 'network=full' >>"$dest/$id.job.tmp" ;; loopback) echo 'network=loopback' >>"$dest/$id.job.tmp" ;; esac
+	[[ $flags == *+nocheck* ]] && echo 'nocheck=1' >>"$dest/$id.job.tmp"
 	mv "$dest/$id.job.tmp" "$dest/$id.job"
 	printf '%s\n' "$id.job"
 }

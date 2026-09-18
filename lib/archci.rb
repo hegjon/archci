@@ -267,8 +267,10 @@ module Archci
           name, version, commit, arch, profile, source, build, arch_repo, pkgnames, deps = line.split
           next unless build
 
+          mode, *extra = build.split('+')   # "loopback+nocheck": the network mode, then the package's other flags
           { 'pkgbase' => name, 'version' => version, 'commit' => commit, 'arches' => arch.split(','),
-            'profile' => profile, 'source' => source, 'skip' => build == 'skip', 'network' => (build if %w[network loopback].include?(build)), 'arch_repo' => arch_repo.to_s,
+            'profile' => profile, 'source' => source, 'skip' => mode == 'skip', 'network' => (mode if %w[network loopback].include?(mode)),
+            'nocheck' => extra.include?('nocheck'), 'arch_repo' => arch_repo.to_s,
             'pkgnames' => (pkgnames || name).split(','), 'deps' => (deps == '-' ? [] : deps.to_s.split(',')) }
         end
       else
@@ -395,7 +397,7 @@ module Archci
         expected ||= sources_required && source_file(repo, p).nil?
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
                   'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting, 'expected' => expected,
-                  'network' => p['network'], 'dependents' => weight[p['pkgbase']],
+                  'network' => p['network'], 'nocheck' => p['nocheck'], 'dependents' => weight[p['pkgbase']],
                   'lane' => lane(p['pkgbase']),
                   'rank' => [lane(p['pkgbase']) == 'fast' ? 0 : 1, also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, -weight[p['pkgbase']],
                              origin_rank(p), any ? 1 : 0, p['pkgbase']] }

@@ -284,12 +284,20 @@ cmd_report() {
 		else ingest "$id" "$inc" || status=failure
 		fi
 	fi
+	# a build killed for silence (ARCHCI_BUILD_MAX_IDLE_MINUTES: a test suite
+	# waiting on a socket it cannot have) would do the same on every attempt:
+	# with ARCHCI_SILENT_BUILD_FINAL it is given up at once, and the fix is
+	# the package's network flag, not a retry
+	local silent=0 l
+	if [[ $ARCHCI_SILENT_BUILD_FINAL == 1 ]]; then
+		for l in "${summary[@]}"; do [[ $l == *"==> build killed after "*" without output"* ]] && silent=1; done
+	fi
 	if [[ $status == success ]]; then
 		rewrite_job "$file" "$Q_DONE/$id.job" "worker=$job_worker" "status=success" "finished=$(archci_now)" "${summary[@]}"
 		archci_log "$id succeeded on $job_worker"
-	elif (( job_attempt >= ARCHCI_MAX_ATTEMPTS )); then
+	elif (( job_attempt >= ARCHCI_MAX_ATTEMPTS || silent )); then
 		rewrite_job "$file" "$Q_FAILED/$id.job" "worker=$job_worker" "status=failure" "finished=$(archci_now)" "final=1" "${summary[@]}"
-		archci_log "$id failed on $job_worker, attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS, giving up"
+		archci_log "$id failed on $job_worker, attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS, giving up$( (( silent )) && echo ' (the build went silent; it would again: a network flag, not a retry)')"
 	else
 		rewrite_job "$file" "$Q_FAILED/$id.job" "worker=$job_worker" "status=failure" "finished=$(archci_now)" "${summary[@]}"
 		archci_log "$id failed on $job_worker, attempt $job_attempt/$ARCHCI_MAX_ATTEMPTS, will retry"
@@ -302,18 +310,19 @@ cmd_report() {
 # to a package after its build failed (guile's loopback for its test
 # suite) reaches the retry, which is otherwise the same job file again
 refresh_flags() {
-	local file=$1 pkgbase flag tmp=$1.tmp
+	local file=$1 pkgbase word flag nocheck='' tmp=$1.tmp
 	pkgbase=$(sed -n 's/^pkgbase=//p' "$file")
-	flag=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase" 2>/dev/null | awk -v p="$pkgbase" '$1 == p { print $7; exit }')
-	case $flag in
+	word=$("$ARCHCI_MASTER_DIR/archci-pkgindex" "$pkgbase" 2>/dev/null | awk -v p="$pkgbase" '$1 == p { print $7; exit }')
+	case ${word%%+*} in
 		network)  flag=full ;;
-		loopback) ;;
+		loopback) flag=loopback ;;
 		*)        flag='' ;;
 	esac
-	[[ $(sed -n 's/^network=//p' "$file") == "$flag" ]] && return 0
-	{ grep -v '^network=' "$file"; [[ -n $flag ]] && printf 'network=%s\n' "$flag"; } >"$tmp"
+	[[ $word == *+nocheck* ]] && nocheck=1
+	[[ $(sed -n 's/^network=//p' "$file") == "$flag" && $(sed -n 's/^nocheck=//p' "$file") == "$nocheck" ]] && return 0
+	{ grep -v '^network=\|^nocheck=' "$file"; [[ -n $flag ]] && printf 'network=%s\n' "$flag"; [[ -n $nocheck ]] && printf 'nocheck=1\n'; } >"$tmp"
 	mv "$tmp" "$file"
-	archci_log "${file##*/}: network is now ${flag:-off}, as the package's package.json says"
+	archci_log "${file##*/}: network is now ${flag:-off}${nocheck:+, check() skipped}, as the package's package.json says"
 }
 
 # a finished job's exported= line goes, under the lock: the next export pass
