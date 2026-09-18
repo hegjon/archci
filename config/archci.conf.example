@@ -225,12 +225,14 @@ ARCHCI_FAST_IDLE_SLEEP=5
 # (a setting in the environment wins over this file).
 ARCHCI_WORKER_LANES="normal fast heavy"
 # A build's share of the CPU and IO the builds get, by lane: the CPUWeight
-# and IOWeight of its container's scope. What the builds get as a whole is
+# and IOWeight of its container's scope (a fast build five times a normal
+# one, a heavy one half: the hours-long build lets the short ones flow past
+# it). What the builds get as a whole is
 # the archci.slice unit's (CPUWeight=idle, IOWeight=10: no build competes
 # with sshd, pacman or a desktop's own work); systemctl edit archci.slice
 # to change that.
 ARCHCI_WEIGHT_FAST=500
 ARCHCI_WEIGHT_NORMAL=100
-ARCHCI_WEIGHT_HEAVY=100
+ARCHCI_WEIGHT_HEAVY=50
 ARCHCI_DELIVERY_RETRY_SECONDS=30
 ARCHCI_HEARTBEAT_SECONDS=60
