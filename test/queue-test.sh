@@ -484,4 +484,23 @@ mv "$ARCHCI_HOME/queue/pending/5-1-omarchy,app,1-1,x86_64.job" "$ARCHCI_HOME/que
 mkdir -p "$ARCHCI_HOME/built/omarchy-x86_64"; echo "1-1 $(pkgcommit lib)" >"$ARCHCI_HOME/built/omarchy-x86_64/lib"
 "$housekeeping"
 [[ -f $ARCHCI_HOME/queue/pending/5-1-omarchy,app,1-1,x86_64.job ]] || fail "a retry must go ahead once its dependency is built"
+echo "--- lanes: a fast-only worker takes fast packages alone, they rank first for everyone, a host builds one heavy package at a time"
+mkpkgbuild fastpkg 1-1; mkpkgbuild heavy1 1-1; mkpkgbuild heavy2 1-1; mkpkgbuild plain 1-1
+commit_pkgs lanes; "$scan" >/dev/null
+export ARCHCI_LANE_FAST=fastpkg ARCHCI_LANE_HEAVY="heavy1 heavy2"
+[[ $("$next" x86_64 fast) == "5 omarchy x86_64 fastpkg "* ]] || fail "the fast lane's outstanding package: $("$next" x86_64 fast)"
+[[ $("$next" x86_64 normal) != *fastpkg* && $("$next" x86_64 normal) != *heavy* ]] || fail "the normal lane has neither fast nor heavy packages: $("$next" x86_64 normal)"
+[[ $("$next" x86_64) == "5 omarchy x86_64 fastpkg "* ]] || fail "for a worker taking every lane the fast package ranks first: $("$next" x86_64)"
+"$job" enqueue plain 0 x86_64 >/dev/null; "$job" enqueue fastpkg 0 x86_64 >/dev/null   # plain is first in pending/
+id=$(claim_id fast-1 x86_64 lanes=fast); [[ $id == *,fastpkg,* ]] || fail "a fast-only worker takes the fast package past the plain one before it: $id"
+[[ -z $(claim_id fast-2 x86_64 lanes=fast) ]] || fail "nothing in the fast lane: a fast-only worker gets nothing, whatever else is pending or outstanding"
+id2=$(claim_id plain-1 x86_64 lanes=normal,fast,heavy); [[ $id2 == *,plain,* ]] || fail "a worker taking every lane takes the plain one: $id2"
+! "$job" claim bad-1 x86_64 "lanes=fast;rm" >/dev/null 2>&1 || fail "a malformed lanes word is refused"
+"$job" enqueue heavy1 0 x86_64 >/dev/null; "$job" enqueue heavy2 0 x86_64 >/dev/null
+h1=$(claim_id big-1 x86_64); [[ $h1 == *,heavy1,* ]] || fail "the first heavy job on host big: $h1"
+[[ $(claim_id big-2 x86_64) != *,heavy2,* ]] || fail "one heavy package per host (ARCHCI_HEAVY_PER_HOST=1): big-2 must not take heavy2 while big-1 builds heavy1"
+o=$(claim_id other-1 x86_64); [[ $o == *,heavy2,* ]] || fail "another host takes heavy2: $o"
+"$job" report "$o" abandoned other-1 >/dev/null
+[[ $(ARCHCI_HEAVY_PER_HOST=2 claim_id big-3 x86_64) == *,heavy2,* ]] || fail "with ARCHCI_HEAVY_PER_HOST=2 the host takes a second heavy job"
+unset ARCHCI_LANE_FAST ARCHCI_LANE_HEAVY
 echo "ALL OK"

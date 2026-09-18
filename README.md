@@ -117,7 +117,12 @@ AUR and local packages build only where their arch array says, an x86_64
 listing counting for x86_64_v4 (see [docs/ports.md](docs/ports.md)).
 
 **Workers.** A worker polls the master for a job over ssh, builds it, and
-hands back the result. For each job it:
+hands back the result. A worker instance claims with the lanes it takes:
+packages the master's `ARCHCI_LANE_FAST` names rank first for everyone and
+are all that an instance with `ARCHCI_WORKER_LANES=fast` builds, so the
+farm's own archci is built the minute it is released while that instance
+idles otherwise; packages in `ARCHCI_LANE_HEAVY` are built at most
+`ARCHCI_HEAVY_PER_HOST` at a time on one host. For each job it:
 
 1. takes the source package the sourcer prepared (the recipe, every verified
    source, and the vendored dependencies), or, when there is none, exports

@@ -31,6 +31,16 @@ ARCHCI_PKG_REPOS=""
 # Packages built whatever their source or repository, e.g. archci itself on
 # a farm that otherwise builds only the Arch-origin packages.
 ARCHCI_PKG_ALSO=""
+# Lanes. Packages in the fast lane (the farm's own archci, say) rank first
+# for every worker and are what a worker instance that takes only the fast
+# lane (ARCHCI_WORKER_LANES=fast on it) builds, so a release never waits
+# behind the backlog. Packages in the heavy lane (gcc, glibc, llvm...) are
+# built at most ARCHCI_HEAVY_PER_HOST at a time per host. Everything else
+# is the normal lane. Space-separated pkgbases; a change applies to the next
+# claim.
+ARCHCI_LANE_FAST=""
+ARCHCI_LANE_HEAVY=""
+ARCHCI_HEAVY_PER_HOST=1
 
 ## Master ---------------------------------------------------------------------
 # Architectures workers may claim jobs for; a worker sends its ARCHCI_ARCH with
@@ -203,6 +213,13 @@ ARCHCI_IGNOREARCH=1
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
 ARCHCI_CHROOT_UPDATE_MINUTES=10
 ARCHCI_IDLE_SLEEP=30
-# Between tries at delivering a finished build while the master is unreachable.
+# The lanes this worker instance takes (see ARCHCI_LANE_FAST on the master):
+# every lane by default. An instance kept free for the fast lane takes
+# "fast" alone; that is per instance, so set it on the unit rather than
+# here: systemctl edit archci-worker@3, then
+#   [Service]
+#   Environment=ARCHCI_WORKER_LANES=fast
+# (a setting in the environment wins over this file).
+ARCHCI_WORKER_LANES="normal fast heavy"
 ARCHCI_DELIVERY_RETRY_SECONDS=30
 ARCHCI_HEARTBEAT_SECONDS=60

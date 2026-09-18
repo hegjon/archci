@@ -33,10 +33,12 @@ if ARGV[0] == '--waiting'
   exit
 end
 # not a package whose dependency is being built or retried: that build would only fail first
+# archci-next ARCH [LANES]: LANES, comma-separated, limits the answer to
+# packages in those lanes (a claim passes the worker's; see Archci.lane)
 entry = if ARGV[0] == 'src'
           Archci.outstanding_sources.first
         else
-          Archci.outstanding(arch: ARGV[0]).find { |e| !e['expected'] }
+          Archci.outstanding(arch: ARGV[0], lanes: ARGV[1]&.split(',')).find { |e| !e['expected'] }
         end
 exit 0 unless entry
 

@@ -110,6 +110,13 @@ and pull request:
 
 ## Releasing
 
+A release is built by the farm like any package. To have it built at once
+rather than behind the backlog, put `archci` in the master's
+`ARCHCI_LANE_FAST` and keep one worker instance for that lane:
+`systemctl edit archci-worker@3` on a worker with
+`Environment=ARCHCI_WORKER_LANES=fast` under `[Service]`, then restart it.
+That instance idles until archci (or another fast-lane package) is due.
+
 A release is a tag `vX.Y.Z` on this repository plus the matching PKGBUILD
 in the PKGBUILD repository (`pkgbuilds/archci/` in the fork), which the
 farm then builds and publishes like any other package. That PKGBUILD is

@@ -28,6 +28,8 @@ module Archci
     'ARCHCI_PKG_SOURCES' => '',
     'ARCHCI_PKG_REPOS' => '',
     'ARCHCI_PKG_ALSO' => '',
+    'ARCHCI_LANE_FAST' => '',
+    'ARCHCI_LANE_HEAVY' => '',
     'ARCHCI_IGNOREARCH' => '1',
     'ARCHCI_MAX_ATTEMPTS' => '3',
     'ARCHCI_RELEASE_LAG_MINUTES' => '20',
@@ -299,7 +301,18 @@ module Archci
   # A package waiting on a running/queued dep is 'expected' and passed over; one
   # on an unbuilt dep is claimed last, so cycles build. arch: jobs this worker may
   # build (nil=all); limit: cap; queued: count running/queued too (waiting_for).
-  def self.outstanding(arch: nil, limit: nil, queued: false)
+  # the lane a package is in: fast (ARCHCI_LANE_FAST), heavy
+  # (ARCHCI_LANE_HEAVY) or normal (archci_lane in archci-common.sh, the same)
+  def self.lane(pkgbase)
+    return 'fast' if config['ARCHCI_LANE_FAST'].to_s.split.include?(pkgbase)
+    return 'heavy' if config['ARCHCI_LANE_HEAVY'].to_s.split.include?(pkgbase)
+
+    'normal'
+  end
+
+  # lanes: only packages in these lanes (a claim passes the worker's; nil
+  # for every lane); fast packages rank first for everyone
+  def self.outstanding(arch: nil, limit: nil, queued: false, lanes: nil)
     cfg = config
     repo = cfg['ARCHCI_REPO']
     running = jobs('running').to_h { |j| [[j['repo'], j['pkgbase'], j['arch']], true] }
@@ -323,6 +336,7 @@ module Archci
     # the arch's own. Everything else goes to each enabled arch its array
     # lists, and Arch's x86_64-only packages to port arches too with
     # --ignorearch (ARCHCI_IGNOREARCH); AUR/local packages only where listed.
+    candidates = candidates.select { |p| lanes.include?(lane(p['pkgbase'])) } if lanes
     per_arch, any_pkgs = candidates.partition { |p| p['arches'] != ['any'] }
     # which pkgbase of this repository provides each name a dependency may use
     by_pkgname = candidates.flat_map { |p| p['pkgnames'].map { |n| [n, p['pkgbase']] } }.to_h
@@ -382,7 +396,8 @@ module Archci
         entry = { 'repo' => repo, 'arch' => job_arch, 'pkgbase' => p['pkgbase'], 'version' => p['version'],
                   'commit' => p['commit'], 'profile' => p['profile'], 'prio' => built ? 1 : 5, 'waiting' => waiting, 'expected' => expected,
                   'network' => p['network'], 'dependents' => weight[p['pkgbase']],
-                  'rank' => [also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, -weight[p['pkgbase']],
+                  'lane' => lane(p['pkgbase']),
+                  'rank' => [lane(p['pkgbase']) == 'fast' ? 0 : 1, also.include?(p['pkgbase']) ? 0 : 1, waiting.empty? ? 0 : 1, built ? 0 : 1, -weight[p['pkgbase']],
                              origin_rank(p), any ? 1 : 0, p['pkgbase']] }
         (built ? updates : backlog) << entry
       end

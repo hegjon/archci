@@ -217,6 +217,32 @@ archci_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 archci_valid_id()     { [[ $1 =~ ^[0-9]-[0-9]+-[a-z0-9-]+,[a-zA-Z0-9@._+-]+,[a-zA-Z0-9@._+:~-]+,[a-z0-9_]+$ ]]; }
 archci_valid_worker() { [[ $1 =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; }
 archci_valid_arch()   { [[ $1 =~ ^[a-z0-9_]{1,32}$ ]]; }
+# --- lanes: which workers take which packages ------------------------------
+# A package is in one lane: "fast" (ARCHCI_LANE_FAST: the farm's own archci,
+# whose release should not wait behind a day of backlog), "heavy"
+# (ARCHCI_LANE_HEAVY: gcc, glibc, llvm and the like, of which a host builds
+# at most ARCHCI_HEAVY_PER_HOST at a time) or "normal" (the rest). A worker
+# instance claims with the lanes it takes (ARCHCI_WORKER_LANES, every lane
+# by default): an instance that takes "fast" alone idles until a fast
+# package is due and then builds it at once. The lane is a fact of the
+# configuration, not of the job file, so a change applies to the next claim.
+: "${ARCHCI_LANE_FAST:=}"
+: "${ARCHCI_LANE_HEAVY:=}"
+: "${ARCHCI_HEAVY_PER_HOST:=1}"
+: "${ARCHCI_WORKER_LANES:=normal fast heavy}"
+# archci_lane PKGBASE -> fast | heavy | normal
+archci_lane() {
+	if [[ " $ARCHCI_LANE_FAST " == *" $1 "* ]]; then echo fast
+	elif [[ " $ARCHCI_LANE_HEAVY " == *" $1 "* ]]; then echo heavy
+	else echo normal; fi
+}
+# archci_worker_host WORKER -> the host of <host>-N or <host>-<arch>-N
+archci_worker_host() {
+	local w=${1%-*} a
+	for a in $ARCHCI_ARCHES; do [[ $w == *"-$a" ]] && { w=${w%-"$a"}; break; }; done
+	printf '%s\n' "$w"
+}
+
 # Is ARCH one of ARCHCI_ARCHES, or src (source packages, the sourcer's jobs)?
 archci_enabled_arch() { [[ " $ARCHCI_ARCHES " == *" $1 "* || $1 == src ]]; }
 # Does this machine run ARCH natively? Its own, or a feature level of it

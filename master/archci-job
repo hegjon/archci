@@ -93,8 +93,31 @@ cmd_claim() {
 	archci_valid_worker "$worker" || archci_die "invalid worker id: $worker"
 	archci_valid_arch "$warch" || archci_die "invalid arch: $warch"
 	archci_enabled_arch "$warch" || archci_die "arch $warch is not enabled on this master (ARCHCI_ARCHES=\"$ARCHCI_ARCHES\")"
-	(( $# )) && record_poll "$worker" "$warch" "$@"
+	# the lanes this instance takes (lanes=fast,heavy among the claim's words;
+	# every lane for a worker that says nothing, from before lanes existed)
+	local lanes="normal fast heavy" stats=() w
+	for w in "$@"; do
+		if [[ $w == lanes=* ]]; then
+			[[ ${w#lanes=} =~ ^[a-z,]{1,40}$ ]] || archci_die "bad lanes: $w"
+			lanes=${w#lanes=}; lanes=${lanes//,/ }
+		else stats+=("$w"); fi
+	done
+	(( ${#stats[@]} )) && record_poll "$worker" "$warch" "${stats[@]}"
 	lock_queue
+	# a host builds at most ARCHCI_HEAVY_PER_HOST heavy packages at a time:
+	# with that many running on this worker's host, no heavy job for this claim
+	if [[ " $lanes " == *" heavy "* ]]; then
+		local host heavy=0 r
+		host=$(archci_worker_host "$worker")
+		shopt -s nullglob
+		for r in "$Q_RUNNING"/*.job; do
+			archci_read_job "$r" || continue
+			[[ $(archci_worker_host "$job_worker") == "$host" && $(archci_lane "$job_pkgbase") == heavy ]] && heavy=$((heavy + 1))
+		done
+		shopt -u nullglob
+		(( heavy >= ARCHCI_HEAVY_PER_HOST )) && lanes=${lanes// heavy/}
+	fi
+	lanes=${lanes# }
 	# A worker runs one job at a time, so a claim while one of its jobs is
 	# still running means that job died with the worker's previous process
 	# (a restart between this master's answer and the worker reading it).
@@ -121,6 +144,7 @@ cmd_claim() {
 		archci_read_job "$p" || continue
 		archci_can_build "$warch" "$job_arch" || continue
 		archci_pkg_wanted "$job_pkgbase" || continue
+		[[ " $lanes " == *" $(archci_lane "$job_pkgbase") "* ]] || continue
 		if [[ $ARCHCI_SOURCES_REQUIRED == 1 && $job_arch != src ]]; then
 			[[ -n $(source_package_for "$job_repo" "$job_pkgbase" "$job_commit") ]] || continue
 		fi
@@ -129,7 +153,7 @@ cmd_claim() {
 	if [[ -z $name ]]; then
 		# Nothing queued by hand or for retry: pick the next outstanding package now.
 		local prio repo arch pkgbase version commit profile flags
-		read -r prio repo arch pkgbase version commit profile flags < <("$ARCHCI_MASTER_DIR/archci-next" "$warch") || true
+		read -r prio repo arch pkgbase version commit profile flags < <("$ARCHCI_MASTER_DIR/archci-next" "$warch" "${lanes// /,}") || true
 		[[ -n ${commit:-} ]] || exit 0
 		name=$(write_job "$Q_PENDING" "$prio" "$repo" "$arch" "$pkgbase" "$version" "$commit" "$profile" "${flags:-}")
 	fi
