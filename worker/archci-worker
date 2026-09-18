@@ -63,6 +63,15 @@ while true; do
 		archci_log "archci-worker or its library changed on disk; restarting on the new code"
 		exec "$self" "${orig_args[@]}"
 	fi
+	# archci drain N left a flag: the loop ends here, between jobs (a build
+	# in progress finished and reported first), with an exit status the
+	# unit does not restart on (RestartPreventExitStatus=75; systemctl
+	# start brings the instance back)
+	if [[ -e $jobsdir/drain-$instance ]]; then
+		rm -f "$jobsdir/drain-$instance"
+		archci_log "drained: stopping between jobs (archci drain); systemctl start archci-worker@... brings it back"
+		exit 75
+	fi
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
 	archci_claim "$worker" "$ARCHCI_ARCH" "$claim" "lanes=${ARCHCI_WORKER_LANES// /,}" $(archci_worker_stats) || { sleep "$ARCHCI_IDLE_SLEEP"; continue; }
 	reported=0

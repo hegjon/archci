@@ -118,4 +118,21 @@ wait_for 10 'changed on disk; restarting on the new code' "$tmp/worker.log" || f
 for ((i = 0; i < 100; i++)); do (( $(grep -c 'started, master' "$tmp/worker.log") == 2 )) && break; sleep 0.1; done
 (( $(grep -c 'started, master' "$tmp/worker.log") == 2 )) || fail "the worker did not come back after the restart: $(<"$tmp/worker.log")"
 kill "$worker_pid"; wait "$worker_pid" 2>/dev/null || true; worker_pid=''
+
+echo "--- archci drain: the loop finishes the job it is on, reports it, then exits 75 (the unit stays down)"
+rm -f "$ARCHCI_HOME/built/omarchy-x86_64/acl"; rm -f "$ARCHCI_HOME"/queue/done/*   # acl outstanding again
+start_worker
+wait_for 20 'building .*omarchy,acl,' "$tmp/worker.log" || fail "the worker did not start a job: $(<"$tmp/worker.log")"
+"$here/../bin/archci-worker" drain 1 | grep -q "archci-worker@1 " || fail "archci drain says what it does"
+[[ -e $ARCHCI_WORKER_HOME/jobs/drain-1 ]] || fail "the drain flag is beside the jobs"
+wait_for 20 'omarchy,acl,1:2.4.0-1,x86_64: success after' "$tmp/worker.log" || fail "the job did not finish: $(<"$tmp/worker.log")"
+wait_for 10 'drained: stopping between jobs' "$tmp/worker.log" || fail "the worker did not drain after the job: $(<"$tmp/worker.log")"
+wait "$worker_pid" && fail "the drained loop must exit with a status" || rc=$?
+(( rc == 75 )) || fail "exit status 75 (RestartPreventExitStatus in the unit), got $rc"
+worker_pid=''
+[[ ! -e $ARCHCI_WORKER_HOME/jobs/drain-1 ]] || fail "the flag is consumed"
+wait_for 10 . "$ARCHCI_HOME/built/omarchy-x86_64/acl" || fail "the job was reported before the stop"
+! "$here/../bin/archci-worker" drain 'x;rm' >/dev/null 2>&1 || fail "a bad instance name is refused"
+"$here/../bin/archci-worker" drain aarch64-1 | grep -q "archci-worker-aarch64@1" || fail "an arch instance names its unit"
+"$here/../bin/archci-worker" drain --cancel aarch64-1 >/dev/null && [[ ! -e $ARCHCI_WORKER_HOME/jobs/drain-aarch64-1 ]] || fail "--cancel removes the flag"
 echo "ALL OK"

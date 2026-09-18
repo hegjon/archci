@@ -117,6 +117,10 @@ rather than behind the backlog, put `archci` in the master's
 `Environment=ARCHCI_WORKER_LANES=fast` under `[Service]`, then restart it.
 That instance idles until archci (or another fast-lane package) is due.
 
+To stop a worker instance after the job it is on rather than abandon it,
+`archci drain N` on the worker (`archci drain aarch64-1` for an arch
+instance); the unit stays down until `systemctl start`.
+
 A release is a tag `vX.Y.Z` on this repository plus the matching PKGBUILD
 in the PKGBUILD repository (`pkgbuilds/archci/` in the fork), which the
 farm then builds and publishes like any other package. That PKGBUILD is

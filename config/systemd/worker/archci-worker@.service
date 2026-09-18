@@ -13,6 +13,10 @@ ExecStart=/usr/lib/archci/worker/archci-worker %i
 LogNamespace=archci
 Restart=always
 RestartSec=30
+# archci drain N: the loop exits 75 between jobs, and the instance stays down
+# until systemctl start
+RestartPreventExitStatus=75
+SuccessExitStatus=75
 # Builds run as archci-build@<name>.service. On stop the loop stops the running
 # build unit and reports the job as abandoned, so the master requeues it at once.
 TimeoutStopSec=120

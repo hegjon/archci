@@ -356,8 +356,10 @@ role on top of a shared one:
   scripts under `/usr/lib/archci/<role>/` (run by its units), its units in
   `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies;
   each also installs its `archci <name>` command line as `/usr/bin/archci`,
-  the master's and the signer's with bash completion. A worker has no
-  commands to run by hand, so it knows `archci version` only. The worker
+  the master's and the signer's with bash completion. A worker's knows
+  `archci version` and `archci drain N`, which stops `archci-worker@N`
+  after the job it is on (where `systemctl stop` would abandon the build
+  to be requeued). The worker
   package also carries `archci-worker-x86_64_v4@.service` and the
   `arch/x86_64_v4/` chroot configs: an x86-64-v4 instance on a machine
   whose CPU has the level (see [docs/ports.md](docs/ports.md))
@@ -451,7 +453,11 @@ systemctl enable --now archci-worker@1
 ```
 
 `ARCHCI_MASTER` defaults to `archci@master`, so make sure `master` resolves
-to the master's address first. The first start runs
+to the master's address first. To take an instance out of service without
+losing the build it is on, `archci drain 1`: the loop finishes and reports
+that job, then exits and the unit stays down until `systemctl start`
+(`archci drain --cancel 1` takes it back; `systemctl stop` instead abandons
+the build, which the master requeues at once). The first start runs
 `archci-worker-setup.service`: it generates `/etc/archci/worker_key` and the
 builder signing key, makes `/var/lib/archbuild` a btrfs subvolume, and logs
 the two public keys to authorize
