@@ -128,7 +128,8 @@ heavy one a little less than normal (`ARCHCI_WEIGHT_FAST`, `_HEAVY`). `systemctl
 
 To stop a worker instance after the job it is on rather than abandon it,
 `archci drain N` on the worker (`archci drain aarch64-1` for an arch
-instance); the unit stays down until `systemctl start`.
+instance, `archci drain --all` for every instance running on the host,
+`--cancel` takes a drain back); the unit stays down until `systemctl start`.
 
 A release is a tag `vX.Y.Z` on this repository plus the matching PKGBUILD
 in the PKGBUILD repository (`pkgbuilds/archci/` in the fork), which the

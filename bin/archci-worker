@@ -1,43 +1,93 @@
 #!/bin/bash
-# archci version | drain [--cancel] INSTANCE -- the worker's command line.
+# archci version | drain [--cancel] INSTANCE|--all -- the worker's command line.
 # A worker is run by its units; by hand there is the installed version and
 # the drain: `archci drain 3` stops archci-worker@3 after the job it is on
 # (an idle instance stops at its next poll), where `systemctl stop` would
 # abandon the build; `archci drain aarch64-1` for archci-worker-aarch64@1,
-# `--cancel` takes a drain back. Installed as /usr/bin/archci by the
-# archci-worker package (bin/archci-worker in the tree).
+# `archci drain --all` every instance running on the host, `--cancel` takes
+# a drain back (`--cancel --all` every pending one). Installed as
+# /usr/bin/archci by the archci-worker package (bin/archci-worker in the tree).
 set -euo pipefail
 root=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..
 source "$root/lib/archci-common.sh"
 
 usage() {
-	echo "usage: archci version              the installed archci version"
-	echo "       archci drain [--cancel] N   stop archci-worker@N after its current job (N: 3, aarch64-1, x86_64_v4-1 ...)"
+	echo "usage: archci version                    the installed archci version"
+	echo "       archci drain [--cancel] N         stop archci-worker@N after its current job (N: 3, aarch64-1, x86_64_v4-1 ...)"
+	echo "       archci drain [--cancel] -a|--all  the same for every instance running on this host"
 }
+
+# unit_of INSTANCE -> its unit (3 -> archci-worker@3, aarch64-1 -> archci-worker-aarch64@1)
+unit_of() { if [[ $1 == *-* ]]; then echo "archci-worker-${1%-*}@${1##*-}"; else echo "archci-worker@$1"; fi; }
+
+# the instances running on this host (3, aarch64-1 ...), from their units
+running_instances() {
+	local unit name
+	systemctl list-units --plain --no-legend --state=active 'archci-worker@*.service' 'archci-worker-*@*.service' \
+	| while read -r unit _; do
+		unit=${unit%.service}; name=${unit%@*}
+		if [[ $name == archci-worker ]]; then echo "${unit#*@}"; else echo "${name#archci-worker-}-${unit#*@}"; fi
+	done
+}
+
+# drain_one INSTANCE -- leave the flag for it and say what happens
+drain_one() {
+	local inst=$1 unit flag
+	unit=$(unit_of "$inst")
+	flag=$ARCHCI_WORKER_HOME/jobs/drain-$inst
+	if ! { mkdir -p "$ARCHCI_WORKER_HOME/jobs" && : >"$flag"; } 2>/dev/null; then
+		echo "archci drain: cannot write $flag (run as root)" >&2
+		exit 1
+	fi
+	if command -v systemctl >/dev/null && ! systemctl is-active --quiet "$unit" 2>/dev/null; then
+		echo "archci drain: $unit is not running; the flag waits for its next start (archci drain --cancel $inst takes it back)"
+	else
+		echo "archci drain: $unit stops after its current job (an idle one within ARCHCI_IDLE_SLEEP); systemctl start $unit brings it back"
+	fi
+}
+
 sub=${1:-help}
 case $sub in
 	help|-h|--help) usage; exit 0 ;;
 	version|-V|--version) echo "archci $(archci_version)"; exit 0 ;;
 	drain)
 		shift
-		cancel=0; [[ ${1:-} == --cancel ]] && { cancel=1; shift; }
-		inst=${1:-}
-		[[ $inst =~ ^([a-z0-9_]+-)?[0-9]+$ ]] || { echo "archci drain: an instance is N or ARCH-N (3, aarch64-1), not '${inst}'" >&2; exit 2; }
-		if [[ $inst == *-* ]]; then unit="archci-worker-${inst%-*}@${inst##*-}"; else unit="archci-worker@$inst"; fi
-		flag=$ARCHCI_WORKER_HOME/jobs/drain-$inst
+		cancel=0 all=0 inst=''
+		for arg; do
+			case $arg in
+				--cancel) cancel=1 ;;
+				-a|--all) all=1 ;;
+				-*) echo "archci drain: unknown option '$arg'" >&2; usage >&2; exit 2 ;;
+				*) inst=$arg ;;
+			esac
+		done
+		if (( all )); then
+			[[ -z $inst ]] || { echo "archci drain: --all or an instance, not both" >&2; exit 2; }
+		else
+			[[ $inst =~ ^([a-z0-9_]+-)?[0-9]+$ ]] || { echo "archci drain: an instance is N or ARCH-N (3, aarch64-1) or --all, not '${inst}'" >&2; exit 2; }
+		fi
 		if (( cancel )); then
-			rm -f "$flag" && echo "archci drain: $unit will keep going"
+			if (( all )); then
+				n=0
+				for flag in "$ARCHCI_WORKER_HOME"/jobs/drain-*; do
+					[[ -e $flag ]] || continue
+					rm -f "$flag" && (( ++n ))
+					echo "archci drain: $(unit_of "${flag##*/drain-}") will keep going"
+				done
+				(( n )) || echo "archci drain: no drain is pending"
+			else
+				rm -f "$ARCHCI_WORKER_HOME/jobs/drain-$inst" && echo "archci drain: $(unit_of "$inst") will keep going"
+			fi
 			exit 0
 		fi
-		if ! { mkdir -p "$ARCHCI_WORKER_HOME/jobs" && : >"$flag"; } 2>/dev/null; then
-			echo "archci drain: cannot write $flag (run as root)" >&2
-			exit 1
-		fi
-		if command -v systemctl >/dev/null && ! systemctl is-active --quiet "$unit" 2>/dev/null; then
-			echo "archci drain: $unit is not running; the flag waits for its next start (archci drain --cancel $inst takes it back)"
+		if (( all )); then
+			command -v systemctl >/dev/null || { echo "archci drain: --all needs systemctl to list the instances" >&2; exit 1; }
+			mapfile -t insts < <(running_instances)
+			(( ${#insts[@]} )) || { echo "archci drain: no archci-worker instance is running on this host"; exit 0; }
 		else
-			echo "archci drain: $unit stops after its current job (an idle one within ARCHCI_IDLE_SLEEP); systemctl start $unit brings it back"
+			insts=("$inst")
 		fi
+		for inst in "${insts[@]}"; do drain_one "$inst"; done
 		exit 0 ;;
 esac
 echo "archci: unknown subcommand '$sub'" >&2

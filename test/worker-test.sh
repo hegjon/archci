@@ -135,4 +135,23 @@ wait_for 10 . "$ARCHCI_HOME/built/omarchy-x86_64/acl" || fail "the job was repor
 ! "$here/../bin/archci-worker" drain 'x;rm' >/dev/null 2>&1 || fail "a bad instance name is refused"
 "$here/../bin/archci-worker" drain aarch64-1 | grep -q "archci-worker-aarch64@1" || fail "an arch instance names its unit"
 "$here/../bin/archci-worker" drain --cancel aarch64-1 >/dev/null && [[ ! -e $ARCHCI_WORKER_HOME/jobs/drain-aarch64-1 ]] || fail "--cancel removes the flag"
+
+echo "--- archci drain --all: a flag for every instance running on the host (the units, from a faked systemctl)"
+cat >"$tmp/bin/systemctl" <<'FAKE'
+#!/bin/bash
+case $1 in
+	list-units) for u in archci-worker@1 archci-worker@2 archci-worker-aarch64@1 archci-worker-x86_64_v4@1; do echo "$u.service loaded active running archci: worker"; done ;;
+	is-active) exit 0 ;;
+esac
+FAKE
+chmod +x "$tmp/bin/systemctl"
+out=$("$here/../bin/archci-worker" drain --all) || fail "drain --all failed: $out"
+for u in 'archci-worker@1 ' 'archci-worker@2 ' 'archci-worker-aarch64@1 ' 'archci-worker-x86_64_v4@1 '; do grep -q "$u" <<<"$out" || fail "drain --all names $u: $out"; done
+for f in drain-1 drain-2 drain-aarch64-1 drain-x86_64_v4-1; do [[ -e $ARCHCI_WORKER_HOME/jobs/$f ]] || fail "drain --all leaves the flag $f"; done
+out=$("$here/../bin/archci-worker" drain --cancel -a) || fail "drain --cancel -a failed: $out"
+grep -q "archci-worker-x86_64_v4@1 will keep going" <<<"$out" || fail "--cancel --all names what it took back: $out"
+compgen -G "$ARCHCI_WORKER_HOME/jobs/drain-*" >/dev/null && fail "--cancel --all removes every flag"
+"$here/../bin/archci-worker" drain --cancel --all | grep -q "no drain is pending" || fail "--cancel --all with nothing pending says so"
+! "$here/../bin/archci-worker" drain --all 2 >/dev/null 2>&1 || fail "--all with an instance is refused"
+! "$here/../bin/archci-worker" drain --bogus 1 >/dev/null 2>&1 || fail "an unknown option is refused"
 echo "ALL OK"
