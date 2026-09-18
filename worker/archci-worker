@@ -72,8 +72,11 @@ while true; do
 		archci_log "drained: stopping between jobs (archci drain); systemctl start archci-worker@... brings it back"
 		exit 75
 	fi
+	# (a fast-lane-only instance polls every ARCHCI_FAST_IDLE_SLEEP: its one
+	# job is to start a fast package quickly, and an idle poll is cheap)
+	idle=$ARCHCI_IDLE_SLEEP; [[ ${ARCHCI_WORKER_LANES// /} == fast ]] && idle=$ARCHCI_FAST_IDLE_SLEEP
 	# shellcheck disable=SC2046  # the stats are separate key=value words on purpose
-	archci_claim "$worker" "$ARCHCI_ARCH" "$claim" "lanes=${ARCHCI_WORKER_LANES// /,}" $(archci_worker_stats) || { sleep "$ARCHCI_IDLE_SLEEP"; continue; }
+	archci_claim "$worker" "$ARCHCI_ARCH" "$claim" "lanes=${ARCHCI_WORKER_LANES// /,}" $(archci_worker_stats) || { sleep "$idle"; continue; }
 	reported=0
 	# Unit instance and job directory share a name of filesystem- and unit-safe
 	# characters. No ':' (an epoch version like 1:1.3.2-3 would leave a colon in

@@ -167,6 +167,10 @@ archci_load_conf
 # is silent for well over half an hour, so not too low.
 : "${ARCHCI_BUILD_MAX_IDLE_MINUTES:=90}"
 : "${ARCHCI_IDLE_SLEEP:=30}"
+# An instance that takes the fast lane alone polls this often instead: what
+# bounds how long a fast package waits once it is due (a busy worker claims
+# the instant its job ends; an idle one only at its next poll).
+: "${ARCHCI_FAST_IDLE_SLEEP:=5}"
 # Between tries at delivering a finished build while the master is unreachable.
 : "${ARCHCI_DELIVERY_RETRY_SECONDS:=30}"
 : "${ARCHCI_HEARTBEAT_SECONDS:=60}"

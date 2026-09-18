@@ -115,7 +115,10 @@ rather than behind the backlog, put `archci` in the master's
 `ARCHCI_LANE_FAST` and keep one worker instance for that lane:
 `systemctl edit archci-worker@3` on a worker with
 `Environment=ARCHCI_WORKER_LANES=fast` under `[Service]`, then restart it.
-That instance idles until archci (or another fast-lane package) is due.
+That instance idles until archci (or another fast-lane package) is due,
+polling every `ARCHCI_FAST_IDLE_SLEEP` (5 s) so it starts within seconds;
+any other worker that happens to be free takes a fast package too, since
+they rank first for everyone: what matters is that it starts, not where.
 
 To stop a worker instance after the job it is on rather than abandon it,
 `archci drain N` on the worker (`archci drain aarch64-1` for an arch

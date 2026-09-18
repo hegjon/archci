@@ -213,6 +213,9 @@ ARCHCI_IGNOREARCH=1
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
 ARCHCI_CHROOT_UPDATE_MINUTES=10
 ARCHCI_IDLE_SLEEP=30
+# An instance that takes the fast lane alone polls this often instead, so a
+# fast package waits at most this long once it is due.
+ARCHCI_FAST_IDLE_SLEEP=5
 # The lanes this worker instance takes (see ARCHCI_LANE_FAST on the master):
 # every lane by default. An instance kept free for the fast lane takes
 # "fast" alone; that is per instance, so set it on the unit rather than
