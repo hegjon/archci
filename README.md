@@ -133,7 +133,7 @@ idles otherwise; packages in `ARCHCI_LANE_HEAVY` are built at most
    whose `CPUWeight=idle` and small IO weight mean no build competes with
    the rest of the machine (sshd, pacman, a desktop's own work); among the
    builds a fast-lane one has five times a normal one's weight and a heavy
-   one half of it (`ARCHCI_WEIGHT_*`);
+   one a little less than normal (`ARCHCI_WEIGHT_*`);
 3. installs dependencies in a container that has the network, then builds in
    one that has none: the sources come from the package and the vendored
    caches replay offline. A package that must reach itself or the network

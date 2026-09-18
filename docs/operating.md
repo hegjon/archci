@@ -123,7 +123,7 @@ they rank first for everyone: what matters is that it starts, not where.
 Builds never compete with the machine: `archci.slice` has `CPUWeight=idle`
 (CPU only when nothing else wants it) and `IOWeight=10`; a fast-lane build's
 container has five times a normal build's weight among the builds and a
-heavy one half of it (`ARCHCI_WEIGHT_FAST`, `_HEAVY`). `systemctl edit archci.slice` changes the whole;
+heavy one a little less than normal (`ARCHCI_WEIGHT_FAST`, `_HEAVY`). `systemctl edit archci.slice` changes the whole;
 `systemctl show -p CPUWeight archci.slice` shows what is in force.
 
 To stop a worker instance after the job it is on rather than abandon it,
