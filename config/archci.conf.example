@@ -213,9 +213,6 @@ ARCHCI_IGNOREARCH=1
 ARCHCI_PACKAGER="archci build farm <archci@localhost>"
 ARCHCI_CHROOT_UPDATE_MINUTES=10
 ARCHCI_IDLE_SLEEP=30
-# An instance that takes the fast lane alone polls this often instead, so a
-# fast package waits at most this long once it is due.
-ARCHCI_FAST_IDLE_SLEEP=5
 # The lanes this worker instance takes (see ARCHCI_LANE_FAST on the master):
 # every lane by default. An instance kept free for the fast lane takes
 # "fast" alone; that is per instance, so set it on the unit rather than
@@ -224,13 +221,16 @@ ARCHCI_FAST_IDLE_SLEEP=5
 #   Environment=ARCHCI_WORKER_LANES=fast
 # (a setting in the environment wins over this file).
 ARCHCI_WORKER_LANES="normal fast heavy"
+# An instance that takes the fast lane alone polls this often instead of
+# ARCHCI_IDLE_SLEEP, so a fast package waits at most this long once due.
+ARCHCI_FAST_IDLE_SLEEP=5
 # A build's share of the CPU and IO the builds get, by lane: the CPUWeight
 # and IOWeight of its container's scope (a fast build five times a normal
 # one, a heavy one a little less than normal: the hours-long build lets the
-# short ones edge past it). What the builds get as a whole is
-# the archci.slice unit's (CPUWeight=idle, IOWeight=10: no build competes
-# with sshd, pacman or a desktop's own work); systemctl edit archci.slice
-# to change that.
+# short ones edge past it). What the builds get as a whole is the
+# archci.slice unit's (CPUWeight=idle, IOWeight=10: no build competes with
+# sshd, pacman or a desktop's own work); systemctl edit archci.slice to
+# change that.
 ARCHCI_WEIGHT_FAST=500
 ARCHCI_WEIGHT_NORMAL=100
 ARCHCI_WEIGHT_HEAVY=95

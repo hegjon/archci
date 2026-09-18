@@ -238,10 +238,10 @@ archci_valid_arch()   { [[ $1 =~ ^[a-z0-9_]{1,32}$ ]]; }
 # and IOWeight of its container's scope, so among the builds on a host a
 # fast one gets five times a normal one's share under contention, and a
 # heavy one, which runs for hours anyway, a little less than a normal one:
-# the short builds edge past it). What the
-# builds get as a whole is the archci.slice unit's: CPUWeight=idle, IOWeight
-# 10, so no build competes with the rest of the machine (sshd, pacman, a
-# desktop's own work); systemctl edit archci.slice to change that.
+# the short builds edge past it). What the builds get as a whole is the
+# archci.slice unit's: CPUWeight=idle, IOWeight 10, so no build competes
+# with the rest of the machine (sshd, pacman, a desktop's own work);
+# systemctl edit archci.slice to change that.
 : "${ARCHCI_WEIGHT_FAST:=500}"
 : "${ARCHCI_WEIGHT_NORMAL:=100}"
 : "${ARCHCI_WEIGHT_HEAVY:=95}"

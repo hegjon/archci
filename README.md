@@ -360,11 +360,10 @@ role on top of a shared one:
   scripts under `/usr/lib/archci/<role>/` (run by its units), its units in
   `/usr/lib/systemd/system`, its directories (tmpfiles), and its dependencies;
   each also installs its `archci <name>` command line as `/usr/bin/archci`,
-  the master's and the signer's with bash completion. A worker's knows
+  the master's and the signer's with bash completion. A worker knows
   `archci version` and `archci drain N`, which stops `archci-worker@N`
   after the job it is on (where `systemctl stop` would abandon the build
-  to be requeued). The worker
-  package also carries `archci-worker-x86_64_v4@.service` and the
+  to be requeued). The worker package also carries `archci-worker-x86_64_v4@.service` and the
   `arch/x86_64_v4/` chroot configs: an x86-64-v4 instance on a machine
   whose CPU has the level (see [docs/ports.md](docs/ports.md))
 - `archci-worker-qemu-aarch64`, `archci-worker-qemu-riscv64`: add-ons
