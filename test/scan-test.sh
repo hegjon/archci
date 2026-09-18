@@ -16,7 +16,15 @@ echo "--- scan: syncs the PKGBUILD repository only, stores no backlog"
 [[ $("$next" | wc -l) == 1 ]] || fail "next prints one line"
 echo "--- the index caches each directory's line by its tree hash"
 cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
-[[ $(wc -l <"$cache") == 4 ]] || fail "one cache entry per package directory: $(cat "$cache")"
+[[ $(head -1 "$cache") == "# v5" ]] || fail "the cache file names its format first: $(head -1 "$cache")"
+[[ $(grep -vc '^#' "$cache") == 4 ]] || fail "one cache entry per package directory: $(cat "$cache")"
+# an index and a cache of another format (an upgrade whose lines changed shape) are not served: the
+# index is rebuilt with every package sourced again, and both are written in the current format
+index=$ARCHCI_HOME/pkgbuilds.index
+sed -i '1s/ v5$/ v0/' "$index"; sed -i '1s/.*/# v0/' "$cache"
+"$master/archci-pkgindex" >/dev/null 2>&1 || fail "the index rebuilds from an old format"
+[[ $(head -1 "$index") == *" v5" && $(head -1 "$cache") == "# v5" ]] || fail "an old-format index and cache are replaced: $(head -1 "$index"; head -1 "$cache")"
+[[ $(grep -vc '^#' "$cache") == 4 ]] || fail "the rebuilt cache has one entry per package: $(cat "$cache")"
 # the same data on the PKGBUILD as extended attributes (btrfs, a requirement, takes them)
 [[ $(getfattr --only-values -n user.archci.version "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>/dev/null) == "1:2.3.2-1" ]] || fail "the PKGBUILD must carry its version as user.archci.version: $(getfattr -d "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>&1)"
 [[ $(getfattr --only-values -n user.archci.tree "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD" 2>/dev/null) == $(git -C "$ARCHCI_HOME/pkgbuilds" ls-tree HEAD:pkgbuilds | awk '$4 == "acl" { print $3 }') ]] || fail "user.archci.tree must be the directory's tree hash"
@@ -27,7 +35,7 @@ commit_pkgs "linux bump"
 "$scan" >/dev/null
 "$master/archci-pkgindex" acl | grep '^acl 9:9-9 ' >/dev/null || fail "an unchanged directory must come from the cache: $("$master/archci-pkgindex" acl)"
 "$master/archci-pkgindex" linux | grep '^linux 7.2.3.arch1-3 ' >/dev/null || fail "a changed directory must be re-read: $("$master/archci-pkgindex" linux)"
-[[ $(wc -l <"$cache") == 4 ]] || fail "the old entry of a changed directory is dropped: $(cat "$cache")"
+[[ $(grep -vc "^#" "$cache") == 4 ]] || fail "the old entry of a changed directory is dropped: $(cat "$cache")"
 # the attributes as the cache (ARCHCI_INDEX_CACHE=xattr): a doctored attribute is what comes out
 setfattr -n user.archci.version -v 8:8-8 "$ARCHCI_HOME/pkgbuilds/pkgbuilds/acl/PKGBUILD"
 rm -f "$ARCHCI_HOME/pkgbuilds.index"

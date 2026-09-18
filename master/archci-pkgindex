@@ -34,7 +34,7 @@
 # its content does: a new commit re-reads only the PKGBUILDs it touched,
 # and a directory at a content seen before is never sourced again. The same
 # data is written onto the PKGBUILD file itself as extended attributes
-# (user.archci.tree, .version, .commit, .arch, .profile, .source, .build,
+# (user.archci.format, .tree, .version, .commit, .arch, .profile, .source, .build,
 # .arch_repo, .pkgnames, .deps; getfattr -d PKGBUILD shows them): a checkout
 # that changes the file drops them with the old inode. Both are written on
 # every rebuild; ARCHCI_INDEX_CACHE says which one is read (file, the
@@ -58,7 +58,12 @@ fi
 command -v jq >/dev/null || archci_die "jq is not installed"
 head=$(git -C "$clone" rev-parse HEAD)
 
-index_current() { [[ -f $index && $(head -1 "$index") == "# $head v4" ]]; }
+# The format of a line (and so of the index, the cache file and the
+# attributes): bump it when calculate's output changes, so that an upgrade
+# reads every package again instead of serving lines cached by the old
+# code (0.7.7's "+nocheck" was missing from cached lines until then)
+FORMAT=5
+index_current() { [[ -f $index && $(head -1 "$index") == "# $head v$FORMAT" ]]; }
 
 # annotate PKGBUILD HASH LINE -- the line's fields as user.archci.* attributes
 # on the file, when it does not carry them for this hash yet (carries[] has
@@ -74,14 +79,15 @@ annotate() {
 	done
 	# the key last: a file interrupted half-way carries the old hash with new
 	# fields, or none, and is read again, never the new hash with old fields
+	setfattr -n user.archci.format -v "$FORMAT" "$file"
 	setfattr -n user.archci.tree -v "$hash" "$file"
 }
 
 # the cached lines: from the cache file, keyed by tree hash ...
 load_cache_file() {
 	local hash line cache=$ARCHCI_CACHE_DIR/pkgbuilds.cache
-	[[ -f $cache ]] || return 0
-	while read -r hash line; do cached[$hash]=$line; done <"$cache"
+	[[ -f $cache && $(head -1 "$cache") == "# v$FORMAT" ]] || return 0   # another format's lines are not served
+	while read -r hash line; do [[ $hash == '#' ]] || cached[$hash]=$line; done <"$cache"
 }
 # ... or from every PKGBUILD's user.archci.* attributes, one getfattr walk
 # over the clone (the line keyed by the tree hash the file carries). Either
@@ -92,9 +98,9 @@ walk_xattrs() {
 	local all=$1 key value file='' hash=''
 	local -A a=()
 	flush() {
-		[[ -n $file && -n $hash ]] || return 0
+		[[ -n $file && -n $hash && ${a[format]:-} == "$FORMAT" ]] || return 0   # attributes of another format: read again
 		carries[$file]=$hash
-		if (( all )) && [[ ${#a[@]} == 9 ]]; then
+		if (( all )) && [[ ${#a[@]} == 10 ]]; then
 			cached[$hash]="${a[version]} ${a[commit]} ${a[arch]} ${a[profile]} ${a[source]} ${a[build]} ${a[arch_repo]} ${a[pkgnames]} ${a[deps]}"
 		fi
 	}
@@ -105,7 +111,7 @@ walk_xattrs() {
 			user.archci.*=*) value=${key#*=}; key=${key%%=*}; a[${key#user.archci.}]=${value//\"/} ;;
 		esac
 	done < <(if (( all )); then getfattr -R -d -m '^user\.archci\.' --absolute-names "$clone/$ARCHCI_PKGBUILDS_DIR"
-	         else getfattr -R -n user.archci.tree --absolute-names "$clone/$ARCHCI_PKGBUILDS_DIR"; fi 2>/dev/null; echo "# file: ")
+	         else getfattr -R -d -m '^user\.archci\.(tree|format)$' --absolute-names "$clone/$ARCHCI_PKGBUILDS_DIR"; fi 2>/dev/null; echo "# file: ")
 }
 
 generate() {
@@ -119,7 +125,8 @@ generate() {
 		*) load_cache_file; walk_xattrs 0 ;;
 	esac
 	newcache=$(mktemp "$cache.XXXXXX")
-	printf '# %s v4\n' "$head"
+	printf '# v%s\n' "$FORMAT" >"$newcache"
+	printf '# %s v%s\n' "$head" "$FORMAT"
 	while read -r mode type hash name; do
 		[[ $type == tree ]] || continue
 		dir=$clone/$ARCHCI_PKGBUILDS_DIR/$name
