@@ -49,7 +49,7 @@ if command -v systemd-analyze >/dev/null; then
 	# system's units ours want (sshd, network-online) are not in the root;
 	# with --recursive-errors=no a missing wanted unit is not an error.
 	root=$(mktemp -d)
-	mapfile -t units < <(find config/systemd \( -name '*.service' -o -name '*.timer' -o -name '*.target' \) | sort)
+	mapfile -t units < <(find config/systemd \( -name '*.service' -o -name '*.timer' -o -name '*.target' -o -name '*.slice' \) | sort)
 	install -d "$root/usr/lib/systemd/system"
 	install -m644 "${units[@]}" "$root/usr/lib/systemd/system/"
 	for d in master worker signer sourcer remote-logging; do

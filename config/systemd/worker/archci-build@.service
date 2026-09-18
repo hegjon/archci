@@ -20,10 +20,12 @@ Delegate=yes
 LogNamespace=archci
 # Compiler output must not be dropped by journald's rate limit.
 LogRateLimitIntervalSec=0
-# Builds yield to everything else on the machine: sshd, the worker loop, a
-# desktop's own work. The container's processes inherit these from
-# makechrootpkg, which matters because nspawn puts them in a scope of its own
-# that this unit's cgroup settings (CPUWeight=) would not reach.
+# The container's processes inherit these from makechrootpkg. Under cgroups
+# v2 they only order processes within one cgroup: what makes the builds
+# yield to the rest of the machine is archci.slice (CPUWeight=idle), and
+# what tells a fast-lane build from a normal one is its scope's weight
+# (archci-build, --property=CPUWeight=). Kept for the processes outside the
+# container (this script, the pipe, gpg).
 Nice=15
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

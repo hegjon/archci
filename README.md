@@ -128,8 +128,12 @@ idles otherwise; packages in `ARCHCI_LANE_HEAVY` are built at most
    source, and the vendored dependencies), or, when there is none, exports
    the PKGBUILD at the job's commit and lets makepkg fetch upstream;
 2. builds in a fresh snapshot of a clean devtools chroot, in its own systemd
-   unit with its own cgroup and journal, at low priority and under a long
-   timeout, killed early only if it goes silent;
+   unit with its own cgroup and journal, under a long timeout, killed early
+   only if it goes silent. Every build container runs under `archci.slice`,
+   whose `CPUWeight=idle` and small IO weight mean no build competes with
+   the rest of the machine (sshd, pacman, a desktop's own work); among the
+   builds a fast-lane one has five times a normal one's weight
+   (`ARCHCI_WEIGHT_*`);
 3. installs dependencies in a container that has the network, then builds in
    one that has none: the sources come from the package and the vendored
    caches replay offline. A package that must reach itself or the network

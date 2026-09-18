@@ -234,6 +234,23 @@ archci_valid_arch()   { [[ $1 =~ ^[a-z0-9_]{1,32}$ ]]; }
 : "${ARCHCI_LANE_HEAVY:=}"
 : "${ARCHCI_HEAVY_PER_HOST:=1}"
 : "${ARCHCI_WORKER_LANES:=normal fast heavy}"
+# A build's share of the CPU and IO the builds get, by lane (the CPUWeight
+# and IOWeight of its container's scope, so among the builds on a host a
+# fast one gets five times a normal one's share under contention). What the
+# builds get as a whole is the archci.slice unit's: CPUWeight=idle, IOWeight
+# 10, so no build competes with the rest of the machine (sshd, pacman, a
+# desktop's own work); systemctl edit archci.slice to change that.
+: "${ARCHCI_WEIGHT_FAST:=500}"
+: "${ARCHCI_WEIGHT_NORMAL:=100}"
+: "${ARCHCI_WEIGHT_HEAVY:=100}"
+# archci_lane_weight LANE -> the weight
+archci_lane_weight() {
+	case $1 in
+		fast) echo "$ARCHCI_WEIGHT_FAST" ;;
+		heavy) echo "$ARCHCI_WEIGHT_HEAVY" ;;
+		*) echo "$ARCHCI_WEIGHT_NORMAL" ;;
+	esac
+}
 # archci_lane PKGBASE -> fast | heavy | normal
 archci_lane() {
 	if [[ " $ARCHCI_LANE_FAST " == *" $1 "* ]]; then echo fast
@@ -447,14 +464,15 @@ archci_chroot_pacconf() {
 
 # archci_read_job FILE -> job_id job_repo job_arch job_pkgbase job_version
 #                         job_commit job_profile job_attempt job_worker
+#                         (job_lane: the claim's, for the build's weights)
 # pkgbase is the package directory under ARCHCI_PKGBUILDS_DIR (its PKGBUILD's
 # own pkgbase may differ for a split package); commit is the PKGBUILD
 # repository commit the build is pinned to. (tag is accepted from old files.)
 archci_read_job() {
 	local line
-	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker='' job_created='' job_sources='' job_network=''
+	job_id='' job_repo='' job_arch='' job_pkgbase='' job_version='' job_tag='' job_commit='' job_profile='' job_attempt=0 job_worker='' job_created='' job_sources='' job_network='' job_lane=''
 	while IFS= read -r line || [[ -n $line ]]; do
-		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker|created|sources|network)=(.*)$ ]] || continue
+		[[ $line =~ ^(id|repo|arch|pkgbase|version|tag|commit|profile|attempt|worker|created|sources|network|lane)=(.*)$ ]] || continue
 		printf -v "job_${BASH_REMATCH[1]}" '%s' "${BASH_REMATCH[2]}"
 	done <"$1"
 	[[ -n $job_id && -n $job_repo && -n $job_arch && -n $job_pkgbase && -n $job_version && -n $job_commit ]]

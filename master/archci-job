@@ -163,8 +163,10 @@ cmd_claim() {
 	# has released it: the worker builds from it instead of fetching upstream
 	local srcpkg=''
 	[[ $job_arch == src ]] || srcpkg=$(source_package_for "$job_repo" "$job_pkgbase" "$job_commit")
+	# (lane: the worker's build weights, archci-build; a fact of the master's
+	# configuration, rewritten at each claim)
 	rewrite_job "$Q_RUNNING/$name" "$Q_RUNNING/$name" \
-		"worker=$worker" "claimed=$(archci_now)" ${srcpkg:+"sources=$srcpkg"}
+		"worker=$worker" "claimed=$(archci_now)" "lane=$(archci_lane "$job_pkgbase")" ${srcpkg:+"sources=$srcpkg"}
 	set_attempt "$Q_RUNNING/$name" $((job_attempt + 1))
 	mkdir -p "$ARCHCI_HOME/incoming/${name%.job}"
 	archci_log "claim ${name%.job} -> $worker (attempt $((job_attempt + 1)))"

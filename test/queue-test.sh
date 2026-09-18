@@ -493,8 +493,10 @@ export ARCHCI_LANE_FAST=fastpkg ARCHCI_LANE_HEAVY="heavy1 heavy2"
 [[ $("$next" x86_64) == "5 omarchy x86_64 fastpkg "* ]] || fail "for a worker taking every lane the fast package ranks first: $("$next" x86_64)"
 "$job" enqueue plain 0 x86_64 >/dev/null; "$job" enqueue fastpkg 0 x86_64 >/dev/null   # plain is first in pending/
 id=$(claim_id fast-1 x86_64 lanes=fast); [[ $id == *,fastpkg,* ]] || fail "a fast-only worker takes the fast package past the plain one before it: $id"
+grep -qx 'lane=fast' "$ARCHCI_HOME/queue/running/$id.job" || fail "the claim names the lane for the build's weights: $(cat "$ARCHCI_HOME/queue/running/$id.job")"
 [[ -z $(claim_id fast-2 x86_64 lanes=fast) ]] || fail "nothing in the fast lane: a fast-only worker gets nothing, whatever else is pending or outstanding"
 id2=$(claim_id plain-1 x86_64 lanes=normal,fast,heavy); [[ $id2 == *,plain,* ]] || fail "a worker taking every lane takes the plain one: $id2"
+grep -qx 'lane=normal' "$ARCHCI_HOME/queue/running/$id2.job" || fail "a plain package's claim says lane=normal"
 ! "$job" claim bad-1 x86_64 "lanes=fast;rm" >/dev/null 2>&1 || fail "a malformed lanes word is refused"
 "$job" enqueue heavy1 0 x86_64 >/dev/null; "$job" enqueue heavy2 0 x86_64 >/dev/null
 h1=$(claim_id big-1 x86_64); [[ $h1 == *,heavy1,* ]] || fail "the first heavy job on host big: $h1"

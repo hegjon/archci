@@ -98,7 +98,7 @@ package_archci-worker() {
   depends=("archci=$pkgver-$pkgrel" "archci-remote-logging=$pkgver-$pkgrel" devtools rsync openssh gnupg btrfs-progs nftables tree)
   conflicts=(archci-sourcer)   # one role's /usr/bin/archci per host
 
-  _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service archci-worker-x86_64_v4@.service
+  _install_role worker archci-worker@.service archci-build@.service archci-worker-setup.service archci-worker-x86_64_v4@.service archci.slice
   _install_cli worker
   cd "$srcdir/$_src"
   # chroot makepkg.conf per port arch (arch/<arch>/, kept in step with devtools' x86_64 one by hand);

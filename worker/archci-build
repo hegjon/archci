@@ -425,8 +425,14 @@ esac
 # journal does), not the machine name nspawn would copy into it.
 machine=$(archci_machine_name "archci-build-$ARCHCI_ARCH-$instance" "$job_pkgbase")
 printf '%s\n' "$machine" >"$jobdir/machine"   # for the worker's per-job heartbeat stats
+# The container's scope carries the lane's weights (ARCHCI_WEIGHT_*): among
+# the builds on this host a fast one gets the larger share; all of them
+# together only what archci.slice leaves the rest of the machine.
+weight=$(archci_lane_weight "${job_lane:-normal}")
+echo "lane         ${job_lane:-normal} (CPU and IO weight $weight among the builds)"
 container=(arch-nspawn -c "$cachedir" "$copydir" --machine="$machine" --hostname="${HOSTNAME%%.*}"
 	--bind="$srcdir:/startdir" --bind="$SRCDEST:/srcdest" --bind="$outdir:/pkgdest" --bind="$outdir:/logdest" --bind="$outdir:/srcpkgdest"
+	--property="CPUWeight=$weight" --property="IOWeight=$weight"
 	"$ARCHCI_CONTAINER_TMP")
 [[ -n $vendor_conf ]] && container+=(--bind-ro="$vendor_conf:/build/.config")
 # A PKGBUILD with a pkgver() has makepkg run it even with --nobuild, after

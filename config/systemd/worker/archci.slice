@@ -1,0 +1,14 @@
+# The slice every build container runs in (archci-online, archci-offline and
+# archci-loopback are its children; archci_firewall keys the network rules on
+# them). Its weights are what the builds get as a whole against the rest of
+# the machine: CPU only when nothing else wants it (sshd, pacman, the worker
+# loop, a desktop's own work never wait for a build), and a small share of
+# the IO. Among the builds, a container's own weights tell a fast-lane
+# build from a normal one (archci-build, ARCHCI_WEIGHT_*).
+# Change with: systemctl edit archci.slice
+[Unit]
+Description=archci builds: CPU when the machine is otherwise idle, a small share of IO
+
+[Slice]
+CPUWeight=idle
+IOWeight=10
